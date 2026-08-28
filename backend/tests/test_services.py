@@ -1,0 +1,37 @@
+"""Contract tests for the domain service stubs."""
+
+from __future__ import annotations
+
+import pytest
+from app.core.errors import NotImplementedFeatureError
+from app.services.ai import AiService
+from app.services.geospatial import GeospatialService
+from app.services.map import MapService
+from app.services.multimodal import MultimodalService
+from app.services.query import QueryService
+from app.services.satellite import SatelliteService
+from app.services.temporal import TemporalService
+
+ALL_SERVICES = [
+    QueryService,
+    SatelliteService,
+    MultimodalService,
+    TemporalService,
+    GeospatialService,
+    AiService,
+    MapService,
+]
+
+
+@pytest.mark.parametrize("service_cls", ALL_SERVICES)
+def test_service_describes_itself(service_cls: type) -> None:
+    service = service_cls()
+    assert service.name
+    assert isinstance(service.describe(), str)
+    assert service.describe()
+
+
+@pytest.mark.parametrize("service_cls", ALL_SERVICES)
+def test_service_run_not_implemented(service_cls: type) -> None:
+    with pytest.raises(NotImplementedFeatureError):
+        service_cls().run()

@@ -1,0 +1,27 @@
+# SatQuery - local development stack.
+# Usage: docker compose up --build
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      SATQUERY_ENVIRONMENT: development
+      SATQUERY_LOG_LEVEL: INFO
+      SATQUERY_CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tests:/app/tests
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    depends_on:
+      - backend
