@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +46,20 @@ class Settings(BaseSettings):
     imagery_max_dimension: int = 1024
     imagery_hard_max_dimension: int = 2048
     imagery_max_window_pixels: int = 50_000_000
+
+    # Natural-language intent extraction via the Google Gemini API (google-genai).
+    # GEMINI_API_KEY / GEMINI_MODEL use the standard unprefixed names. Never
+    # commit a real key. When GEMINI_API_KEY is unset the /query/parse endpoint
+    # returns a 502 instead of crashing.
+    gemini_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GEMINI_API_KEY"),
+    )
+    gemini_model: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias=AliasChoices("GEMINI_MODEL"),
+    )
+    gemini_timeout_seconds: float = 30.0
 
     @field_validator("cors_origins", mode="before")
     @classmethod

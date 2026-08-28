@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.services.ai import AiService, ParsePromptRequest
+from app.services.ai import AiService, GeminiIntentParser, ParsePromptRequest
 from app.services.query import QueryService, ResolvedQueryPlan, SatQueryIntent
 
 router = APIRouter()
@@ -17,13 +17,14 @@ def get_query_service() -> QueryService:
 
 
 def get_ai_service() -> AiService:
-    """Provider for :class:`AiService`; overridden in tests.
+    """Production provider for :class:`AiService` - a Gemini-backed parser.
 
-    Defaults to the ``MockIntentParser``. Swap this for a provider-backed
-    parser later without changing the route or the response contract.
+    Overridden in tests to inject ``MockIntentParser`` or a fake parser. The
+    parser is created lazily, so this stays cheap and does not require
+    ``GEMINI_API_KEY`` to be set at import/startup time.
     """
 
-    return AiService()
+    return AiService(parser=GeminiIntentParser())
 
 
 @router.post("/parse", response_model=SatQueryIntent)
