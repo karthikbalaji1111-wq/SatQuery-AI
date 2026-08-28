@@ -199,6 +199,35 @@ body {
   word-break: break-word;
 }
 
+.plan-form {
+  margin-top: 1.5rem;
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
+  padding-top: 1rem;
+}
+
+.plan-form h3 {
+  margin: 0 0 0.5rem;
+}
+
+.plan-form fieldset {
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.plan-form fieldset label {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  margin-right: 1rem;
+  font-size: 0.9rem;
+}
+
+.plan-result ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
 .map-container {
   display: grid;
   place-items: center;

@@ -1,20 +1,23 @@
-"""Natural-language query parsing and orchestration."""
+"""Structured query intent contracts and query-plan resolution."""
 
-from __future__ import annotations
+from app.services.query.schemas import (
+    Modality,
+    QueryTask,
+    ResolvedQueryPlan,
+    SatQueryIntent,
+    TemporalComparison,
+    TemporalMode,
+    TimeRange,
+)
+from app.services.query.service import QueryService
 
-from app.services.base import DomainService
-
-
-class QueryService(DomainService):
-    """Natural-language query parsing and orchestration.
-
-    Foundation stub - see :class:`DomainService`. No logic implemented yet.
-    """
-
-    name = "query"
-
-    def describe(self) -> str:
-        return "Natural-language query parsing and orchestration."
-
-
-__all__ = ["QueryService"]
+__all__ = [
+    "Modality",
+    "QueryService",
+    "QueryTask",
+    "ResolvedQueryPlan",
+    "SatQueryIntent",
+    "TemporalComparison",
+    "TemporalMode",
+    "TimeRange",
+]

@@ -471,3 +471,242 @@ describe("QueryPanel - bounded imagery", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 });
+
+const PLAN_BBOX = { west: 80.14, south: 12.85, east: 80.33, north: 13.24 };
+
+function planResponse(intent: Record<string, unknown>) {
+  return { intent, bbox: PLAN_BBOX };
+}
+
+function setPlace(value: string) {
+  fireEvent.change(screen.getByLabelText("Place name"), { target: { value } });
+}
+
+const SINGLE_INTENT = {
+  location_query: "Chennai",
+  temporal_mode: "single",
+  time_windows: [{ start_date: "2024-07-01", end_date: "2024-07-01" }],
+  modalities: ["sentinel-2-optical"],
+  task: "visualize",
+};
+
+describe("QueryPanel - query plan", () => {
+  it("renders the intent controls with sensible defaults", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    expect(screen.getByLabelText("Place name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Single date")).toBeChecked();
+    expect(screen.getByLabelText("Compare dates")).not.toBeChecked();
+    expect(screen.getByLabelText("Sentinel-2 Optical")).toBeChecked();
+    expect(screen.getByLabelText("Sentinel-1 SAR")).not.toBeChecked();
+
+    const taskSelect = screen.getByLabelText("Task") as HTMLSelectElement;
+    expect(taskSelect.value).toBe("visualize");
+    expect(
+      screen.getByRole("option", { name: "Change Detection" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Object Identification" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reveals baseline/target fields only in compare mode", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    expect(screen.queryByLabelText("Baseline start")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Compare dates"));
+    expect(screen.getByLabelText("Baseline start")).toBeInTheDocument();
+    expect(screen.getByLabelText("Baseline end")).toBeInTheDocument();
+    expect(screen.getByLabelText("Target start")).toBeInTheDocument();
+    expect(screen.getByLabelText("Target end")).toBeInTheDocument();
+  });
+
+  it("keeps Build Query Plan disabled until place + temporal + modality are set", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    const button = screen.getByRole("button", { name: /build query plan/i });
+    expect(button).toBeDisabled();
+
+    setPlace("Chennai");
+    expect(button).toBeDisabled(); // no observation date yet
+
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    expect(button).toBeEnabled();
+
+    fireEvent.click(screen.getByLabelText("Sentinel-2 Optical")); // uncheck the only modality
+    expect(button).toBeDisabled();
+    expect(
+      screen.getByText("Select at least one modality."),
+    ).toBeInTheDocument();
+  });
+
+  it("posts a single-mode intent and displays the resolved plan", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/build-plan": { body: planResponse(SINGLE_INTENT) },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("W 80.1400, S 12.8500, E 80.3300, N 13.2400"),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText("2024-07-01 → 2024-07-01")).toBeInTheDocument();
+    expect(screen.getByText("sentinel-2-optical")).toBeInTheDocument();
+
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/query/build-plan"),
+    );
+    expect(String(call![0])).toBe(
+      "http://localhost:8000/api/v1/query/build-plan",
+    );
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+      location_query: "Chennai",
+      temporal_mode: "single",
+      time_windows: [{ start_date: "2024-07-01", end_date: "2024-07-01" }],
+      modalities: ["sentinel-2-optical"],
+      task: "visualize",
+    });
+  });
+
+  it("posts a compare-mode intent with nested baseline/target windows", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/build-plan": {
+        body: planResponse({
+          ...SINGLE_INTENT,
+          temporal_mode: "compare",
+          time_windows: {
+            baseline: { start_date: "2023-01-01", end_date: "2023-03-31" },
+            target: { start_date: "2024-01-01", end_date: "2024-03-31" },
+          },
+        }),
+      },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.click(screen.getByLabelText("Compare dates"));
+    fireEvent.change(screen.getByLabelText("Baseline start"), {
+      target: { value: "2023-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("Baseline end"), {
+      target: { value: "2023-03-31" },
+    });
+    fireEvent.change(screen.getByLabelText("Target start"), {
+      target: { value: "2024-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("Target end"), {
+      target: { value: "2024-03-31" },
+    });
+    fireEvent.click(screen.getByLabelText("Sentinel-1 SAR"));
+    fireEvent.change(screen.getByLabelText("Task"), {
+      target: { value: "change_detection" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/baseline: 2023-01-01/)).toBeInTheDocument(),
+    );
+
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/query/build-plan"),
+    );
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+      location_query: "Chennai",
+      temporal_mode: "compare",
+      time_windows: {
+        baseline: { start_date: "2023-01-01", end_date: "2023-03-31" },
+        target: { start_date: "2024-01-01", end_date: "2024-03-31" },
+      },
+      modalities: ["sentinel-2-optical", "sentinel-1-sar"],
+      task: "change_detection",
+    });
+  });
+
+  it("shows a loading state while the plan is built", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/build-plan": () => pending,
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /building…/i })).toBeDisabled(),
+    );
+
+    release({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(planResponse(SINGLE_INTENT))),
+    } as Response);
+
+    await waitFor(() =>
+      expect(screen.getByText("Resolved bounding box")).toBeInTheDocument(),
+    );
+  });
+
+  it("shows a backend error when plan building fails", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/build-plan": {
+        body: {
+          error: {
+            code: "not_found",
+            message: "No matching location was found.",
+          },
+        },
+        ok: false,
+        status: 404,
+      },
+    });
+    render(<QueryPanel />);
+
+    setPlace("nowhere-xyz");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "No matching location was found.",
+      ),
+    );
+  });
+
+  it("leaves the STAC discovery + imagery flow working alongside the plan form", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": { body: imageryResponse(SCENE.id) },
+    });
+    render(<QueryPanel />);
+
+    await resolveSearchAndAwaitScene();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+    expect(await screen.findByRole("img")).toBeInTheDocument();
+  });
+});

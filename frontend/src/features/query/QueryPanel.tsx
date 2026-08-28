@@ -2,13 +2,20 @@ import { type FormEvent, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { resolveLocation } from "../../api/geospatial";
+import { buildQueryPlan } from "../../api/query";
 import { fetchSceneImagery, searchScenes } from "../../api/satellite";
 import type {
   BoundingBox,
   GeoResolveResponse,
   ImageryResponse,
+  Modality,
+  QueryTask,
+  ResolvedQueryPlan,
   SatelliteScene,
+  SatQueryIntent,
   SceneSearchResponse,
+  TemporalComparison,
+  TemporalMode,
 } from "../../api/types";
 
 type ResolveState =
@@ -29,6 +36,12 @@ type ImageryState =
   | { status: "error"; sceneId: string; message: string }
   | { status: "done"; sceneId: string; result: ImageryResponse };
 
+type PlanState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "done"; result: ResolvedQueryPlan };
+
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Unexpected error";
 }
@@ -40,9 +53,16 @@ function formatBbox(bbox: BoundingBox): string {
   );
 }
 
+const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
+  { value: "visualize", label: "Visualize" },
+  { value: "change_detection", label: "Change Detection" },
+  { value: "object_identification", label: "Object Identification" },
+];
+
 /**
- * Phase flow: place -> resolve -> bbox -> Sentinel-2 discovery -> select a
- * scene -> bounded imagery retrieval -> display the RGB window.
+ * Phase flow: place -> structured intent -> query plan (intent + resolved
+ * bbox); and, independently, place -> resolve -> Sentinel-2 discovery ->
+ * bounded RGB imagery for a selected scene.
  * No map, no AI/VLM, no NL parsing, no spectral controls.
  */
 export function QueryPanel() {
@@ -51,6 +71,19 @@ export function QueryPanel() {
     status: "idle",
   });
 
+  // --- structured query intent ---
+  const [temporalMode, setTemporalMode] = useState<TemporalMode>("single");
+  const [obsDate, setObsDate] = useState("");
+  const [baselineStart, setBaselineStart] = useState("");
+  const [baselineEnd, setBaselineEnd] = useState("");
+  const [targetStart, setTargetStart] = useState("");
+  const [targetEnd, setTargetEnd] = useState("");
+  const [opticalOn, setOpticalOn] = useState(true);
+  const [sarOn, setSarOn] = useState(false);
+  const [task, setTask] = useState<QueryTask>("visualize");
+  const [planState, setPlanState] = useState<PlanState>({ status: "idle" });
+
+  // --- STAC discovery + imagery ---
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [maxCloud, setMaxCloud] = useState("");
@@ -70,6 +103,28 @@ export function QueryPanel() {
     !datesInvalid &&
     searchState.status !== "loading";
 
+  const modalities: Modality[] = [
+    ...(opticalOn ? (["sentinel-2-optical"] as const) : []),
+    ...(sarOn ? (["sentinel-1-sar"] as const) : []),
+  ];
+  const compareRangesInvalid =
+    temporalMode === "compare" &&
+    ((baselineStart !== "" && baselineEnd !== "" && baselineStart > baselineEnd) ||
+      (targetStart !== "" && targetEnd !== "" && targetStart > targetEnd));
+  const temporalComplete =
+    temporalMode === "single"
+      ? obsDate !== ""
+      : baselineStart !== "" &&
+        baselineEnd !== "" &&
+        targetStart !== "" &&
+        targetEnd !== "";
+  const canBuildPlan =
+    place.trim() !== "" &&
+    modalities.length > 0 &&
+    temporalComplete &&
+    !compareRangesInvalid &&
+    planState.status !== "loading";
+
   async function handleResolve(event: FormEvent) {
     event.preventDefault();
     const trimmed = place.trim();
@@ -83,6 +138,35 @@ export function QueryPanel() {
       setResolveState({ status: "done", result });
     } catch (error) {
       setResolveState({ status: "error", message: errorMessage(error) });
+    }
+  }
+
+  async function handleBuildPlan(event: FormEvent) {
+    event.preventDefault();
+    if (!canBuildPlan) return;
+
+    const timeWindows: SatQueryIntent["time_windows"] =
+      temporalMode === "single"
+        ? [{ start_date: obsDate, end_date: obsDate }]
+        : ({
+            baseline: { start_date: baselineStart, end_date: baselineEnd },
+            target: { start_date: targetStart, end_date: targetEnd },
+          } satisfies TemporalComparison);
+
+    const intent: SatQueryIntent = {
+      location_query: place.trim(),
+      temporal_mode: temporalMode,
+      time_windows: timeWindows,
+      modalities,
+      task,
+    };
+
+    setPlanState({ status: "loading" });
+    try {
+      const result = await buildQueryPlan(intent);
+      setPlanState({ status: "done", result });
+    } catch (error) {
+      setPlanState({ status: "error", message: errorMessage(error) });
     }
   }
 
@@ -130,8 +214,8 @@ export function QueryPanel() {
     <section className="panel" aria-labelledby="query-heading">
       <h2 id="query-heading">Ask</h2>
       <p className="hint">
-        Place → resolved bounding box → Sentinel-2 discovery → bounded RGB
-        imagery for a selected scene.
+        Structured intent → resolved bounding box (query plan); and place →
+        Sentinel-2 discovery → bounded RGB imagery.
       </p>
 
       <form onSubmit={handleResolve} className="query-form">
@@ -157,6 +241,145 @@ export function QueryPanel() {
           {resolveState.message}
         </p>
       )}
+
+      <form onSubmit={handleBuildPlan} className="query-form plan-form">
+        <h3>Query plan</h3>
+
+        <fieldset className="temporal-mode">
+          <legend>Temporal mode</legend>
+          <label>
+            <input
+              type="radio"
+              name="temporal_mode"
+              value="single"
+              checked={temporalMode === "single"}
+              onChange={() => setTemporalMode("single")}
+            />
+            Single date
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="temporal_mode"
+              value="compare"
+              checked={temporalMode === "compare"}
+              onChange={() => setTemporalMode("compare")}
+            />
+            Compare dates
+          </label>
+        </fieldset>
+
+        {temporalMode === "single" ? (
+          <div>
+            <label htmlFor="obs-date">Observation date</label>
+            <input
+              id="obs-date"
+              name="obs_date"
+              type="date"
+              value={obsDate}
+              onChange={(event) => setObsDate(event.target.value)}
+            />
+          </div>
+        ) : (
+          <div className="field-row">
+            <div>
+              <label htmlFor="baseline-start">Baseline start</label>
+              <input
+                id="baseline-start"
+                type="date"
+                value={baselineStart}
+                onChange={(event) => setBaselineStart(event.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="baseline-end">Baseline end</label>
+              <input
+                id="baseline-end"
+                type="date"
+                value={baselineEnd}
+                onChange={(event) => setBaselineEnd(event.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="target-start">Target start</label>
+              <input
+                id="target-start"
+                type="date"
+                value={targetStart}
+                onChange={(event) => setTargetStart(event.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="target-end">Target end</label>
+              <input
+                id="target-end"
+                type="date"
+                value={targetEnd}
+                onChange={(event) => setTargetEnd(event.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
+        <fieldset className="modalities">
+          <legend>Modalities</legend>
+          <label>
+            <input
+              type="checkbox"
+              name="sentinel-2-optical"
+              checked={opticalOn}
+              onChange={(event) => setOpticalOn(event.target.checked)}
+            />
+            Sentinel-2 Optical
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              name="sentinel-1-sar"
+              checked={sarOn}
+              onChange={(event) => setSarOn(event.target.checked)}
+            />
+            Sentinel-1 SAR
+          </label>
+        </fieldset>
+
+        <div>
+          <label htmlFor="task-select">Task</label>
+          <select
+            id="task-select"
+            name="task"
+            value={task}
+            onChange={(event) => setTask(event.target.value as QueryTask)}
+          >
+            {TASK_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {modalities.length === 0 && (
+          <p className="result-error">Select at least one modality.</p>
+        )}
+        {compareRangesInvalid && (
+          <p className="result-error">
+            Each window&apos;s start must be on or before its end.
+          </p>
+        )}
+
+        <button type="submit" disabled={!canBuildPlan}>
+          {planState.status === "loading" ? "Building…" : "Build Query Plan"}
+        </button>
+      </form>
+
+      {planState.status === "error" && (
+        <p className="result-error" role="alert">
+          {planState.message}
+        </p>
+      )}
+
+      {planState.status === "done" && <PlanView plan={planState.result} />}
 
       {resolved && (
         <>
@@ -244,6 +467,59 @@ export function QueryPanel() {
         </>
       )}
     </section>
+  );
+}
+
+function PlanView({ plan }: { plan: ResolvedQueryPlan }) {
+  const { intent, bbox } = plan;
+  const windows = intent.time_windows;
+  return (
+    <dl className="result plan-result">
+      <div>
+        <dt>Location</dt>
+        <dd>{intent.location_query}</dd>
+      </div>
+      <div>
+        <dt>Temporal mode</dt>
+        <dd>{intent.temporal_mode}</dd>
+      </div>
+      <div>
+        <dt>Time windows</dt>
+        <dd>
+          {Array.isArray(windows) ? (
+            <ul>
+              {windows.map((w, index) => (
+                <li key={index}>
+                  {w.start_date} → {w.end_date}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul>
+              <li>
+                baseline: {windows.baseline.start_date} →{" "}
+                {windows.baseline.end_date}
+              </li>
+              <li>
+                target: {windows.target.start_date} → {windows.target.end_date}
+              </li>
+            </ul>
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Modalities</dt>
+        <dd>{intent.modalities.join(", ")}</dd>
+      </div>
+      <div>
+        <dt>Task</dt>
+        <dd>{intent.task}</dd>
+      </div>
+      <div>
+        <dt>Resolved bounding box</dt>
+        <dd>{formatBbox(bbox)}</dd>
+      </div>
+    </dl>
   );
 }
 
