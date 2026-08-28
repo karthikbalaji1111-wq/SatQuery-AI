@@ -30,6 +30,14 @@ class Settings(BaseSettings):
         default=["http://localhost:5173", "http://127.0.0.1:5173"]
     )
 
+    # Geospatial grounding via OpenStreetMap Nominatim.
+    nominatim_base_url: str = "https://nominatim.openstreetmap.org"
+    nominatim_user_agent: str = (
+        "SatQuery/0.1 (SIH 2026 PS 26167; "
+        "+https://github.com/karthikbalaji1111-wq)"
+    )
+    http_timeout_seconds: float = 10.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

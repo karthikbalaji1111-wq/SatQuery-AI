@@ -30,6 +30,27 @@ class NotImplementedFeatureError(AppError):
     code = "not_implemented"
 
 
+class InvalidInputError(AppError):
+    """Raised when a request is well-formed but semantically invalid."""
+
+    status_code = 422  # Unprocessable Content
+    code = "invalid_input"
+
+
+class NotFoundError(AppError):
+    """Raised when a requested resource cannot be found."""
+
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "not_found"
+
+
+class UpstreamServiceError(AppError):
+    """Raised when a third-party service (e.g. Nominatim) fails or times out."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "upstream_error"
+
+
 def _error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
