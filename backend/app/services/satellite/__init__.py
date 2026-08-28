@@ -1,9 +1,14 @@
 """Sentinel-1 SAR and Sentinel-2 optical imagery retrieval.
 
-This phase implements Sentinel-2 optical scene *discovery* only (STAC metadata).
+Implemented so far:
+- Sentinel-2 optical scene *discovery* (STAC metadata).
+- Bounded Sentinel-2 RGB *imagery retrieval* (windowed COG reads).
 """
 
+from app.services.satellite.imagery import ImageryService
 from app.services.satellite.schemas import (
+    ImageryRequest,
+    ImageryResponse,
     Scene,
     SceneAsset,
     SceneSearchRequest,
@@ -12,6 +17,9 @@ from app.services.satellite.schemas import (
 from app.services.satellite.service import SatelliteService
 
 __all__ = [
+    "ImageryRequest",
+    "ImageryResponse",
+    "ImageryService",
     "Scene",
     "SceneAsset",
     "SceneSearchRequest",

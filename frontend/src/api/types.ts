@@ -83,3 +83,35 @@ export interface SceneSearchResponse {
   scenes: SatelliteScene[];
   catalog: string;
 }
+
+export interface ImageryRequest {
+  scene_id: string;
+  bbox: BoundingBox;
+  asset?: string;
+  max_dimension?: number;
+}
+
+export interface ImageryWindowInfo {
+  col_off: number;
+  row_off: number;
+  width: number;
+  height: number;
+}
+
+export interface ImageryResponse {
+  scene_id: string;
+  bbox: BoundingBox;
+  asset: string;
+  asset_href: string;
+  width: number;
+  height: number;
+  format: "png";
+  media_type: "image/png";
+  bands: string[];
+  crs: string | null;
+  resolution: number | null;
+  normalization: string;
+  window: ImageryWindowInfo;
+  source_shape: number[];
+  image_base64: string;
+}

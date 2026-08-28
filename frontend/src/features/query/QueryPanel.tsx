@@ -2,8 +2,14 @@ import { type FormEvent, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { resolveLocation } from "../../api/geospatial";
-import { searchScenes } from "../../api/satellite";
-import type { GeoResolveResponse, SceneSearchResponse } from "../../api/types";
+import { fetchSceneImagery, searchScenes } from "../../api/satellite";
+import type {
+  BoundingBox,
+  GeoResolveResponse,
+  ImageryResponse,
+  SatelliteScene,
+  SceneSearchResponse,
+} from "../../api/types";
 
 type ResolveState =
   | { status: "idle" }
@@ -17,16 +23,17 @@ type SearchState =
   | { status: "error"; message: string }
   | { status: "done"; result: SceneSearchResponse };
 
+type ImageryState =
+  | { status: "idle" }
+  | { status: "loading"; sceneId: string }
+  | { status: "error"; sceneId: string; message: string }
+  | { status: "done"; sceneId: string; result: ImageryResponse };
+
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Unexpected error";
 }
 
-function formatBbox(bbox: {
-  west: number;
-  south: number;
-  east: number;
-  north: number;
-}): string {
+function formatBbox(bbox: BoundingBox): string {
   return (
     `W ${bbox.west.toFixed(4)}, S ${bbox.south.toFixed(4)}, ` +
     `E ${bbox.east.toFixed(4)}, N ${bbox.north.toFixed(4)}`
@@ -34,8 +41,9 @@ function formatBbox(bbox: {
 }
 
 /**
- * Phase flow: place name -> geospatial resolve -> validated bbox ->
- * Sentinel-2 STAC scene discovery. No map, no imagery, no NL parsing.
+ * Phase flow: place -> resolve -> bbox -> Sentinel-2 discovery -> select a
+ * scene -> bounded imagery retrieval -> display the RGB window.
+ * No map, no AI/VLM, no NL parsing, no spectral controls.
  */
 export function QueryPanel() {
   const [place, setPlace] = useState("");
@@ -47,6 +55,9 @@ export function QueryPanel() {
   const [endDate, setEndDate] = useState("");
   const [maxCloud, setMaxCloud] = useState("");
   const [searchState, setSearchState] = useState<SearchState>({ status: "idle" });
+  const [imageryState, setImageryState] = useState<ImageryState>({
+    status: "idle",
+  });
 
   const resolved =
     resolveState.status === "done" ? resolveState.result : undefined;
@@ -66,6 +77,7 @@ export function QueryPanel() {
 
     setResolveState({ status: "loading" });
     setSearchState({ status: "idle" });
+    setImageryState({ status: "idle" });
     try {
       const result = await resolveLocation({ place: trimmed });
       setResolveState({ status: "done", result });
@@ -80,6 +92,7 @@ export function QueryPanel() {
 
     const cloud = maxCloud.trim() === "" ? undefined : Number(maxCloud);
     setSearchState({ status: "loading" });
+    setImageryState({ status: "idle" });
     try {
       const result = await searchScenes({
         bbox: resolved.bbox,
@@ -95,12 +108,30 @@ export function QueryPanel() {
     }
   }
 
+  async function handlePreview(scene: SatelliteScene) {
+    if (!resolved) return;
+    setImageryState({ status: "loading", sceneId: scene.id });
+    try {
+      const result = await fetchSceneImagery({
+        scene_id: scene.id,
+        bbox: resolved.bbox,
+      });
+      setImageryState({ status: "done", sceneId: scene.id, result });
+    } catch (error) {
+      setImageryState({
+        status: "error",
+        sceneId: scene.id,
+        message: errorMessage(error),
+      });
+    }
+  }
+
   return (
     <section className="panel" aria-labelledby="query-heading">
       <h2 id="query-heading">Ask</h2>
       <p className="hint">
-        Place name → resolved bounding box → Sentinel-2 scene discovery
-        (metadata only).
+        Place → resolved bounding box → Sentinel-2 discovery → bounded RGB
+        imagery for a selected scene.
       </p>
 
       <form onSubmit={handleResolve} className="query-form">
@@ -204,7 +235,11 @@ export function QueryPanel() {
           )}
 
           {searchState.status === "done" && (
-            <SceneResults result={searchState.result} />
+            <SceneResults
+              result={searchState.result}
+              imageryState={imageryState}
+              onPreview={handlePreview}
+            />
           )}
         </>
       )}
@@ -212,7 +247,15 @@ export function QueryPanel() {
   );
 }
 
-function SceneResults({ result }: { result: SceneSearchResponse }) {
+function SceneResults({
+  result,
+  imageryState,
+  onPreview,
+}: {
+  result: SceneSearchResponse;
+  imageryState: ImageryState;
+  onPreview: (scene: SatelliteScene) => void;
+}) {
   if (result.scene_count === 0) {
     return (
       <p className="hint" role="status">
@@ -273,9 +316,70 @@ function SceneResults({ result }: { result: SceneSearchResponse }) {
                 </dd>
               </div>
             </dl>
+
+            <button
+              type="button"
+              className="preview-button"
+              onClick={() => onPreview(scene)}
+              disabled={
+                imageryState.status === "loading" &&
+                imageryState.sceneId === scene.id
+              }
+            >
+              {imageryState.status === "loading" &&
+              imageryState.sceneId === scene.id
+                ? "Loading image…"
+                : "Load image"}
+            </button>
+
+            <SceneImage sceneId={scene.id} imageryState={imageryState} />
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+function SceneImage({
+  sceneId,
+  imageryState,
+}: {
+  sceneId: string;
+  imageryState: ImageryState;
+}) {
+  if (imageryState.status === "idle" || imageryState.sceneId !== sceneId) {
+    return null;
+  }
+  if (imageryState.status === "loading") {
+    return (
+      <p className="hint" role="status">
+        Retrieving bounded RGB window…
+      </p>
+    );
+  }
+  if (imageryState.status === "error") {
+    return (
+      <p className="result-error" role="alert">
+        {imageryState.message}
+      </p>
+    );
+  }
+
+  const img = imageryState.result;
+  return (
+    <figure className="scene-image">
+      <img
+        src={`data:${img.media_type};base64,${img.image_base64}`}
+        alt={`Bounded RGB window for scene ${img.scene_id}`}
+        width={img.width}
+        height={img.height}
+      />
+      <figcaption className="scene-image-meta">
+        {img.asset} · {img.width}×{img.height}px · {img.crs ?? "unknown CRS"} ·{" "}
+        {img.resolution ? `${img.resolution} m/px native` : "resolution n/a"} ·
+        window {img.window.width}×{img.window.height} of {img.source_shape[1]}×
+        {img.source_shape[0]} · norm: {img.normalization}
+      </figcaption>
+    </figure>
   );
 }

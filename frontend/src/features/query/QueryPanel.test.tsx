@@ -310,3 +310,164 @@ describe("QueryPanel - Sentinel-2 scene search", () => {
     expect(searchButton).toBeEnabled();
   });
 });
+
+// A 1x1 PNG (payload is opaque to the component - it only builds a data URI).
+const PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+function imageryResponse(sceneId: string) {
+  return {
+    scene_id: sceneId,
+    bbox: { west: 80.1, south: 12.9, east: 80.3, north: 13.2 },
+    asset: "visual",
+    asset_href: "https://sentinel-cogs.s3.us-west-2.amazonaws.com/x/TCI.tif",
+    width: 128,
+    height: 96,
+    format: "png",
+    media_type: "image/png",
+    bands: ["red", "green", "blue"],
+    crs: "EPSG:32644",
+    resolution: 10,
+    normalization: "none (source is 8-bit RGB)",
+    window: { col_off: 1328, row_off: 5830, width: 436, height: 445 },
+    source_shape: [10980, 10980],
+    image_base64: PNG_B64,
+  };
+}
+
+async function resolveSearchAndAwaitScene() {
+  await resolveAndAwaitBbox();
+  fillDates();
+  fireEvent.click(
+    screen.getByRole("button", { name: /search sentinel-2 scenes/i }),
+  );
+  await waitFor(() =>
+    expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument(),
+  );
+}
+
+describe("QueryPanel - bounded imagery", () => {
+  it("shows a Load image button for each scene", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+    });
+    render(<QueryPanel />);
+
+    await resolveSearchAndAwaitScene();
+
+    expect(
+      screen.getByRole("button", { name: /load image/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("requests bounded imagery with the selected scene id and resolved bbox", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": { body: imageryResponse(SCENE.id) },
+    });
+    render(<QueryPanel />);
+
+    await resolveSearchAndAwaitScene();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("img")).toBeInTheDocument(),
+    );
+
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/satellite/imagery"),
+    );
+    expect(call).toBeDefined();
+    expect(String(call![0])).toBe(
+      "http://localhost:8000/api/v1/satellite/imagery",
+    );
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+      scene_id: "S2B_44PLA_20240715_0_L2A",
+      bbox: { west: 80.1, south: 12.9, east: 80.3, north: 13.2 },
+    });
+  });
+
+  it("shows a loading state while imagery is retrieved", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": () => pending,
+    });
+    render(<QueryPanel />);
+
+    await resolveSearchAndAwaitScene();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Retrieving bounded RGB window…"),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: /loading image…/i }),
+    ).toBeDisabled();
+
+    release({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(imageryResponse(SCENE.id))),
+    } as Response);
+
+    await waitFor(() => expect(screen.getByRole("img")).toBeInTheDocument());
+  });
+
+  it("displays the returned RGB image and its metadata", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": { body: imageryResponse(SCENE.id) },
+    });
+    render(<QueryPanel />);
+
+    await resolveSearchAndAwaitScene();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+
+    const img = await screen.findByRole("img");
+    expect(img).toHaveAttribute("src", `data:image/png;base64,${PNG_B64}`);
+    expect(img).toHaveAttribute("width", "128");
+    expect(img).toHaveAttribute("height", "96");
+    expect(
+      screen.getByText(/visual · 128×96px · EPSG:32644/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/window 436×445 of 10980×10980/)).toBeInTheDocument();
+  });
+
+  it("shows a backend error when imagery retrieval fails", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": {
+        body: {
+          error: {
+            code: "invalid_input",
+            message: "The requested bbox does not intersect the selected scene.",
+          },
+        },
+        ok: false,
+        status: 422,
+      },
+    });
+    render(<QueryPanel />);
+
+    await resolveSearchAndAwaitScene();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "The requested bbox does not intersect the selected scene.",
+      ),
+    );
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+});
