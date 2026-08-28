@@ -20,9 +20,10 @@ class AiService(DomainService):
     """Wraps an :class:`IntentParser` to expose :meth:`parse_intent`.
 
     The generic :meth:`run` hook stays unimplemented; :meth:`parse_intent` is
-    the typed entry point for this phase. The parser is injected so a real
-    provider-backed implementation can replace :class:`MockIntentParser` later
-    without touching this class or the API contract.
+    the typed entry point. This class holds no provider logic - the parser is
+    injected. Production wires a ``GeminiIntentParser`` in via the route's
+    dependency; the constructor default is the credential-free
+    :class:`MockIntentParser` so tests and offline use never need a key.
     """
 
     name = "ai"

@@ -58,6 +58,17 @@ class ImageryError(AppError):
     code = "imagery_error"
 
 
+class IntentParsingError(AppError):
+    """Raised when a prompt cannot be turned into a valid ``SatQueryIntent``.
+
+    Used when the language model produced an empty, malformed, or
+    contract-violating result - the parser fails clearly rather than inventing.
+    """
+
+    status_code = 422  # Unprocessable Content
+    code = "intent_parse_error"
+
+
 def _error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
