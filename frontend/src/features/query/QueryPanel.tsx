@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { resolveLocation } from "../../api/geospatial";
-import { buildQueryPlan } from "../../api/query";
+import { buildQueryPlan, parsePrompt } from "../../api/query";
 import { fetchSceneImagery, searchScenes } from "../../api/satellite";
 import type {
   BoundingBox,
@@ -42,6 +42,12 @@ type PlanState =
   | { status: "error"; message: string }
   | { status: "done"; result: ResolvedQueryPlan };
 
+type ParseState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "done"; result: SatQueryIntent };
+
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Unexpected error";
 }
@@ -60,16 +66,22 @@ const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
 ];
 
 /**
- * Phase flow: place -> structured intent -> query plan (intent + resolved
- * bbox); and, independently, place -> resolve -> Sentinel-2 discovery ->
- * bounded RGB imagery for a selected scene.
- * No map, no AI/VLM, no NL parsing, no spectral controls.
+ * Phase flow: natural-language text -> parsed SatQueryIntent (review/edit) ->
+ * structured query plan (intent + resolved bbox); and, independently, place ->
+ * resolve -> Sentinel-2 discovery -> bounded RGB imagery for a selected scene.
+ * NL parsing only fills the form - it never auto-runs Build Query Plan. The
+ * backend parser is a provider-agnostic mock in this phase.
+ * No map, no AI/VLM image reasoning, no spectral controls.
  */
 export function QueryPanel() {
   const [place, setPlace] = useState("");
   const [resolveState, setResolveState] = useState<ResolveState>({
     status: "idle",
   });
+
+  // --- natural-language intent parsing ---
+  const [nlText, setNlText] = useState("");
+  const [parseState, setParseState] = useState<ParseState>({ status: "idle" });
 
   // --- structured query intent ---
   const [temporalMode, setTemporalMode] = useState<TemporalMode>("single");
@@ -124,6 +136,42 @@ export function QueryPanel() {
     temporalComplete &&
     !compareRangesInvalid &&
     planState.status !== "loading";
+
+  /** Populate the editable Query Plan form from a parsed intent. */
+  function applyIntent(intent: SatQueryIntent) {
+    setPlace(intent.location_query);
+    setOpticalOn(intent.modalities.includes("sentinel-2-optical"));
+    setSarOn(intent.modalities.includes("sentinel-1-sar"));
+    setTask(intent.task);
+
+    const windows = intent.time_windows;
+    if (intent.temporal_mode === "compare" && !Array.isArray(windows)) {
+      setTemporalMode("compare");
+      setBaselineStart(windows.baseline.start_date);
+      setBaselineEnd(windows.baseline.end_date);
+      setTargetStart(windows.target.start_date);
+      setTargetEnd(windows.target.end_date);
+    } else if (Array.isArray(windows) && windows.length > 0) {
+      // single, or timeseries collapsed to its first window for the manual form
+      setTemporalMode("single");
+      setObsDate(windows[0].start_date);
+    }
+  }
+
+  async function handleParse(event: FormEvent) {
+    event.preventDefault();
+    const text = nlText.trim();
+    if (!text) return;
+
+    setParseState({ status: "loading" });
+    try {
+      const intent = await parsePrompt(text);
+      applyIntent(intent); // fills the form; user must still click Build Query Plan
+      setParseState({ status: "done", result: intent });
+    } catch (error) {
+      setParseState({ status: "error", message: errorMessage(error) });
+    }
+  }
 
   async function handleResolve(event: FormEvent) {
     event.preventDefault();
@@ -214,9 +262,44 @@ export function QueryPanel() {
     <section className="panel" aria-labelledby="query-heading">
       <h2 id="query-heading">Ask</h2>
       <p className="hint">
-        Structured intent → resolved bounding box (query plan); and place →
-        Sentinel-2 discovery → bounded RGB imagery.
+        Describe a request in plain language, or fill the Query Plan form
+        directly. Parsing pre-fills the form for you to review before building.
       </p>
+
+      <form onSubmit={handleParse} className="query-form nl-form">
+        <label htmlFor="nl-input">Natural Language Request</label>
+        <textarea
+          id="nl-input"
+          name="nl_prompt"
+          rows={3}
+          value={nlText}
+          placeholder="e.g. Show optical imagery of Chennai this summer"
+          onChange={(event) => setNlText(event.target.value)}
+        />
+        <button
+          type="submit"
+          disabled={parseState.status === "loading" || nlText.trim() === ""}
+        >
+          {parseState.status === "loading" ? "Parsing…" : "Parse Request"}
+        </button>
+      </form>
+
+      {parseState.status === "error" && (
+        <p className="result-error" role="alert">
+          {parseState.message}
+        </p>
+      )}
+
+      {parseState.status === "done" && (
+        <p className="hint" role="status">
+          Parsed intent: {parseState.result.temporal_mode} ·{" "}
+          {parseState.result.modalities.join(", ")} · {parseState.result.task}.
+          The Query Plan form below is pre-filled — review or edit it, then click
+          Build Query Plan.
+          {parseState.result.temporal_mode === "timeseries" &&
+            " (Time-series windows collapsed to the first window in the manual form.)"}
+        </p>
+      )}
 
       <form onSubmit={handleResolve} className="query-form">
         <label htmlFor="place-input">Place name</label>

@@ -1,20 +1,17 @@
-"""Model inference and reasoning over geospatial inputs."""
+"""Model inference and reasoning over geospatial inputs.
 
-from __future__ import annotations
+Implemented so far: a provider-agnostic natural-language -> ``SatQueryIntent``
+boundary. The only concrete parser is :class:`MockIntentParser` (test/dev);
+no external AI provider is wired in yet.
+"""
 
-from app.services.base import DomainService
+from app.services.ai.parser import IntentParser, MockIntentParser
+from app.services.ai.schemas import ParsePromptRequest
+from app.services.ai.service import AiService
 
-
-class AiService(DomainService):
-    """Model inference and reasoning over geospatial inputs.
-
-    Foundation stub - see :class:`DomainService`. No logic implemented yet.
-    """
-
-    name = "ai"
-
-    def describe(self) -> str:
-        return "Model inference and reasoning over geospatial inputs."
-
-
-__all__ = ["AiService"]
+__all__ = [
+    "AiService",
+    "IntentParser",
+    "MockIntentParser",
+    "ParsePromptRequest",
+]
