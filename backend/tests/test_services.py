@@ -16,12 +16,16 @@ from app.services.temporal import TemporalService
 STUBBED_SERVICES = [
     MultimodalService,
     TemporalService,
-    AiService,
     MapService,
 ]
 
 # Implemented services expose a typed entry point instead of the generic `run`.
-IMPLEMENTED_SERVICES = [GeospatialService, SatelliteService, QueryService]
+IMPLEMENTED_SERVICES = [
+    GeospatialService,
+    SatelliteService,
+    QueryService,
+    AiService,
+]
 
 ALL_SERVICES = [*STUBBED_SERVICES, *IMPLEMENTED_SERVICES]
 

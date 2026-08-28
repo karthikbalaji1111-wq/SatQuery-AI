@@ -710,3 +710,163 @@ describe("QueryPanel - query plan", () => {
     expect(await screen.findByRole("img")).toBeInTheDocument();
   });
 });
+
+const COMPARE_INTENT = {
+  location_query: "Rotterdam",
+  temporal_mode: "compare",
+  time_windows: {
+    baseline: { start_date: "2023-06-01", end_date: "2023-06-30" },
+    target: { start_date: "2024-06-01", end_date: "2024-06-30" },
+  },
+  modalities: ["sentinel-2-optical", "sentinel-1-sar"],
+  task: "change_detection",
+};
+
+function typeNl(value: string) {
+  fireEvent.change(screen.getByLabelText("Natural Language Request"), {
+    target: { value },
+  });
+}
+
+describe("QueryPanel - natural language parsing", () => {
+  it("shows the NL textarea and disables Parse until text is entered", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    expect(
+      screen.getByLabelText("Natural Language Request"),
+    ).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: /parse request/i });
+    expect(button).toBeDisabled();
+
+    typeNl("show me chennai");
+    expect(button).toBeEnabled();
+  });
+
+  it("populates the Query Plan form from a parsed single-mode intent", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/parse": { body: SINGLE_INTENT },
+    });
+    render(<QueryPanel />);
+
+    typeNl("optical imagery of Chennai on 2024-07-01");
+    fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Place name") as HTMLInputElement).value,
+      ).toBe("Chennai"),
+    );
+    expect(screen.getByLabelText("Single date")).toBeChecked();
+    expect(
+      (screen.getByLabelText("Observation date") as HTMLInputElement).value,
+    ).toBe("2024-07-01");
+    expect(screen.getByLabelText("Sentinel-2 Optical")).toBeChecked();
+    expect(screen.getByLabelText("Sentinel-1 SAR")).not.toBeChecked();
+    expect((screen.getByLabelText("Task") as HTMLSelectElement).value).toBe(
+      "visualize",
+    );
+    expect(screen.getByText(/Parsed intent: single/)).toBeInTheDocument();
+  });
+
+  it("populates compare fields, modalities and task from a compare-mode intent", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/parse": { body: COMPARE_INTENT },
+    });
+    render(<QueryPanel />);
+
+    typeNl("compare Rotterdam optical and radar, 2023 vs 2024");
+    fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Compare dates")).toBeChecked(),
+    );
+    expect(
+      (screen.getByLabelText("Baseline start") as HTMLInputElement).value,
+    ).toBe("2023-06-01");
+    expect(
+      (screen.getByLabelText("Target end") as HTMLInputElement).value,
+    ).toBe("2024-06-30");
+    expect(screen.getByLabelText("Sentinel-1 SAR")).toBeChecked();
+    expect((screen.getByLabelText("Task") as HTMLSelectElement).value).toBe(
+      "change_detection",
+    );
+  });
+
+  it("does not auto-run Build Query Plan after parsing", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/parse": { body: SINGLE_INTENT },
+      "/query/build-plan": { body: planResponse(SINGLE_INTENT) },
+    });
+    render(<QueryPanel />);
+
+    typeNl("show chennai");
+    fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Parsed intent:/)).toBeInTheDocument(),
+    );
+
+    expect(
+      fetchMock.mock.calls.some((c) =>
+        String(c[0]).includes("/query/build-plan"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByText("Resolved bounding box")).not.toBeInTheDocument();
+  });
+
+  it("shows a loading state while parsing", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/parse": () => pending,
+    });
+    render(<QueryPanel />);
+
+    typeNl("show chennai");
+    fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /parsing…/i })).toBeDisabled(),
+    );
+
+    release({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(SINGLE_INTENT)),
+    } as Response);
+
+    await waitFor(() =>
+      expect(screen.getByText(/Parsed intent:/)).toBeInTheDocument(),
+    );
+  });
+
+  it("shows a backend error when parsing fails", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/parse": {
+        body: {
+          error: { code: "invalid_input", message: "prompt must not be empty" },
+        },
+        ok: false,
+        status: 422,
+      },
+    });
+    render(<QueryPanel />);
+
+    typeNl("   x");
+    fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "prompt must not be empty",
+      ),
+    );
+  });
+});
