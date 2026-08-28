@@ -1,4 +1,4 @@
-"""Contract tests for the domain service stubs."""
+"""Contract tests for the domain services."""
 
 from __future__ import annotations
 
@@ -12,15 +12,17 @@ from app.services.query import QueryService
 from app.services.satellite import SatelliteService
 from app.services.temporal import TemporalService
 
-ALL_SERVICES = [
+# Services still awaiting implementation - their generic `run` hook must raise.
+STUBBED_SERVICES = [
     QueryService,
     SatelliteService,
     MultimodalService,
     TemporalService,
-    GeospatialService,
     AiService,
     MapService,
 ]
+
+ALL_SERVICES = [*STUBBED_SERVICES, GeospatialService]
 
 
 @pytest.mark.parametrize("service_cls", ALL_SERVICES)
@@ -31,7 +33,7 @@ def test_service_describes_itself(service_cls: type) -> None:
     assert service.describe()
 
 
-@pytest.mark.parametrize("service_cls", ALL_SERVICES)
+@pytest.mark.parametrize("service_cls", STUBBED_SERVICES)
 def test_service_run_not_implemented(service_cls: type) -> None:
     with pytest.raises(NotImplementedFeatureError):
         service_cls().run()
