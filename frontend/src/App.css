@@ -104,6 +104,76 @@ body {
   font-size: 0.9rem;
 }
 
+.scene-search-form {
+  margin-top: 1.25rem;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.field-row > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.field-row label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.scene-results {
+  margin-top: 1rem;
+}
+
+.scene-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.scene {
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.scene-id {
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.scene dl {
+  margin: 0.5rem 0 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.scene dl div {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.5rem;
+}
+
+.scene dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.scene dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
 .map-container {
   display: grid;
   place-items: center;

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     )
     http_timeout_seconds: float = 10.0
 
+    # Sentinel-2 scene discovery via the Earth Search STAC API.
+    stac_base_url: str = "https://earth-search.aws.element84.com/v1"
+    stac_collection: str = "sentinel-2-l2a"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
