@@ -115,3 +115,33 @@ export interface ImageryResponse {
   source_shape: number[];
   image_base64: string;
 }
+
+export type TemporalMode = "single" | "compare" | "timeseries";
+export type Modality = "sentinel-2-optical" | "sentinel-1-sar";
+export type QueryTask =
+  | "visualize"
+  | "change_detection"
+  | "object_identification";
+
+export interface TimeRange {
+  start_date: string;
+  end_date: string;
+}
+
+export interface TemporalComparison {
+  baseline: TimeRange;
+  target: TimeRange;
+}
+
+export interface SatQueryIntent {
+  location_query: string;
+  temporal_mode: TemporalMode;
+  time_windows: TemporalComparison | TimeRange[];
+  modalities: Modality[];
+  task: QueryTask;
+}
+
+export interface ResolvedQueryPlan {
+  intent: SatQueryIntent;
+  bbox: BoundingBox;
+}

@@ -14,7 +14,6 @@ from app.services.temporal import TemporalService
 
 # Services still awaiting implementation - their generic `run` hook must raise.
 STUBBED_SERVICES = [
-    QueryService,
     MultimodalService,
     TemporalService,
     AiService,
@@ -22,7 +21,7 @@ STUBBED_SERVICES = [
 ]
 
 # Implemented services expose a typed entry point instead of the generic `run`.
-IMPLEMENTED_SERVICES = [GeospatialService, SatelliteService]
+IMPLEMENTED_SERVICES = [GeospatialService, SatelliteService, QueryService]
 
 ALL_SERVICES = [*STUBBED_SERVICES, *IMPLEMENTED_SERVICES]
 
