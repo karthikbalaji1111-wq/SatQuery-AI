@@ -1,0 +1,96 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.app-header p {
+  margin: 0.25rem 0 1rem;
+  opacity: 0.75;
+}
+
+.backend-status {
+  font-size: 0.9rem;
+}
+
+.backend-status .ok {
+  color: #1a7f37;
+}
+
+.backend-status .error {
+  color: #c0392b;
+}
+
+.app-main {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.panel {
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.query-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.query-form textarea {
+  font: inherit;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.5);
+}
+
+.query-form button {
+  justify-self: start;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+}
+
+.hint {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.map-container {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  border-radius: 6px;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(128, 128, 128, 0.08),
+    rgba(128, 128, 128, 0.08) 12px,
+    rgba(128, 128, 128, 0.16) 12px,
+    rgba(128, 128, 128, 0.16) 24px
+  );
+  opacity: 0.85;
+}
+
+.app-footer {
+  margin-top: 2.5rem;
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
