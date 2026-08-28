@@ -15,14 +15,16 @@ from app.services.temporal import TemporalService
 # Services still awaiting implementation - their generic `run` hook must raise.
 STUBBED_SERVICES = [
     QueryService,
-    SatelliteService,
     MultimodalService,
     TemporalService,
     AiService,
     MapService,
 ]
 
-ALL_SERVICES = [*STUBBED_SERVICES, GeospatialService]
+# Implemented services expose a typed entry point instead of the generic `run`.
+IMPLEMENTED_SERVICES = [GeospatialService, SatelliteService]
+
+ALL_SERVICES = [*STUBBED_SERVICES, *IMPLEMENTED_SERVICES]
 
 
 @pytest.mark.parametrize("service_cls", ALL_SERVICES)

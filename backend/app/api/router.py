@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.routes import geospatial, health
+from app.api.routes import geospatial, health, satellite
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -16,6 +16,11 @@ api_router.include_router(
     prefix=f"{settings.api_v1_prefix}/geospatial",
     tags=["geospatial"],
 )
+api_router.include_router(
+    satellite.router,
+    prefix=f"{settings.api_v1_prefix}/satellite",
+    tags=["satellite"],
+)
 
-# Future domain routers (query, satellite, multimodal, temporal, ai, map) will be
+# Future domain routers (query, multimodal, temporal, ai, map) will be
 # registered here as they are implemented.
