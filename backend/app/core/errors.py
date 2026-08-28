@@ -51,6 +51,13 @@ class UpstreamServiceError(AppError):
     code = "upstream_error"
 
 
+class ImageryError(AppError):
+    """Raised when bounded imagery cannot be read or converted to RGB."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "imagery_error"
+
+
 def _error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 

@@ -7,7 +7,7 @@ define a competing geometry schema.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -15,6 +15,10 @@ from app.services.geospatial.schemas import BoundingBox
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 100
+
+# Assets that are true 3-band RGB, windowed-readable remote rasters (COGs).
+SUPPORTED_IMAGERY_ASSETS = ("visual",)
+DEFAULT_IMAGERY_ASSET = "visual"
 
 
 class SceneSearchRequest(BaseModel):
@@ -76,3 +80,48 @@ class SceneSearchResponse(BaseModel):
     scene_count: int
     scenes: list[Scene]
     catalog: str
+
+
+class ImageryRequest(BaseModel):
+    """Bounded imagery request for an already-discovered scene.
+
+    No natural-language search happens here - the scene must already be known
+    from the discovery phase.
+    """
+
+    scene_id: str = Field(min_length=1, max_length=200)
+    bbox: BoundingBox
+    asset: str = Field(default=DEFAULT_IMAGERY_ASSET, min_length=1, max_length=50)
+    max_dimension: int | None = Field(default=None, ge=16, le=4096)
+
+
+class WindowInfo(BaseModel):
+    """The pixel window actually read from the source raster."""
+
+    col_off: int
+    row_off: int
+    width: int
+    height: int
+
+
+class ImageryResponse(BaseModel):
+    """A bounded RGB representation of a scene, suitable for a later VLM phase.
+
+    The raw STAC item is never exposed.
+    """
+
+    scene_id: str
+    bbox: BoundingBox
+    asset: str
+    asset_href: str
+    width: int
+    height: int
+    format: Literal["png"]
+    media_type: Literal["image/png"]
+    bands: list[str]
+    crs: str | None
+    resolution: float | None
+    normalization: str
+    window: WindowInfo
+    source_shape: list[int]
+    image_base64: str

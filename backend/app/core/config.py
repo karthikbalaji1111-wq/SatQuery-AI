@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     stac_base_url: str = "https://earth-search.aws.element84.com/v1"
     stac_collection: str = "sentinel-2-l2a"
 
+    # Bounded Sentinel-2 imagery retrieval (windowed COG reads).
+    imagery_max_dimension: int = 1024
+    imagery_hard_max_dimension: int = 2048
+    imagery_max_window_pixels: int = 50_000_000
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
