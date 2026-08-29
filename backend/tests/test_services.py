@@ -8,7 +8,7 @@ from app.services.ai import AiService
 from app.services.geospatial import GeospatialService
 from app.services.map import MapService
 from app.services.multimodal import MultimodalService
-from app.services.query import QueryService
+from app.services.query import QueryExecutionService, QueryService
 from app.services.satellite import SatelliteService
 from app.services.temporal import TemporalService
 
@@ -24,6 +24,7 @@ IMPLEMENTED_SERVICES = [
     GeospatialService,
     SatelliteService,
     QueryService,
+    QueryExecutionService,
     AiService,
 ]
 

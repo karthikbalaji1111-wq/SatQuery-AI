@@ -870,3 +870,168 @@ describe("QueryPanel - natural language parsing", () => {
     );
   });
 });
+
+function executionResult(overrides: Record<string, unknown> = {}) {
+  return {
+    plan: { intent: SINGLE_INTENT, bbox: PLAN_BBOX },
+    executed_modalities: ["sentinel-2-optical"],
+    skipped_modalities: [],
+    windows: [
+      {
+        label: "single",
+        time_range: { start_date: "2024-07-01", end_date: "2024-07-01" },
+        scene_count: 1,
+        scenes: [SCENE],
+        selected_scene_id: "S2B_44PLA_20240715_0_L2A",
+        imagery: null,
+        imagery_error: null,
+      },
+    ],
+    catalog: "https://earth-search.aws.element84.com/v1",
+    ...overrides,
+  };
+}
+
+describe("QueryPanel - run full query", () => {
+  it("keeps Run full query disabled until place + temporal + modality are set", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    const button = screen.getByRole("button", { name: /run full query/i });
+    expect(button).toBeDisabled();
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    expect(button).toBeEnabled();
+  });
+
+  it("sends the current intent to /query/execute and renders per-window results", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "single" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument();
+    expect(screen.getByText("2024-07-01 → 2024-07-01")).toBeInTheDocument();
+
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/query/execute"),
+    );
+    expect(String(call![0])).toBe("http://localhost:8000/api/v1/query/execute");
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+      intent: {
+        location_query: "Chennai",
+        temporal_mode: "single",
+        time_windows: [{ start_date: "2024-07-01", end_date: "2024-07-01" }],
+        modalities: ["sentinel-2-optical"],
+        task: "visualize",
+      },
+      include_imagery: false,
+    });
+  });
+
+  it("requests bounded imagery when the checkbox is set and renders the preview", async () => {
+    const withImagery = executionResult();
+    (withImagery.windows[0] as Record<string, unknown>).imagery =
+      imageryResponse("S2B_44PLA_20240715_0_L2A");
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: withImagery },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(
+      screen.getByLabelText("Include bounded imagery preview"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    expect(await screen.findByRole("img")).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/query/execute"),
+    );
+    expect(
+      JSON.parse((call![1] as RequestInit).body as string).include_imagery,
+    ).toBe(true);
+  });
+
+  it("reports skipped Sentinel-1 and keeps the manual Build Query Plan flow working", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": {
+        body: executionResult({
+          skipped_modalities: [
+            {
+              modality: "sentinel-1-sar",
+              reason:
+                "Sentinel-1 SAR execution is not implemented in this phase; only Sentinel-2 optical is executed.",
+            },
+          ],
+        }),
+      },
+      "/query/build-plan": { body: planResponse(SINGLE_INTENT) },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Skipped sentinel-1-sar/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+    await waitFor(() =>
+      expect(screen.getByText("Resolved bounding box")).toBeInTheDocument(),
+    );
+  });
+
+  it("shows a backend error when execution fails", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": {
+        body: {
+          error: {
+            code: "upstream_error",
+            message: "The satellite catalog timed out.",
+          },
+        },
+        ok: false,
+        status: 502,
+      },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "The satellite catalog timed out.",
+      ),
+    );
+  });
+});
