@@ -5,7 +5,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.services.ai import AiService, GeminiIntentParser, ParsePromptRequest
-from app.services.query import QueryService, ResolvedQueryPlan, SatQueryIntent
+from app.services.query import (
+    QueryExecutionRequest,
+    QueryExecutionResult,
+    QueryExecutionService,
+    QueryService,
+    ResolvedQueryPlan,
+    SatQueryIntent,
+)
 
 router = APIRouter()
 
@@ -25,6 +32,17 @@ def get_ai_service() -> AiService:
     """
 
     return AiService(parser=GeminiIntentParser())
+
+
+def get_query_execution_service() -> QueryExecutionService:
+    """Provider for :class:`QueryExecutionService`; overridden in tests.
+
+    Composes the real ``QueryService``, ``SatelliteService`` and
+    ``ImageryService``. Cheap to construct; performs no network at
+    import/startup time.
+    """
+
+    return QueryExecutionService()
 
 
 @router.post("/parse", response_model=SatQueryIntent)
@@ -52,3 +70,19 @@ async def build_plan(
     LLM/AI inference - only validation and location resolution."""
 
     return await service.build_plan(intent)
+
+
+@router.post("/execute", response_model=QueryExecutionResult)
+async def execute_query(
+    request: QueryExecutionRequest,
+    service: QueryExecutionService = Depends(get_query_execution_service),
+) -> QueryExecutionResult:
+    """Execute a validated ``SatQueryIntent`` end to end.
+
+    Grounds the location via the Geospatial Service, runs Sentinel-2 discovery
+    once per temporal window, deterministically selects one scene per window,
+    and - when ``include_imagery`` is set - retrieves one bounded RGB window for
+    each selected scene. Sentinel-1 SAR is reported under ``skipped_modalities``
+    and is not executed in this phase. No LLM/AI inference happens here."""
+
+    return await service.execute(request)

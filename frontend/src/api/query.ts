@@ -1,5 +1,10 @@
 import { apiRequest } from "./client";
-import type { ResolvedQueryPlan, SatQueryIntent } from "./types";
+import type {
+  QueryExecutionRequest,
+  QueryExecutionResult,
+  ResolvedQueryPlan,
+  SatQueryIntent,
+} from "./types";
 
 /**
  * Translate a natural-language request into a structured {@link SatQueryIntent}.
@@ -27,6 +32,24 @@ export function buildQueryPlan(
   return apiRequest<ResolvedQueryPlan>("/api/v1/query/build-plan", {
     method: "POST",
     body: intent,
+    signal,
+  });
+}
+
+/**
+ * Execute a validated {@link SatQueryIntent} end to end: ground the location,
+ * run Sentinel-2 discovery once per temporal window, deterministically select a
+ * scene, and - when {@link QueryExecutionRequest.include_imagery} is set -
+ * retrieve one bounded RGB window per selected scene. Sentinel-1 SAR is
+ * reported as skipped, not executed.
+ */
+export function executeQuery(
+  request: QueryExecutionRequest,
+  signal?: AbortSignal,
+): Promise<QueryExecutionResult> {
+  return apiRequest<QueryExecutionResult>("/api/v1/query/execute", {
+    method: "POST",
+    body: request,
     signal,
   });
 }
