@@ -151,10 +151,12 @@ class RecordingReader:
 class RecordingFetcher:
     def __init__(self, item: dict[str, Any] | None = None) -> None:
         self.scene_ids: list[str] = []
+        self.collections: list[str] = []
         self._item = item if item is not None else stac_item()
 
-    def __call__(self, scene_id: str) -> dict[str, Any]:
+    def __call__(self, scene_id: str, collection: str) -> dict[str, Any]:
         self.scene_ids.append(scene_id)
+        self.collections.append(collection)
         return {**self._item, "id": scene_id}
 
 
@@ -312,7 +314,7 @@ def test_bbox_outside_scene_is_rejected_before_any_raster_read() -> None:
 
 
 def test_unknown_scene_returns_404() -> None:
-    def missing(_scene_id: str) -> dict[str, Any]:
+    def missing(_scene_id: str, _collection: str) -> dict[str, Any]:
         from app.core.errors import NotFoundError
 
         raise NotFoundError("Scene not found in the catalog.")
@@ -845,6 +847,7 @@ def test_vv_asset_is_accepted_and_resolved_end_to_end(monkeypatch: Any) -> None:
             json={
                 "scene_id": "S1A_IW_GRDH_1SDV_20240214",
                 "asset": "vv",
+                "collection": "sentinel-1-grd",
                 "bbox": {
                     "west": req_bbox.west,
                     "south": req_bbox.south,
@@ -864,6 +867,7 @@ def test_vv_asset_is_accepted_and_resolved_end_to_end(monkeypatch: Any) -> None:
     image = decode_png(body["image_base64"])
     assert image.mode == "RGB"
     assert fetcher.scene_ids == ["S1A_IW_GRDH_1SDV_20240214"]
+    assert fetcher.collections == ["sentinel-1-grd"]
 
 
 def test_visual_asset_behaviour_is_unchanged() -> None:
@@ -883,4 +887,103 @@ def test_vh_asset_is_still_rejected() -> None:
         json=valid_body(scene_id="S1A_IW_GRDH_1SDV_20240214", asset="vh"),
     )
     assert response.status_code == 422
+    assert reader.calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Collection-aware STAC item lookup (S1 vs S2)
+# --------------------------------------------------------------------------- #
+
+
+def test_s2_item_lookup_uses_default_collection_when_unset() -> None:
+    fetcher = RecordingFetcher()
+    response = make_client(fetcher=fetcher).post(IMAGERY_URL, json=valid_body())
+
+    assert response.status_code == 200
+    assert fetcher.collections == ["sentinel-2-l2a"]
+
+
+def test_explicit_s2_collection_is_honoured() -> None:
+    fetcher = RecordingFetcher()
+    response = make_client(fetcher=fetcher).post(
+        IMAGERY_URL, json=valid_body(collection="sentinel-2-l2a")
+    )
+
+    assert response.status_code == 200
+    assert fetcher.collections == ["sentinel-2-l2a"]
+
+
+def test_s1_item_lookup_uses_sentinel_1_grd_collection() -> None:
+    rb = bbox_for_window(Window(0, 0, 40, 30))
+    item_bbox = [rb.west - 1, rb.south - 1, rb.east + 1, rb.north + 1]
+    fetcher = RecordingFetcher(sar_stac_item(bbox=item_bbox))
+    response = make_client(fetcher=fetcher, reader=RecordingReader()).post(
+        IMAGERY_URL,
+        json=valid_body(
+            scene_id="S1A_IW_GRDH_1SDV_20240214",
+            asset="vv",
+            collection="sentinel-1-grd",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert fetcher.scene_ids == ["S1A_IW_GRDH_1SDV_20240214"]
+    assert fetcher.collections == ["sentinel-1-grd"]
+
+
+def test_s2_item_lookup_url_targets_sentinel_2_collection() -> None:
+    import httpx
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json=stac_item())
+
+    _imagery_client_with_transport(handler).post(IMAGERY_URL, json=valid_body())
+
+    assert seen == [
+        "/v1/collections/sentinel-2-l2a/items/S2A_44PMV_20240214_0_L2A"
+    ]
+
+
+def test_s1_item_lookup_url_targets_sentinel_1_collection() -> None:
+    import httpx
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(
+            200, json=sar_stac_item(bbox=[80.0, 12.5, 81.1, 13.6])
+        )
+
+    _imagery_client_with_transport(handler).post(
+        IMAGERY_URL,
+        json=valid_body(
+            scene_id="S1A_IW_GRDH_1SDV_20240214",
+            asset="vv",
+            collection="sentinel-1-grd",
+        ),
+    )
+
+    assert seen == [
+        "/v1/collections/sentinel-1-grd/items/S1A_IW_GRDH_1SDV_20240214"
+    ]
+
+
+def test_vh_rejected_even_with_s1_collection_before_any_catalog_call() -> None:
+    fetcher = RecordingFetcher()
+    reader = RecordingReader()
+    response = make_client(fetcher=fetcher, reader=reader).post(
+        IMAGERY_URL,
+        json=valid_body(
+            scene_id="S1A_IW_GRDH_1SDV_20240214",
+            asset="vh",
+            collection="sentinel-1-grd",
+        ),
+    )
+
+    assert response.status_code == 422
+    assert fetcher.scene_ids == []  # whitelist rejection precedes the lookup
     assert reader.calls == []

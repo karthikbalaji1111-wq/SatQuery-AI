@@ -88,6 +88,7 @@ export interface ImageryRequest {
   scene_id: string;
   bbox: BoundingBox;
   asset?: string;
+  collection?: string;
   max_dimension?: number;
 }
 
