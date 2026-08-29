@@ -152,7 +152,9 @@ class FakeImageryService:
                 raise exc
         elif self._error is not None:
             raise self._error
-        return self._response or make_imagery_response(request.scene_id)
+        return self._response or make_imagery_response(
+            request.scene_id, asset=request.asset
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -200,11 +202,11 @@ def make_search_response(
     )
 
 
-def make_imagery_response(scene_id: str) -> ImageryResponse:
+def make_imagery_response(scene_id: str, *, asset: str = "visual") -> ImageryResponse:
     return ImageryResponse(
         scene_id=scene_id,
         bbox=DEFAULT_BBOX,
-        asset="visual",
+        asset=asset,
         asset_href="https://example.test/TCI.tif",
         width=4,
         height=4,
@@ -824,7 +826,7 @@ def test_mixed_s1_s2_failure_propagates_not_soft_fail() -> None:
         )
 
 
-def test_include_imagery_never_calls_retrieve_for_s1() -> None:
+def test_include_imagery_true_retrieves_vv_for_s1_and_visual_for_s2() -> None:
     imagery = FakeImageryService()
     satellite = FakeSatelliteService(
         by_collection={
@@ -845,13 +847,86 @@ def test_include_imagery_never_calls_retrieve_for_s1() -> None:
         )
     )
 
-    # retrieve called exactly once, for the S2 selected scene only
-    assert [r.scene_id for r in imagery.requests] == ["s2"]
-    s1_window = next(w for w in result.windows if w.modality == "sentinel-1-sar")
-    assert s1_window.imagery is None
-    assert s1_window.imagery_error is None
+    # One retrieve per modality window; S2 -> "visual", S1 -> "vv".
+    assert [(r.scene_id, r.asset) for r in imagery.requests] == [
+        ("s2", "visual"),
+        ("s1", "vv"),
+    ]
     s2_window = next(w for w in result.windows if w.modality == "sentinel-2-optical")
+    s1_window = next(w for w in result.windows if w.modality == "sentinel-1-sar")
+    assert s2_window.imagery is not None and s2_window.imagery.asset == "visual"
+    assert s1_window.imagery is not None and s1_window.imagery.asset == "vv"
+    assert s1_window.imagery_error is None
+    # The S1 imagery request carries the grounded plan bbox, same as S2.
+    s1_req = next(r for r in imagery.requests if r.scene_id == "s1")
+    assert s1_req.bbox == DEFAULT_BBOX
+
+
+def test_include_imagery_false_does_not_retrieve_for_s1() -> None:
+    imagery = FakeImageryService()
+    satellite = FakeSatelliteService(
+        by_collection={
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1", moment="2024-01-01T00:00:00Z")
+            )
+        }
+    )
+    result = run(
+        build_service(satellite=satellite, imagery=imagery).execute(
+            QueryExecutionRequest(
+                intent=make_intent(modalities=["sentinel-1-sar"]),
+                include_imagery=False,
+            )
+        )
+    )
+    assert imagery.requests == []
+    assert result.windows[0].imagery is None
+    assert result.windows[0].imagery_error is None
+
+
+def test_s1_imagery_failure_populates_error_without_aborting_execution() -> None:
+    # S2 imagery succeeds; S1 imagery fails -> isolated to the S1 window.
+    imagery = FakeImageryService(errors=[None, ImageryError("SAR render failed")])
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: make_search_response(make_scene("s2", cloud_cover=5.0)),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1", moment="2024-01-01T00:00:00Z")
+            ),
+        }
+    )
+    result = run(
+        build_service(satellite=satellite, imagery=imagery).execute(
+            QueryExecutionRequest(
+                intent=make_intent(
+                    modalities=["sentinel-2-optical", "sentinel-1-sar"]
+                ),
+                include_imagery=True,
+            )
+        )
+    )
+    s2_window = next(w for w in result.windows if w.modality == "sentinel-2-optical")
+    s1_window = next(w for w in result.windows if w.modality == "sentinel-1-sar")
     assert s2_window.imagery is not None
+    assert s2_window.imagery_error is None
+    assert s1_window.imagery is None
+    assert s1_window.imagery_error == "SAR render failed"
+
+
+def test_s1_discovery_failure_propagates_even_with_include_imagery() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={"sentinel-1-grd": UpstreamServiceError("S1 catalog down")}
+    )
+    service = build_service(satellite=satellite, imagery=FakeImageryService())
+    with pytest.raises(UpstreamServiceError):
+        run(
+            service.execute(
+                QueryExecutionRequest(
+                    intent=make_intent(modalities=["sentinel-1-sar"]),
+                    include_imagery=True,
+                )
+            )
+        )
 
 
 # --------------------------------------------------------------------------- #

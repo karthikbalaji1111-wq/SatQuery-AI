@@ -16,9 +16,13 @@ from app.services.geospatial.schemas import BoundingBox
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 100
 
-# Assets that are true 3-band RGB, windowed-readable remote rasters (COGs).
-SUPPORTED_IMAGERY_ASSETS = ("visual",)
+# Windowed-readable remote rasters (COGs) supported for bounded retrieval:
+#   "visual" - Sentinel-2 true-colour 8-bit RGB, used as-is.
+#   "vv"     - Sentinel-1 GRD VV backscatter, single-band Float32, display-only
+#              normalized to 8-bit grayscale (see raster._normalize_sar_band).
 DEFAULT_IMAGERY_ASSET = "visual"
+SAR_IMAGERY_ASSET = "vv"
+SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET)
 
 
 class SceneSearchRequest(BaseModel):
