@@ -145,3 +145,33 @@ export interface ResolvedQueryPlan {
   intent: SatQueryIntent;
   bbox: BoundingBox;
 }
+
+export interface SkippedModality {
+  modality: Modality;
+  reason: string;
+}
+
+export interface ExecutedWindow {
+  label: string;
+  time_range: TimeRange;
+  scene_count: number;
+  scenes: SatelliteScene[];
+  selected_scene_id: string | null;
+  imagery: ImageryResponse | null;
+  imagery_error: string | null;
+}
+
+export interface QueryExecutionRequest {
+  intent: SatQueryIntent;
+  include_imagery?: boolean;
+  max_cloud_cover?: number;
+  limit?: number;
+}
+
+export interface QueryExecutionResult {
+  plan: ResolvedQueryPlan;
+  executed_modalities: Modality[];
+  skipped_modalities: SkippedModality[];
+  windows: ExecutedWindow[];
+  catalog: string;
+}

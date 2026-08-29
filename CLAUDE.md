@@ -24,8 +24,10 @@ Core intended capabilities:
 3. Bounded Sentinel-2 imagery retrieval
 4. Structured query intent
 5. Deterministic query-plan resolution
+6. Query execution orchestration (intent -> plan -> discovery -> deterministic
+   scene selection -> optional bounded imagery)
 
-Current HEAD represents the completed Query/Intent Grounding phase.
+Current HEAD represents the completed Query Execution Orchestration phase.
 
 ## Architecture Rules
 

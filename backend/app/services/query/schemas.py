@@ -14,6 +14,12 @@ from typing import Literal, Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.services.geospatial.schemas import BoundingBox
+from app.services.satellite.schemas import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    ImageryResponse,
+    Scene,
+)
 
 TemporalMode = Literal["single", "compare", "timeseries"]
 Modality = Literal["sentinel-2-optical", "sentinel-1-sar"]
@@ -87,3 +93,57 @@ class ResolvedQueryPlan(BaseModel):
 
     intent: SatQueryIntent
     bbox: BoundingBox
+
+
+# --------------------------------------------------------------------------- #
+# Query execution orchestration
+#
+# These models describe the *composition* of the existing grounding, discovery
+# and bounded-imagery contracts. No new geometry, scene, or imagery shape is
+# introduced - ``ResolvedQueryPlan``, ``Scene`` and ``ImageryResponse`` are
+# reused verbatim.
+# --------------------------------------------------------------------------- #
+
+
+class SkippedModality(BaseModel):
+    """A requested modality that this phase deliberately does not execute."""
+
+    modality: Modality
+    reason: str
+
+
+class QueryExecutionRequest(BaseModel):
+    """Input to end-to-end query execution.
+
+    ``intent`` is the same contract that ``/query/parse`` produces and
+    ``/query/build-plan`` consumes. ``max_cloud_cover`` and ``limit`` are
+    optional pass-throughs to the existing Sentinel-2 discovery contract; their
+    bounds mirror :class:`SceneSearchRequest`.
+    """
+
+    intent: SatQueryIntent
+    include_imagery: bool = False
+    max_cloud_cover: float | None = Field(default=None, ge=0, le=100)
+    limit: int = Field(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
+
+
+class ExecutedWindow(BaseModel):
+    """Discovery and selection outcome for one expanded temporal window."""
+
+    label: str
+    time_range: TimeRange
+    scene_count: int
+    scenes: list[Scene]
+    selected_scene_id: str | None
+    imagery: ImageryResponse | None = None
+    imagery_error: str | None = None
+
+
+class QueryExecutionResult(BaseModel):
+    """Structured, deterministic result of executing a :class:`SatQueryIntent`."""
+
+    plan: ResolvedQueryPlan
+    executed_modalities: list[Modality]
+    skipped_modalities: list[SkippedModality]
+    windows: list[ExecutedWindow]
+    catalog: str
