@@ -2,13 +2,15 @@ import { type FormEvent, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { resolveLocation } from "../../api/geospatial";
-import { buildQueryPlan, parsePrompt } from "../../api/query";
+import { buildQueryPlan, executeQuery, parsePrompt } from "../../api/query";
 import { fetchSceneImagery, searchScenes } from "../../api/satellite";
 import type {
   BoundingBox,
+  ExecutedWindow,
   GeoResolveResponse,
   ImageryResponse,
   Modality,
+  QueryExecutionResult,
   QueryTask,
   ResolvedQueryPlan,
   SatelliteScene,
@@ -48,6 +50,12 @@ type ParseState =
   | { status: "error"; message: string }
   | { status: "done"; result: SatQueryIntent };
 
+type ExecuteState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "done"; result: QueryExecutionResult };
+
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Unexpected error";
 }
@@ -69,8 +77,11 @@ const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
  * Phase flow: natural-language text -> parsed SatQueryIntent (review/edit) ->
  * structured query plan (intent + resolved bbox); and, independently, place ->
  * resolve -> Sentinel-2 discovery -> bounded RGB imagery for a selected scene.
- * NL parsing only fills the form - it never auto-runs Build Query Plan. The
- * backend parser is a provider-agnostic mock in this phase.
+ * NL parsing only fills the form - it never auto-runs Build Query Plan.
+ * "Run full query" sends the current intent to /query/execute, which grounds
+ * the location, runs discovery per temporal window, deterministically selects a
+ * scene, and (optionally) retrieves bounded imagery. The manual step-by-step
+ * forms remain available.
  * No map, no AI/VLM image reasoning, no spectral controls.
  */
 export function QueryPanel() {
@@ -94,6 +105,10 @@ export function QueryPanel() {
   const [sarOn, setSarOn] = useState(false);
   const [task, setTask] = useState<QueryTask>("visualize");
   const [planState, setPlanState] = useState<PlanState>({ status: "idle" });
+  const [includeImagery, setIncludeImagery] = useState(false);
+  const [executeState, setExecuteState] = useState<ExecuteState>({
+    status: "idle",
+  });
 
   // --- STAC discovery + imagery ---
   const [startDate, setStartDate] = useState("");
@@ -130,12 +145,13 @@ export function QueryPanel() {
         baselineEnd !== "" &&
         targetStart !== "" &&
         targetEnd !== "";
-  const canBuildPlan =
+  const planReady =
     place.trim() !== "" &&
     modalities.length > 0 &&
     temporalComplete &&
-    !compareRangesInvalid &&
-    planState.status !== "loading";
+    !compareRangesInvalid;
+  const canBuildPlan = planReady && planState.status !== "loading";
+  const canExecute = planReady && executeState.status !== "loading";
 
   /** Populate the editable Query Plan form from a parsed intent. */
   function applyIntent(intent: SatQueryIntent) {
@@ -189,10 +205,8 @@ export function QueryPanel() {
     }
   }
 
-  async function handleBuildPlan(event: FormEvent) {
-    event.preventDefault();
-    if (!canBuildPlan) return;
-
+  /** Assemble a SatQueryIntent from the current Query Plan form state. */
+  function currentIntent(): SatQueryIntent {
     const timeWindows: SatQueryIntent["time_windows"] =
       temporalMode === "single"
         ? [{ start_date: obsDate, end_date: obsDate }]
@@ -201,20 +215,40 @@ export function QueryPanel() {
             target: { start_date: targetStart, end_date: targetEnd },
           } satisfies TemporalComparison);
 
-    const intent: SatQueryIntent = {
+    return {
       location_query: place.trim(),
       temporal_mode: temporalMode,
       time_windows: timeWindows,
       modalities,
       task,
     };
+  }
+
+  async function handleBuildPlan(event: FormEvent) {
+    event.preventDefault();
+    if (!canBuildPlan) return;
 
     setPlanState({ status: "loading" });
     try {
-      const result = await buildQueryPlan(intent);
+      const result = await buildQueryPlan(currentIntent());
       setPlanState({ status: "done", result });
     } catch (error) {
       setPlanState({ status: "error", message: errorMessage(error) });
+    }
+  }
+
+  async function handleExecute() {
+    if (!canExecute) return;
+
+    setExecuteState({ status: "loading" });
+    try {
+      const result = await executeQuery({
+        intent: currentIntent(),
+        include_imagery: includeImagery,
+      });
+      setExecuteState({ status: "done", result });
+    } catch (error) {
+      setExecuteState({ status: "error", message: errorMessage(error) });
     }
   }
 
@@ -454,6 +488,19 @@ export function QueryPanel() {
         <button type="submit" disabled={!canBuildPlan}>
           {planState.status === "loading" ? "Building…" : "Build Query Plan"}
         </button>
+
+        <label className="include-imagery">
+          <input
+            type="checkbox"
+            name="include_imagery"
+            checked={includeImagery}
+            onChange={(event) => setIncludeImagery(event.target.checked)}
+          />
+          Include bounded imagery preview
+        </label>
+        <button type="button" onClick={handleExecute} disabled={!canExecute}>
+          {executeState.status === "loading" ? "Running…" : "Run full query"}
+        </button>
       </form>
 
       {planState.status === "error" && (
@@ -463,6 +510,16 @@ export function QueryPanel() {
       )}
 
       {planState.status === "done" && <PlanView plan={planState.result} />}
+
+      {executeState.status === "error" && (
+        <p className="result-error" role="alert">
+          {executeState.message}
+        </p>
+      )}
+
+      {executeState.status === "done" && (
+        <ExecutionView result={executeState.result} />
+      )}
 
       {resolved && (
         <>
@@ -603,6 +660,72 @@ function PlanView({ plan }: { plan: ResolvedQueryPlan }) {
         <dd>{formatBbox(bbox)}</dd>
       </div>
     </dl>
+  );
+}
+
+function ExecutionView({ result }: { result: QueryExecutionResult }) {
+  return (
+    <div className="result execution-result">
+      <p className="hint" role="status">
+        Executed: {result.executed_modalities.join(", ") || "none"} · source:{" "}
+        {result.catalog}
+      </p>
+      {result.skipped_modalities.map((skipped) => (
+        <p key={skipped.modality} className="hint">
+          Skipped {skipped.modality}: {skipped.reason}
+        </p>
+      ))}
+      {result.windows.length === 0 ? (
+        <p className="hint" role="status">
+          No windows executed for the requested modalities.
+        </p>
+      ) : (
+        <ul className="execution-windows">
+          {result.windows.map((win) => (
+            <ExecutionWindowView key={win.label} win={win} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ExecutionWindowView({ win }: { win: ExecutedWindow }) {
+  return (
+    <li className="execution-window">
+      <h4>{win.label}</h4>
+      <dl>
+        <div>
+          <dt>Window</dt>
+          <dd>
+            {win.time_range.start_date} → {win.time_range.end_date}
+          </dd>
+        </div>
+        <div>
+          <dt>Scenes found</dt>
+          <dd>{win.scene_count}</dd>
+        </div>
+        <div>
+          <dt>Selected scene</dt>
+          <dd>{win.selected_scene_id ?? "— none —"}</dd>
+        </div>
+      </dl>
+      {win.imagery_error && (
+        <p className="result-error" role="alert">
+          {win.imagery_error}
+        </p>
+      )}
+      {win.imagery && (
+        <figure className="scene-image">
+          <img
+            src={`data:${win.imagery.media_type};base64,${win.imagery.image_base64}`}
+            alt={`Bounded RGB window for scene ${win.imagery.scene_id}`}
+            width={win.imagery.width}
+            height={win.imagery.height}
+          />
+        </figure>
+      )}
+    </li>
   );
 }
 
