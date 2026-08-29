@@ -200,6 +200,7 @@ class QueryExecutionService(DomainService):
                                 scene_id=selected.id,
                                 bbox=plan.bbox,
                                 asset=asset,
+                                collection=collection,
                             ),
                         )
                     except AppError as exc:

@@ -34,7 +34,7 @@ from app.services.satellite.schemas import (
 
 logger = get_logger("satellite.imagery")
 
-StacItemFetcher = Callable[[str], dict[str, Any]]
+StacItemFetcher = Callable[[str, str], dict[str, Any]]
 RasterReader = Callable[..., RgbWindow]
 
 _COG_TYPE_HINT = "geotiff"
@@ -70,10 +70,10 @@ class ImageryService(DomainService):
 
     # -- STAC item lookup (metadata only) ---------------------------------- #
 
-    def _default_fetch_item(self, scene_id: str) -> dict[str, Any]:
+    def _default_fetch_item(self, scene_id: str, collection: str) -> dict[str, Any]:
         url = (
             f"{self._settings.stac_base_url}/collections/"
-            f"{self._settings.stac_collection}/items/{scene_id}"
+            f"{collection}/items/{scene_id}"
         )
         try:
             with httpx.Client(
@@ -138,7 +138,8 @@ class ImageryService(DomainService):
                 f"retrieval. Supported: {', '.join(SUPPORTED_IMAGERY_ASSETS)}."
             )
 
-        item = self._fetch_item(request.scene_id)
+        collection = request.collection or self._settings.stac_collection
+        item = self._fetch_item(request.scene_id, collection)
         scene_bbox = item.get("bbox")
         if isinstance(scene_bbox, list) and not _bbox_intersects(request.bbox, scene_bbox):
             raise InvalidInputError(

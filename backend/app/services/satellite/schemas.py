@@ -97,11 +97,15 @@ class ImageryRequest(BaseModel):
 
     No natural-language search happens here - the scene must already be known
     from the discovery phase.
+
+    ``collection`` names the STAC collection the scene belongs to (e.g.
+    ``sentinel-1-grd``); ``None`` preserves the existing Sentinel-2 default.
     """
 
     scene_id: str = Field(min_length=1, max_length=200)
     bbox: BoundingBox
     asset: str = Field(default=DEFAULT_IMAGERY_ASSET, min_length=1, max_length=50)
+    collection: str | None = None
     max_dimension: int | None = Field(default=None, ge=16, le=4096)
 
 

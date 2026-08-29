@@ -847,10 +847,13 @@ def test_include_imagery_true_retrieves_vv_for_s1_and_visual_for_s2() -> None:
         )
     )
 
-    # One retrieve per modality window; S2 -> "visual", S1 -> "vv".
-    assert [(r.scene_id, r.asset) for r in imagery.requests] == [
-        ("s2", "visual"),
-        ("s1", "vv"),
+    # One retrieve per modality window; S2 -> "visual"/default collection,
+    # S1 -> "vv"/sentinel-1-grd collection.
+    assert [
+        (r.scene_id, r.asset, r.collection) for r in imagery.requests
+    ] == [
+        ("s2", "visual", None),
+        ("s1", "vv", "sentinel-1-grd"),
     ]
     s2_window = next(w for w in result.windows if w.modality == "sentinel-2-optical")
     s1_window = next(w for w in result.windows if w.modality == "sentinel-1-sar")
