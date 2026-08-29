@@ -1,5 +1,7 @@
 import { apiRequest } from "./client";
 import type {
+  AnalysisRequest,
+  AnalysisResult,
   QueryExecutionRequest,
   QueryExecutionResult,
   ResolvedQueryPlan,
@@ -48,6 +50,23 @@ export function executeQuery(
   signal?: AbortSignal,
 ): Promise<QueryExecutionResult> {
   return apiRequest<QueryExecutionResult>("/api/v1/query/execute", {
+    method: "POST",
+    body: request,
+    signal,
+  });
+}
+
+/**
+ * Interpret an already-computed {@link QueryExecutionResult}. The analysis task
+ * is derived from `execution.plan.intent.task`. The backend performs no
+ * discovery, no imagery retrieval, and no model inference here; a task with no
+ * engine yet comes back as `status: "not_implemented"` in a 200 response.
+ */
+export function analyzeQuery(
+  request: AnalysisRequest,
+  signal?: AbortSignal,
+): Promise<AnalysisResult> {
+  return apiRequest<AnalysisResult>("/api/v1/query/analyze", {
     method: "POST",
     body: request,
     signal,

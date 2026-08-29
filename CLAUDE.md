@@ -36,7 +36,16 @@ Core intended capabilities:
    only, NOT calibrated. SAR scientific processing (speckle filtering,
    calibration, terrain correction, fusion, analysis) remains out of scope.
 
-Current HEAD represents the completed Sentinel-1 Imagery Retrieval phase.
+9. Analysis boundary (contract only): `POST /api/v1/query/analyze` accepts an
+   already-computed `QueryExecutionResult` and returns an `AnalysisResult`
+   (status, derived task, deterministic answer, slim per-window traceability,
+   warnings, empty measurements). `AnalysisService` is pure - no discovery, no
+   STAC, no imagery, no raster I/O, no LLM/VLM. Only `visualize` is answered
+   (`status="ok"`, templated summary); `change_detection` and
+   `object_identification` return `status="not_implemented"` in a 200 body. No
+   analysis engine exists yet.
+
+Current HEAD represents the completed Analysis Boundary phase.
 
 ## Architecture Rules
 
