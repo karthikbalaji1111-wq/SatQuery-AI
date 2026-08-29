@@ -2,9 +2,15 @@ import { type FormEvent, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { resolveLocation } from "../../api/geospatial";
-import { buildQueryPlan, executeQuery, parsePrompt } from "../../api/query";
+import {
+  analyzeQuery,
+  buildQueryPlan,
+  executeQuery,
+  parsePrompt,
+} from "../../api/query";
 import { fetchSceneImagery, searchScenes } from "../../api/satellite";
 import type {
+  AnalysisResult,
   BoundingBox,
   ExecutedWindow,
   GeoResolveResponse,
@@ -55,6 +61,12 @@ type ExecuteState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "done"; result: QueryExecutionResult };
+
+type AnalyzeState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "done"; result: AnalysisResult };
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Unexpected error";
@@ -107,6 +119,9 @@ export function QueryPanel() {
   const [planState, setPlanState] = useState<PlanState>({ status: "idle" });
   const [includeImagery, setIncludeImagery] = useState(false);
   const [executeState, setExecuteState] = useState<ExecuteState>({
+    status: "idle",
+  });
+  const [analyzeState, setAnalyzeState] = useState<AnalyzeState>({
     status: "idle",
   });
 
@@ -241,14 +256,28 @@ export function QueryPanel() {
     if (!canExecute) return;
 
     setExecuteState({ status: "loading" });
+    setAnalyzeState({ status: "idle" });
+
+    let result: QueryExecutionResult;
     try {
-      const result = await executeQuery({
+      result = await executeQuery({
         intent: currentIntent(),
         include_imagery: includeImagery,
       });
       setExecuteState({ status: "done", result });
     } catch (error) {
       setExecuteState({ status: "error", message: errorMessage(error) });
+      return;
+    }
+
+    // Analysis is a separate boundary: a failure here must never discard the
+    // execution result that is already rendered.
+    setAnalyzeState({ status: "loading" });
+    try {
+      const analysis = await analyzeQuery({ execution: result });
+      setAnalyzeState({ status: "done", result: analysis });
+    } catch (error) {
+      setAnalyzeState({ status: "error", message: errorMessage(error) });
     }
   }
 
@@ -521,6 +550,16 @@ export function QueryPanel() {
         <ExecutionView result={executeState.result} />
       )}
 
+      {analyzeState.status === "error" && (
+        <p className="result-error" role="alert">
+          Analysis failed: {analyzeState.message}
+        </p>
+      )}
+
+      {analyzeState.status === "done" && (
+        <AnalysisView result={analyzeState.result} />
+      )}
+
       {resolved && (
         <>
           <dl className="result">
@@ -731,6 +770,52 @@ function ExecutionWindowView({ win }: { win: ExecutedWindow }) {
         </figure>
       )}
     </li>
+  );
+}
+
+/**
+ * Renders the analysis boundary result: status, answer, per-window traceability
+ * and warnings. Text only - no maps, overlays, detections or charts.
+ */
+function AnalysisView({ result }: { result: AnalysisResult }) {
+  return (
+    <div className="result analysis-result">
+      <h3>Analysis</h3>
+      <p className="hint" role="status">
+        {result.task} · {result.status}
+      </p>
+      <p className="analysis-answer">{result.answer}</p>
+
+      {result.windows_considered.length > 0 && (
+        <ul className="analysis-windows">
+          {result.windows_considered.map((ref) => (
+            <li key={`${ref.modality}:${ref.label}`}>
+              {ref.modality} · {ref.label} ({ref.time_range.start_date} →{" "}
+              {ref.time_range.end_date}) · {ref.selected_scene_id ?? "— none —"}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {result.measurements.length > 0 && (
+        <dl className="analysis-measurements">
+          {result.measurements.map((measurement) => (
+            <div key={measurement.name}>
+              <dt>{measurement.name}</dt>
+              <dd>
+                {measurement.value} {measurement.unit}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {result.warnings.map((warning) => (
+        <p key={warning} className="hint">
+          Warning: {warning}
+        </p>
+      ))}
+    </div>
   );
 }
 

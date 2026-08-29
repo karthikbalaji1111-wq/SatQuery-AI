@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.services.ai import AiService, GeminiIntentParser, ParsePromptRequest
+from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService
 from app.services.query import (
     QueryExecutionRequest,
     QueryExecutionResult,
@@ -43,6 +44,16 @@ def get_query_execution_service() -> QueryExecutionService:
     """
 
     return QueryExecutionService()
+
+
+def get_analysis_service() -> AnalysisService:
+    """Provider for :class:`AnalysisService`; overridden in tests.
+
+    The service has no collaborators and no external dependencies, so this is
+    a plain construction.
+    """
+
+    return AnalysisService()
 
 
 @router.post("/parse", response_model=SatQueryIntent)
@@ -86,3 +97,22 @@ async def execute_query(
     and is not executed in this phase. No LLM/AI inference happens here."""
 
     return await service.execute(request)
+
+
+@router.post("/analyze", response_model=AnalysisResult)
+async def analyze_query(
+    request: AnalysisRequest,
+    service: AnalysisService = Depends(get_analysis_service),
+) -> AnalysisResult:
+    """Interpret an already-computed ``QueryExecutionResult``.
+
+    Returns the analysis status, the task derived from
+    ``execution.plan.intent.task``, a deterministic answer, slim per-window
+    traceability, and warnings. A task with no engine yet is reported as
+    ``status="not_implemented"`` in a 200 body rather than as an error.
+
+    This endpoint performs no scene discovery, no STAC search, no imagery
+    retrieval, no raster I/O, and no LLM/VLM inference - it only reads the
+    execution result it is given."""
+
+    return await service.analyze(request)

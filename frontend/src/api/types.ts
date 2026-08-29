@@ -177,3 +177,37 @@ export interface QueryExecutionResult {
   windows: ExecutedWindow[];
   catalog: string;
 }
+
+/**
+ * `not_implemented` is returned in a normal 200 body for a task that has no
+ * analysis engine yet - the analysis ran, it just performed no such analysis.
+ */
+export type AnalysisStatus = "ok" | "not_implemented";
+
+export interface Measurement {
+  name: string;
+  value: number;
+  unit: string;
+}
+
+/** Slim traceability reference - never echoes scenes or imagery. */
+export interface AnalysisWindowRef {
+  modality: Modality;
+  label: string;
+  time_range: TimeRange;
+  selected_scene_id: string | null;
+}
+
+/** The task is derived from `execution.plan.intent.task`; there is no task field. */
+export interface AnalysisRequest {
+  execution: QueryExecutionResult;
+}
+
+export interface AnalysisResult {
+  status: AnalysisStatus;
+  task: QueryTask;
+  answer: string;
+  windows_considered: AnalysisWindowRef[];
+  warnings: string[];
+  measurements: Measurement[];
+}

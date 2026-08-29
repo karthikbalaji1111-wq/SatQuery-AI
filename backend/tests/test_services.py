@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from app.core.errors import NotImplementedFeatureError
 from app.services.ai import AiService
+from app.services.analysis import AnalysisService
 from app.services.geospatial import GeospatialService
 from app.services.map import MapService
 from app.services.multimodal import MultimodalService
@@ -26,6 +27,7 @@ IMPLEMENTED_SERVICES = [
     QueryService,
     QueryExecutionService,
     AiService,
+    AnalysisService,
 ]
 
 ALL_SERVICES = [*STUBBED_SERVICES, *IMPLEMENTED_SERVICES]

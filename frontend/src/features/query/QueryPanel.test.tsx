@@ -1066,3 +1066,181 @@ describe("QueryPanel - run full query", () => {
     );
   });
 });
+
+function analysisResult(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "ok",
+    task: "visualize",
+    answer:
+      "Retrieved 1 window(s) for 'Chennai' from " +
+      "https://earth-search.aws.element84.com/v1: sentinel-2-optical single " +
+      "(2024-07-01 to 2024-07-01) -> S2B_44PLA_20240715_0_L2A.",
+    windows_considered: [
+      {
+        modality: "sentinel-2-optical",
+        label: "single",
+        time_range: { start_date: "2024-07-01", end_date: "2024-07-01" },
+        selected_scene_id: "S2B_44PLA_20240715_0_L2A",
+      },
+    ],
+    warnings: [],
+    measurements: [],
+    ...overrides,
+  };
+}
+
+function runFullQuery() {
+  setPlace("Chennai");
+  fireEvent.change(screen.getByLabelText("Observation date"), {
+    target: { value: "2024-07-01" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+}
+
+describe("QueryPanel - analysis", () => {
+  it("chains /query/analyze after a successful execute and sends the execution", async () => {
+    const execution = executionResult();
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: execution },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/query/analyze"),
+    );
+    expect(call).toBeDefined();
+    expect(String(call![0])).toBe("http://localhost:8000/api/v1/query/analyze");
+    // The whole execution result, and nothing else - no separate task field.
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+      execution,
+    });
+  });
+
+  it("renders the analysis answer, status and window traceability", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/visualize · ok/)).toBeInTheDocument();
+    expect(screen.getByText(/Retrieved 1 window\(s\) for 'Chennai'/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/sentinel-2-optical · single .*S2B_44PLA_20240715_0_L2A/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a not_implemented analysis without claiming a result", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({
+          status: "not_implemented",
+          task: "change_detection",
+          answer:
+            "The 'change_detection' analysis is not implemented in this phase.",
+        }),
+      },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByText(/change_detection · not_implemented/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/not implemented in this phase/)).toBeInTheDocument();
+  });
+
+  it("renders analysis warnings", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({
+          warnings: ["No scene was selected for the sentinel-1-sar window 'single'."],
+        }),
+      },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Warning: No scene was selected/),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("keeps the execution result visible when the analysis fails", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: {
+          error: { code: "invalid_input", message: "analysis rejected the body" },
+        },
+        ok: false,
+        status: 422,
+      },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Analysis failed: analysis rejected the body/),
+      ).toBeInTheDocument(),
+    );
+
+    // Failure isolation: the execution result must still be rendered.
+    expect(
+      screen.getByRole("heading", { name: /sentinel-2-optical/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Analysis" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not analyze when the execution itself fails", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": {
+        body: {
+          error: { code: "upstream_error", message: "catalog down" },
+        },
+        ok: false,
+        status: 502,
+      },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("catalog down"),
+    );
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).includes("/query/analyze")),
+    ).toBe(false);
+  });
+});
