@@ -6,13 +6,13 @@ A thin composition layer over services that already exist:
       -> QueryService.build_plan()      (existing grounding, unchanged)
       -> SatelliteService.search()      (existing STAC discovery, single entry point)
       -> deterministic scene selection  (per-modality, pure)
-      -> ImageryService.retrieve()      (existing bounded imagery, Sentinel-2 only, optional)
+      -> ImageryService.retrieve()      (existing bounded imagery, optional)
 
 Every requested modality is executed independently against every expanded
-temporal window. Sentinel-1 is discovered and selected here; Sentinel-1
-*imagery* retrieval is out of scope and no ``ImageryRequest`` is ever built for
-it. This module owns *composition only*: it performs no HTTP, no STAC, no raster
-I/O and no language-model calls, and must not import provider SDKs or the
+temporal window. Optical windows retrieve the ``visual`` asset; SAR windows
+retrieve the ``vv`` asset (display-normalized to grayscale by the raster
+layer). This module owns *composition only*: it performs no HTTP, no STAC, no
+raster I/O and no language-model calls, and must not import provider SDKs or the
 low-level transport/raster helpers - only the public service entry points.
 """
 
@@ -41,7 +41,7 @@ from app.services.satellite import (
     Scene,
     SceneSearchRequest,
 )
-from app.services.satellite.schemas import DEFAULT_IMAGERY_ASSET
+from app.services.satellite.schemas import DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET
 
 logger = get_logger("query.execution")
 
@@ -157,9 +157,8 @@ class QueryExecutionService(DomainService):
         """Ground, then discover + select per (modality, temporal window).
 
         Geospatial and STAC failures propagate unchanged. A bounded-imagery
-        failure is confined to its Sentinel-2 window via ``imagery_error`` and
-        never aborts the whole execution. Sentinel-1 never triggers imagery
-        retrieval.
+        failure is confined to its window via ``imagery_error`` and never aborts
+        the whole execution.
         """
 
         intent = request.intent
@@ -192,14 +191,15 @@ class QueryExecutionService(DomainService):
 
                 imagery = None
                 imagery_error = None
-                if is_optical and request.include_imagery and selected is not None:
+                if request.include_imagery and selected is not None:
+                    asset = DEFAULT_IMAGERY_ASSET if is_optical else SAR_IMAGERY_ASSET
                     try:
                         imagery = await run_in_threadpool(
                             self._imagery.retrieve,
                             ImageryRequest(
                                 scene_id=selected.id,
                                 bbox=plan.bbox,
-                                asset=DEFAULT_IMAGERY_ASSET,
+                                asset=asset,
                             ),
                         )
                     except AppError as exc:
