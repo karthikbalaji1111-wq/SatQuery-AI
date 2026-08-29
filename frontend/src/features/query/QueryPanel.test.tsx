@@ -878,6 +878,7 @@ function executionResult(overrides: Record<string, unknown> = {}) {
     skipped_modalities: [],
     windows: [
       {
+        modality: "sentinel-2-optical",
         label: "single",
         time_range: { start_date: "2024-07-01", end_date: "2024-07-01" },
         scene_count: 1,
@@ -891,6 +892,17 @@ function executionResult(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+const S1_WINDOW = {
+  modality: "sentinel-1-sar",
+  label: "single",
+  time_range: { start_date: "2024-07-01", end_date: "2024-07-01" },
+  scene_count: 1,
+  scenes: [SCENE],
+  selected_scene_id: "S1A_IW_GRDH_20240701",
+  imagery: null,
+  imagery_error: null,
+};
 
 describe("QueryPanel - run full query", () => {
   it("keeps Run full query disabled until place + temporal + modality are set", () => {
@@ -922,7 +934,7 @@ describe("QueryPanel - run full query", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: "single" }),
+        screen.getByRole("heading", { name: /sentinel-2-optical/ }),
       ).toBeInTheDocument(),
     );
     expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument();
@@ -972,17 +984,27 @@ describe("QueryPanel - run full query", () => {
     ).toBe(true);
   });
 
-  it("reports skipped Sentinel-1 and keeps the manual Build Query Plan flow working", async () => {
+  it("executes Sentinel-1 alongside Sentinel-2 and keeps the manual Build Query Plan flow", async () => {
+    // Two windows share the temporal label "single"; the composite React key
+    // must keep them distinct (no duplicate-key warning).
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     stubRouter({
       "/geospatial/resolve": { body: CHENNAI },
       "/query/execute": {
         body: executionResult({
-          skipped_modalities: [
+          executed_modalities: ["sentinel-2-optical", "sentinel-1-sar"],
+          windows: [
             {
-              modality: "sentinel-1-sar",
-              reason:
-                "Sentinel-1 SAR execution is not implemented in this phase; only Sentinel-2 optical is executed.",
+              modality: "sentinel-2-optical",
+              label: "single",
+              time_range: { start_date: "2024-07-01", end_date: "2024-07-01" },
+              scene_count: 1,
+              scenes: [SCENE],
+              selected_scene_id: "S2B_44PLA_20240715_0_L2A",
+              imagery: null,
+              imagery_error: null,
             },
+            S1_WINDOW,
           ],
         }),
       },
@@ -994,12 +1016,21 @@ describe("QueryPanel - run full query", () => {
     fireEvent.change(screen.getByLabelText("Observation date"), {
       target: { value: "2024-07-01" },
     });
+    fireEvent.click(screen.getByLabelText("Sentinel-1 SAR"));
     fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/Skipped sentinel-1-sar/i)).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: /sentinel-1-sar/ }),
+      ).toBeInTheDocument(),
     );
+    expect(
+      screen.getByRole("heading", { name: /sentinel-2-optical/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("S1A_IW_GRDH_20240701")).toBeInTheDocument();
+    expect(errorSpy).not.toHaveBeenCalled();
 
+    // Manual Build Query Plan still works.
     fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
     await waitFor(() =>
       expect(screen.getByText("Resolved bounding box")).toBeInTheDocument(),

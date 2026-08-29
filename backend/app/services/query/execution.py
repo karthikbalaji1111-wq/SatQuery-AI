@@ -4,12 +4,15 @@ A thin composition layer over services that already exist:
 
     SatQueryIntent
       -> QueryService.build_plan()      (existing grounding, unchanged)
-      -> SatelliteService.search()      (existing Sentinel-2 discovery, unchanged)
-      -> deterministic scene selection  (new, pure)
-      -> ImageryService.retrieve()      (existing bounded imagery, unchanged, optional)
+      -> SatelliteService.search()      (existing STAC discovery, single entry point)
+      -> deterministic scene selection  (per-modality, pure)
+      -> ImageryService.retrieve()      (existing bounded imagery, Sentinel-2 only, optional)
 
-This module owns *composition only*. It performs no HTTP, no STAC, no raster
-I/O and no language-model calls; it must not import provider SDKs or the
+Every requested modality is executed independently against every expanded
+temporal window. Sentinel-1 is discovered and selected here; Sentinel-1
+*imagery* retrieval is out of scope and no ``ImageryRequest`` is ever built for
+it. This module owns *composition only*: it performs no HTTP, no STAC, no raster
+I/O and no language-model calls, and must not import provider SDKs or the
 low-level transport/raster helpers - only the public service entry points.
 """
 
@@ -27,7 +30,6 @@ from app.services.query.schemas import (
     QueryExecutionRequest,
     QueryExecutionResult,
     SatQueryIntent,
-    SkippedModality,
     TemporalComparison,
     TimeRange,
 )
@@ -44,10 +46,18 @@ from app.services.satellite.schemas import DEFAULT_IMAGERY_ASSET
 logger = get_logger("query.execution")
 
 _OPTICAL: Modality = "sentinel-2-optical"
-_SAR_SKIP_REASON = (
-    "Sentinel-1 SAR execution is not implemented in this phase; only "
-    "Sentinel-2 optical is executed."
-)
+_SAR: Modality = "sentinel-1-sar"
+
+
+def _collection_for(modality: Modality, settings: Settings) -> str | None:
+    """STAC collection override for a modality, for ``SatelliteService.search``.
+
+    ``None`` means "use SatelliteService's configured default" (the Sentinel-2
+    collection). Sentinel-1 targets the configured S1 collection. Deliberately
+    tiny - not a registry.
+    """
+
+    return settings.stac_s1_collection if modality == _SAR else None
 
 
 def _expand_windows(intent: SatQueryIntent) -> list[tuple[str, TimeRange]]:
@@ -90,13 +100,35 @@ def _select_scene(scenes: list[Scene]) -> Scene | None:
     return min(scenes, key=sort_key)
 
 
+def _select_scene_sar(scenes: list[Scene]) -> Scene | None:
+    """Deterministically pick one Sentinel-1 (SAR) scene.
+
+    Ordering: ``datetime`` ascending, then ``id`` lexicographically ascending.
+    A ``None`` ``datetime`` sorts after any string. Cloud cover is not a SAR
+    concept and is never consulted; no polarization or orbit-direction
+    preference is applied. An empty list yields ``None`` and is not a failure.
+    """
+
+    if not scenes:
+        return None
+
+    def sort_key(scene: Scene) -> tuple[tuple[int, str], str]:
+        moment = scene.datetime
+        datetime_key = (1, "") if moment is None else (0, moment)
+        return (datetime_key, scene.id)
+
+    return min(scenes, key=sort_key)
+
+
 class QueryExecutionService(DomainService):
     """Composes existing grounding, discovery, selection and bounded imagery.
 
     The generic :meth:`run` hook stays unimplemented; :meth:`execute` is the
     typed entry point. Collaborators are injected (defaulting to the real
-    services) so tests can substitute fakes. This service adds no capability of
-    its own beyond temporal-window expansion and deterministic scene selection.
+    services) so tests can substitute fakes. Every requested modality is
+    executed independently per temporal window; this service adds no capability
+    of its own beyond temporal-window expansion and deterministic per-modality
+    scene selection.
     """
 
     name = "query.execution"
@@ -117,51 +149,50 @@ class QueryExecutionService(DomainService):
     def describe(self) -> str:
         return (
             "End-to-end execution of a SatQueryIntent: location grounding, "
-            "Sentinel-2 discovery, deterministic scene selection, and optional "
-            "bounded imagery retrieval."
+            "Sentinel-1 and Sentinel-2 discovery, deterministic per-modality "
+            "scene selection, and optional bounded Sentinel-2 imagery retrieval."
         )
 
     async def execute(self, request: QueryExecutionRequest) -> QueryExecutionResult:
-        """Ground, discover, select and (optionally) retrieve, per temporal window.
+        """Ground, then discover + select per (modality, temporal window).
 
         Geospatial and STAC failures propagate unchanged. A bounded-imagery
-        failure is confined to its window via ``imagery_error`` and never aborts
-        the whole execution.
+        failure is confined to its Sentinel-2 window via ``imagery_error`` and
+        never aborts the whole execution. Sentinel-1 never triggers imagery
+        retrieval.
         """
 
         intent = request.intent
         plan = await self._query.build_plan(intent)
 
-        executed_modalities: list[Modality] = []
-        skipped_modalities: list[SkippedModality] = []
-        for modality in intent.modalities:
-            if modality == _OPTICAL:
-                executed_modalities.append(modality)
-            else:
-                skipped_modalities.append(
-                    SkippedModality(modality=modality, reason=_SAR_SKIP_REASON)
-                )
-
+        executed_modalities: list[Modality] = list(intent.modalities)
         windows: list[ExecutedWindow] = []
         catalog = self._settings.stac_base_url
 
-        if _OPTICAL in executed_modalities:
+        for modality in executed_modalities:
+            is_optical = modality == _OPTICAL
+            collection = _collection_for(modality, self._settings)
+            select = _select_scene if is_optical else _select_scene_sar
+
             for label, time_range in _expand_windows(intent):
                 search_response = await self._satellite.search(
                     SceneSearchRequest(
                         bbox=plan.bbox,
                         start_date=time_range.start_date,
                         end_date=time_range.end_date,
-                        max_cloud_cover=request.max_cloud_cover,
+                        collection=collection,
+                        max_cloud_cover=(
+                            request.max_cloud_cover if is_optical else None
+                        ),
                         limit=request.limit,
                     )
                 )
                 catalog = search_response.catalog
-                selected = _select_scene(search_response.scenes)
+                selected = select(search_response.scenes)
 
                 imagery = None
                 imagery_error = None
-                if request.include_imagery and selected is not None:
+                if is_optical and request.include_imagery and selected is not None:
                     try:
                         imagery = await run_in_threadpool(
                             self._imagery.retrieve,
@@ -174,7 +205,8 @@ class QueryExecutionService(DomainService):
                     except AppError as exc:
                         imagery_error = exc.message
                         logger.info(
-                            "Imagery retrieval failed for window %s [%s]: %s",
+                            "Imagery retrieval failed for %s window %s [%s]: %s",
+                            modality,
                             label,
                             exc.code,
                             exc.message,
@@ -182,28 +214,30 @@ class QueryExecutionService(DomainService):
 
                 windows.append(
                     ExecutedWindow(
+                        modality=modality,
                         label=label,
                         time_range=time_range,
                         scene_count=search_response.scene_count,
                         scenes=search_response.scenes,
-                        selected_scene_id=selected.id if selected is not None else None,
+                        selected_scene_id=(
+                            selected.id if selected is not None else None
+                        ),
                         imagery=imagery,
                         imagery_error=imagery_error,
                     )
                 )
 
         logger.info(
-            "Executed query for %r: %d window(s); executed=%s skipped=%s",
+            "Executed query for %r: %d window(s) across modalities %s",
             intent.location_query,
             len(windows),
             executed_modalities,
-            [skipped.modality for skipped in skipped_modalities],
         )
 
         return QueryExecutionResult(
             plan=plan,
             executed_modalities=executed_modalities,
-            skipped_modalities=skipped_modalities,
+            skipped_modalities=[],
             windows=windows,
             catalog=catalog,
         )

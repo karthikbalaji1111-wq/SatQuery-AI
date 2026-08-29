@@ -32,7 +32,11 @@ from app.services.query import (
     QueryExecutionService,
     QueryService,
 )
-from app.services.query.execution import _expand_windows, _select_scene
+from app.services.query.execution import (
+    _expand_windows,
+    _select_scene,
+    _select_scene_sar,
+)
 from app.services.query.schemas import SatQueryIntent
 from app.services.satellite.schemas import (
     ImageryResponse,
@@ -80,16 +84,24 @@ class FakeGeospatialService:
 
 
 class FakeSatelliteService:
-    """Records search requests; returns canned responses (in order) or raises."""
+    """Records search requests; returns canned responses or raises.
+
+    ``by_collection`` routes the response by ``request.collection`` (``None`` for
+    optical, the S1 collection for SAR); a mapped value that is an ``Exception``
+    is raised. ``responses`` (ordered list or single) is the collection-agnostic
+    fallback.
+    """
 
     def __init__(
         self,
         *,
         responses: list[SceneSearchResponse] | SceneSearchResponse | None = None,
+        by_collection: dict[str | None, SceneSearchResponse | Exception] | None = None,
         error: Exception | None = None,
     ) -> None:
         self.requests: list[Any] = []
         self._responses = responses
+        self._by_collection = by_collection
         self._error = error
         self._index = 0
 
@@ -97,6 +109,11 @@ class FakeSatelliteService:
         self.requests.append(request)
         if self._error is not None:
             raise self._error
+        if self._by_collection is not None:
+            outcome = self._by_collection[request.collection]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
         if isinstance(self._responses, list):
             response = self._responses[self._index]
             self._index += 1
@@ -148,6 +165,8 @@ def make_scene(
     *,
     cloud_cover: float | None = None,
     moment: str | None = None,
+    collection: str = "sentinel-2-l2a",
+    processing_level: str | None = "L2A",
 ) -> Scene:
     return Scene(
         id=scene_id,
@@ -155,9 +174,9 @@ def make_scene(
         bbox=None,
         geometry=None,
         cloud_cover=cloud_cover,
-        collection="sentinel-2-l2a",
+        collection=collection,
         platform=None,
-        processing_level="L2A",
+        processing_level=processing_level,
         thumbnail_url=None,
         assets=[],
     )
@@ -385,8 +404,10 @@ def test_optical_modality_executes_discovery_and_selection() -> None:
     assert request.bbox == DEFAULT_BBOX
     assert request.start_date.isoformat() == "2024-01-01"
     assert request.end_date.isoformat() == "2024-01-31"
+    assert request.collection is None  # SatelliteService falls back to its S2 default
 
     window = result.windows[0]
+    assert window.modality == "sentinel-2-optical"
     assert window.label == "single"
     assert window.scene_count == 2
     assert window.selected_scene_id == "scene-b"
@@ -418,13 +439,29 @@ def test_timeseries_runs_one_search_per_window() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 10: Sentinel-1 SAR is skipped, never executed
+# Sentinel-1 SAR is now executed (discovery + selection), never skipped
 # --------------------------------------------------------------------------- #
 
 
-def test_sar_modality_is_skipped_not_executed() -> None:
+def _s1_scene(scene_id: str, *, moment: str) -> Scene:
+    """A Sentinel-1 scene fixture: no cloud cover, no processing level, no assets."""
+
+    return make_scene(
+        scene_id,
+        moment=moment,
+        collection="sentinel-1-grd",
+        processing_level=None,
+    )
+
+
+def test_sar_modality_is_executed_alongside_optical() -> None:
     satellite = FakeSatelliteService(
-        responses=make_search_response(make_scene("s", cloud_cover=1.0))
+        by_collection={
+            None: make_search_response(make_scene("s2", cloud_cover=5.0)),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1", moment="2024-01-10T00:00:00Z")
+            ),
+        }
     )
     result = run(
         build_service(satellite=satellite).execute(
@@ -436,26 +473,385 @@ def test_sar_modality_is_skipped_not_executed() -> None:
         )
     )
 
-    assert result.executed_modalities == ["sentinel-2-optical"]
-    assert [s.modality for s in result.skipped_modalities] == ["sentinel-1-sar"]
-    assert "not implemented" in result.skipped_modalities[0].reason.lower()
-    assert len(satellite.requests) == 1  # optical discovery still ran
-    assert len(result.windows) == 1
+    assert result.executed_modalities == ["sentinel-2-optical", "sentinel-1-sar"]
+    assert result.skipped_modalities == []
+    assert [(w.modality, w.label) for w in result.windows] == [
+        ("sentinel-2-optical", "single"),
+        ("sentinel-1-sar", "single"),
+    ]
+    assert result.windows[0].selected_scene_id == "s2"
+    assert result.windows[1].selected_scene_id == "s1"
+    assert [r.collection for r in satellite.requests] == [None, "sentinel-1-grd"]
+    assert satellite.requests[1].max_cloud_cover is None
+    assert result.windows[1].imagery is None
+    assert result.windows[1].imagery_error is None
 
 
-def test_sar_only_intent_executes_nothing_but_still_succeeds() -> None:
-    satellite = FakeSatelliteService()
+def test_sar_only_intent_runs_s1_discovery() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1-a", moment="2024-01-03T00:00:00Z")
+            )
+        }
+    )
     result = run(
         build_service(satellite=satellite).execute(
             QueryExecutionRequest(intent=make_intent(modalities=["sentinel-1-sar"]))
         )
     )
 
-    assert result.executed_modalities == []
-    assert [s.modality for s in result.skipped_modalities] == ["sentinel-1-sar"]
-    assert result.windows == []
-    assert satellite.requests == []
+    assert result.executed_modalities == ["sentinel-1-sar"]
+    assert result.skipped_modalities == []
+    assert len(result.windows) == 1
+    assert result.windows[0].modality == "sentinel-1-sar"
+    assert result.windows[0].label == "single"
+    assert result.windows[0].selected_scene_id == "s1-a"
+    assert result.windows[0].imagery is None
+    assert satellite.requests[0].collection == "sentinel-1-grd"
+    assert satellite.requests[0].max_cloud_cover is None
     assert result.catalog  # well-defined: the configured catalog
+
+
+def test_s1_and_s2_use_correct_collection_and_select_independently() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: make_search_response(
+                make_scene("s2-hi", cloud_cover=40.0),
+                make_scene("s2-lo", cloud_cover=3.0),
+            ),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1-late", moment="2024-02-01T00:00:00Z"),
+                _s1_scene("s1-early", moment="2024-01-01T00:00:00Z"),
+            ),
+        }
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(
+                intent=make_intent(
+                    modalities=["sentinel-2-optical", "sentinel-1-sar"]
+                ),
+                max_cloud_cover=20.0,
+            )
+        )
+    )
+
+    # S2 -> lowest cloud; S1 -> earliest datetime (cloud is irrelevant for SAR)
+    assert result.windows[0].selected_scene_id == "s2-lo"
+    assert result.windows[1].selected_scene_id == "s1-early"
+    assert satellite.requests[0].collection is None
+    assert satellite.requests[0].max_cloud_cover == 20.0
+    assert satellite.requests[1].collection == "sentinel-1-grd"
+    assert satellite.requests[1].max_cloud_cover is None
+
+
+def test_timeseries_runs_each_modality_per_window() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: make_search_response(make_scene("s2", cloud_cover=1.0)),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1", moment="2024-01-01T00:00:00Z")
+            ),
+        }
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(
+                intent=make_intent(
+                    temporal_mode="timeseries",
+                    time_windows=TIMESERIES,
+                    modalities=["sentinel-2-optical", "sentinel-1-sar"],
+                )
+            )
+        )
+    )
+
+    assert [(w.modality, w.label) for w in result.windows] == [
+        ("sentinel-2-optical", "series[0]"),
+        ("sentinel-2-optical", "series[1]"),
+        ("sentinel-2-optical", "series[2]"),
+        ("sentinel-1-sar", "series[0]"),
+        ("sentinel-1-sar", "series[1]"),
+        ("sentinel-1-sar", "series[2]"),
+    ]
+    assert [r.collection for r in satellite.requests] == [
+        None,
+        None,
+        None,
+        "sentinel-1-grd",
+        "sentinel-1-grd",
+        "sentinel-1-grd",
+    ]
+
+
+def test_compare_runs_each_modality_per_window() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: make_search_response(make_scene("s2", cloud_cover=1.0)),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1", moment="2024-01-01T00:00:00Z")
+            ),
+        }
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(
+                intent=make_intent(
+                    temporal_mode="compare",
+                    time_windows=COMPARISON,
+                    modalities=["sentinel-2-optical", "sentinel-1-sar"],
+                )
+            )
+        )
+    )
+
+    assert [(w.modality, w.label) for w in result.windows] == [
+        ("sentinel-2-optical", "baseline"),
+        ("sentinel-2-optical", "target"),
+        ("sentinel-1-sar", "baseline"),
+        ("sentinel-1-sar", "target"),
+    ]
+
+
+def test_s1_discovery_request_arguments() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={"sentinel-1-grd": make_search_response()}
+    )
+    run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(
+                intent=make_intent(modalities=["sentinel-1-sar"]),
+                max_cloud_cover=25.0,
+                limit=7,
+            )
+        )
+    )
+
+    req = satellite.requests[0]
+    assert req.bbox == DEFAULT_BBOX
+    assert req.start_date.isoformat() == "2024-01-01"
+    assert req.end_date.isoformat() == "2024-01-31"
+    assert req.collection == "sentinel-1-grd"
+    assert req.max_cloud_cover is None  # never forwarded for S1
+    assert req.limit == 7
+
+
+def test_s2_discovery_request_arguments() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={None: make_search_response(make_scene("s2", cloud_cover=5.0))}
+    )
+    run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(
+                intent=make_intent(modalities=["sentinel-2-optical"]),
+                max_cloud_cover=25.0,
+                limit=7,
+            )
+        )
+    )
+
+    req = satellite.requests[0]
+    assert req.collection is None  # SatelliteService falls back to its S2 default
+    assert req.max_cloud_cover == 25.0  # forwarded for optical
+    assert req.limit == 7
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic Sentinel-1 scene selection (pure)
+# --------------------------------------------------------------------------- #
+
+
+def test_select_scene_sar_earliest_datetime_wins() -> None:
+    scenes = [
+        _s1_scene("late", moment="2024-07-15T00:00:00Z"),
+        _s1_scene("early", moment="2024-07-01T00:00:00Z"),
+    ]
+    picked = _select_scene_sar(scenes)
+    assert picked is not None and picked.id == "early"
+
+
+def test_select_scene_sar_id_tie_break() -> None:
+    scenes = [
+        _s1_scene("s1-z", moment="2024-07-01T00:00:00Z"),
+        _s1_scene("s1-a", moment="2024-07-01T00:00:00Z"),
+    ]
+    picked = _select_scene_sar(scenes)
+    assert picked is not None and picked.id == "s1-a"
+
+
+def test_select_scene_sar_none_datetime_sorts_last() -> None:
+    scenes = [
+        make_scene("no-date", moment=None, collection="sentinel-1-grd", processing_level=None),
+        _s1_scene("dated", moment="2024-12-31T00:00:00Z"),
+    ]
+    picked = _select_scene_sar(scenes)
+    assert picked is not None and picked.id == "dated"
+
+
+def test_select_scene_sar_ignores_cloud_cover() -> None:
+    scenes = [
+        make_scene(
+            "early-cloudy",
+            moment="2024-01-01T00:00:00Z",
+            cloud_cover=99.0,
+            collection="sentinel-1-grd",
+            processing_level=None,
+        ),
+        make_scene(
+            "late-clear",
+            moment="2024-06-01T00:00:00Z",
+            cloud_cover=0.0,
+            collection="sentinel-1-grd",
+            processing_level=None,
+        ),
+    ]
+    picked = _select_scene_sar(scenes)
+    assert picked is not None and picked.id == "early-cloudy"
+
+
+def test_select_scene_sar_empty_list_returns_none() -> None:
+    assert _select_scene_sar([]) is None
+
+
+def test_optical_selector_is_not_used_for_sar_windows() -> None:
+    # An S1 scene with high cloud_cover set: the SAR selector must ignore it and
+    # pick by datetime; the optical selector would have de-prioritised it.
+    satellite = FakeSatelliteService(
+        by_collection={
+            "sentinel-1-grd": make_search_response(
+                make_scene(
+                    "s1-early",
+                    moment="2024-01-01T00:00:00Z",
+                    cloud_cover=90.0,
+                    collection="sentinel-1-grd",
+                    processing_level=None,
+                ),
+                make_scene(
+                    "s1-late",
+                    moment="2024-01-20T00:00:00Z",
+                    cloud_cover=1.0,
+                    collection="sentinel-1-grd",
+                    processing_level=None,
+                ),
+            )
+        }
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent(modalities=["sentinel-1-sar"]))
+        )
+    )
+    assert result.windows[0].selected_scene_id == "s1-early"
+
+
+# --------------------------------------------------------------------------- #
+# Sentinel-1 metadata gaps, empty results, failure propagation, imagery guard
+# --------------------------------------------------------------------------- #
+
+
+def test_s1_scene_with_missing_metadata_is_discoverable_and_selectable() -> None:
+    bare = Scene(
+        id="s1-bare",
+        datetime="2024-01-05T00:00:00Z",
+        bbox=None,
+        geometry=None,
+        cloud_cover=None,
+        collection="sentinel-1-grd",
+        platform=None,
+        processing_level=None,
+        thumbnail_url=None,
+        assets=[],
+    )
+    satellite = FakeSatelliteService(
+        by_collection={"sentinel-1-grd": make_search_response(bare)}
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent(modalities=["sentinel-1-sar"]))
+        )
+    )
+    assert result.windows[0].selected_scene_id == "s1-bare"
+    assert result.windows[0].scene_count == 1
+
+
+def test_empty_s1_result_is_not_a_failure() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={"sentinel-1-grd": make_search_response()}
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent(modalities=["sentinel-1-sar"]))
+        )
+    )
+    assert result.windows[0].modality == "sentinel-1-sar"
+    assert result.windows[0].scene_count == 0
+    assert result.windows[0].selected_scene_id is None
+    assert result.windows[0].imagery is None
+    assert result.windows[0].imagery_error is None
+
+
+def test_s1_upstream_failure_propagates() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={"sentinel-1-grd": UpstreamServiceError("S1 catalog down")}
+    )
+    service = build_service(satellite=satellite)
+    with pytest.raises(UpstreamServiceError):
+        run(
+            service.execute(
+                QueryExecutionRequest(intent=make_intent(modalities=["sentinel-1-sar"]))
+            )
+        )
+
+
+def test_mixed_s1_s2_failure_propagates_not_soft_fail() -> None:
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: make_search_response(make_scene("s2", cloud_cover=5.0)),
+            "sentinel-1-grd": UpstreamServiceError("S1 catalog down"),
+        }
+    )
+    service = build_service(satellite=satellite)
+    with pytest.raises(UpstreamServiceError):
+        run(
+            service.execute(
+                QueryExecutionRequest(
+                    intent=make_intent(
+                        modalities=["sentinel-2-optical", "sentinel-1-sar"]
+                    )
+                )
+            )
+        )
+
+
+def test_include_imagery_never_calls_retrieve_for_s1() -> None:
+    imagery = FakeImageryService()
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: make_search_response(make_scene("s2", cloud_cover=5.0)),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1", moment="2024-01-01T00:00:00Z")
+            ),
+        }
+    )
+    result = run(
+        build_service(satellite=satellite, imagery=imagery).execute(
+            QueryExecutionRequest(
+                intent=make_intent(
+                    modalities=["sentinel-2-optical", "sentinel-1-sar"]
+                ),
+                include_imagery=True,
+            )
+        )
+    )
+
+    # retrieve called exactly once, for the S2 selected scene only
+    assert [r.scene_id for r in imagery.requests] == ["s2"]
+    s1_window = next(w for w in result.windows if w.modality == "sentinel-1-sar")
+    assert s1_window.imagery is None
+    assert s1_window.imagery_error is None
+    s2_window = next(w for w in result.windows if w.modality == "sentinel-2-optical")
+    assert s2_window.imagery is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -617,6 +1013,7 @@ def test_execute_endpoint_with_dependency_override() -> None:
     assert body["executed_modalities"] == ["sentinel-2-optical"]
     assert body["skipped_modalities"] == []
     window = body["windows"][0]
+    assert window["modality"] == "sentinel-2-optical"
     assert window["label"] == "single"
     assert window["selected_scene_id"] == "scene-a"
     assert window["imagery"] is None
@@ -640,9 +1037,14 @@ def test_execute_endpoint_include_imagery_true() -> None:
     assert window["imagery"]["media_type"] == "image/png"
 
 
-def test_execute_endpoint_reports_skipped_sar() -> None:
+def test_execute_endpoint_executes_s1_alongside_s2() -> None:
     satellite = FakeSatelliteService(
-        responses=make_search_response(make_scene("scene-a", cloud_cover=12.0))
+        by_collection={
+            None: make_search_response(make_scene("s2-a", cloud_cover=12.0)),
+            "sentinel-1-grd": make_search_response(
+                _s1_scene("s1-a", moment="2024-01-02T00:00:00Z")
+            ),
+        }
     )
     client = make_client(build_service(satellite=satellite))
 
@@ -655,14 +1057,14 @@ def test_execute_endpoint_reports_skipped_sar() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["executed_modalities"] == ["sentinel-2-optical"]
-    assert body["skipped_modalities"] == [
-        {
-            "modality": "sentinel-1-sar",
-            "reason": body["skipped_modalities"][0]["reason"],
-        }
+    assert body["executed_modalities"] == ["sentinel-2-optical", "sentinel-1-sar"]
+    assert body["skipped_modalities"] == []
+    assert [(w["modality"], w["label"]) for w in body["windows"]] == [
+        ("sentinel-2-optical", "single"),
+        ("sentinel-1-sar", "single"),
     ]
-    assert "not implemented" in body["skipped_modalities"][0]["reason"].lower()
+    assert body["windows"][1]["selected_scene_id"] == "s1-a"
+    assert body["windows"][1]["imagery"] is None
 
 
 @pytest.mark.parametrize(

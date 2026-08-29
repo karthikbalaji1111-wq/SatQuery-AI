@@ -22,11 +22,17 @@ DEFAULT_IMAGERY_ASSET = "visual"
 
 
 class SceneSearchRequest(BaseModel):
-    """Validated input for a Sentinel-2 scene search."""
+    """Validated input for a satellite scene search.
+
+    ``collection`` optionally overrides the configured default STAC collection
+    (e.g. to target Sentinel-1 rather than Sentinel-2). ``None`` preserves the
+    existing Sentinel-2 behaviour.
+    """
 
     bbox: BoundingBox
     start_date: date
     end_date: date
+    collection: str | None = None
     max_cloud_cover: float | None = Field(default=None, ge=0, le=100)
     limit: int = Field(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
 
