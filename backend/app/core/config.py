@@ -38,9 +38,11 @@ class Settings(BaseSettings):
     )
     http_timeout_seconds: float = 10.0
 
-    # Sentinel-2 scene discovery via the Earth Search STAC API.
+    # Satellite scene discovery via the Earth Search STAC API.
     stac_base_url: str = "https://earth-search.aws.element84.com/v1"
     stac_collection: str = "sentinel-2-l2a"
+    # Sentinel-1 GRD discovery uses the same catalog, a different collection.
+    stac_s1_collection: str = "sentinel-1-grd"
 
     # Bounded Sentinel-2 imagery retrieval (windowed COG reads).
     imagery_max_dimension: int = 1024

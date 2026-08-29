@@ -374,3 +374,71 @@ def test_no_asset_or_imagery_downloads() -> None:
     method, path = requests_seen[0]
     assert method == "POST"
     assert path.endswith("/search")
+
+
+# --------------------------------------------------------------------------- #
+# Collection override (Sentinel-1) - additive, default preserves S2
+# --------------------------------------------------------------------------- #
+
+
+def test_default_collection_is_sentinel_2() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=feature_collection())
+
+    make_client(handler).post(SEARCH_URL, json=VALID_REQUEST)
+
+    assert captured["body"]["collections"] == ["sentinel-2-l2a"]
+
+
+def test_collection_override_produces_sentinel_1_stac_request() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=feature_collection())
+
+    request = {
+        "bbox": VALID_REQUEST["bbox"],
+        "start_date": VALID_REQUEST["start_date"],
+        "end_date": VALID_REQUEST["end_date"],
+        "collection": "sentinel-1-grd",
+        "limit": 10,
+    }
+    body = make_client(handler).post(SEARCH_URL, json=request).json()
+
+    assert captured["body"]["collections"] == ["sentinel-1-grd"]
+    assert body["query"]["collections"] == ["sentinel-1-grd"]
+    assert body["catalog"] == "https://earth-search.aws.element84.com/v1"
+
+
+def test_cloud_cover_filter_not_applied_to_non_optical_collection() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=feature_collection())
+
+    # max_cloud_cover supplied *and* a non-optical collection: no eo:cloud_cover.
+    request = {**VALID_REQUEST, "collection": "sentinel-1-grd", "max_cloud_cover": 30}
+    body = make_client(handler).post(SEARCH_URL, json=request).json()
+
+    assert "query" not in captured["body"]
+    assert body["query"]["filter"] is None
+    assert body["query"]["max_cloud_cover"] == pytest.approx(30)
+
+
+def test_cloud_cover_filter_still_applied_to_default_collection() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=feature_collection())
+
+    # Explicitly passing the S2 collection keeps the optical filter.
+    request = {**VALID_REQUEST, "collection": "sentinel-2-l2a", "max_cloud_cover": 30}
+    make_client(handler).post(SEARCH_URL, json=request)
+
+    assert captured["body"]["query"] == {"eo:cloud_cover": {"lte": 30}}

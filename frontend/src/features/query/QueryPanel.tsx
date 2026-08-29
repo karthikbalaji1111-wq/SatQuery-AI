@@ -682,7 +682,10 @@ function ExecutionView({ result }: { result: QueryExecutionResult }) {
       ) : (
         <ul className="execution-windows">
           {result.windows.map((win) => (
-            <ExecutionWindowView key={win.label} win={win} />
+            <ExecutionWindowView
+              key={`${win.modality}:${win.label}`}
+              win={win}
+            />
           ))}
         </ul>
       )}
@@ -693,7 +696,9 @@ function ExecutionView({ result }: { result: QueryExecutionResult }) {
 function ExecutionWindowView({ win }: { win: ExecutedWindow }) {
   return (
     <li className="execution-window">
-      <h4>{win.label}</h4>
+      <h4>
+        {win.modality} · {win.label}
+      </h4>
       <dl>
         <div>
           <dt>Window</dt>

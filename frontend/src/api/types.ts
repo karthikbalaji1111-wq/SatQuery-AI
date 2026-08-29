@@ -152,6 +152,7 @@ export interface SkippedModality {
 }
 
 export interface ExecutedWindow {
+  modality: Modality;
   label: string;
   time_range: TimeRange;
   scene_count: number;

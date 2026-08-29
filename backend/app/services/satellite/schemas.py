@@ -16,17 +16,27 @@ from app.services.geospatial.schemas import BoundingBox
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 100
 
-# Assets that are true 3-band RGB, windowed-readable remote rasters (COGs).
-SUPPORTED_IMAGERY_ASSETS = ("visual",)
+# Windowed-readable remote rasters (COGs) supported for bounded retrieval:
+#   "visual" - Sentinel-2 true-colour 8-bit RGB, used as-is.
+#   "vv"     - Sentinel-1 GRD VV backscatter, single-band Float32, display-only
+#              normalized to 8-bit grayscale (see raster._normalize_sar_band).
 DEFAULT_IMAGERY_ASSET = "visual"
+SAR_IMAGERY_ASSET = "vv"
+SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET)
 
 
 class SceneSearchRequest(BaseModel):
-    """Validated input for a Sentinel-2 scene search."""
+    """Validated input for a satellite scene search.
+
+    ``collection`` optionally overrides the configured default STAC collection
+    (e.g. to target Sentinel-1 rather than Sentinel-2). ``None`` preserves the
+    existing Sentinel-2 behaviour.
+    """
 
     bbox: BoundingBox
     start_date: date
     end_date: date
+    collection: str | None = None
     max_cloud_cover: float | None = Field(default=None, ge=0, le=100)
     limit: int = Field(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
 

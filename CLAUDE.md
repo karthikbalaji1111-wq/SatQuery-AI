@@ -26,8 +26,17 @@ Core intended capabilities:
 5. Deterministic query-plan resolution
 6. Query execution orchestration (intent -> plan -> discovery -> deterministic
    scene selection -> optional bounded imagery)
+7. Sentinel-1 SAR discovery + deterministic per-modality scene selection: each
+   requested modality executes independently against every temporal window,
+   through the existing SatelliteService (collection override).
+8. Sentinel-1 VV imagery retrieval for visualization: the existing
+   ImageryService / raster path now accepts a single-band Float32 VV asset,
+   applies a 2nd-98th percentile display clip -> min-max to 8-bit grayscale ->
+   3 identical bands -> PNG, and returns the existing ImageryResponse. Display
+   only, NOT calibrated. SAR scientific processing (speckle filtering,
+   calibration, terrain correction, fusion, analysis) remains out of scope.
 
-Current HEAD represents the completed Query Execution Orchestration phase.
+Current HEAD represents the completed Sentinel-1 Imagery Retrieval phase.
 
 ## Architecture Rules
 
