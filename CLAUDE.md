@@ -26,8 +26,12 @@ Core intended capabilities:
 5. Deterministic query-plan resolution
 6. Query execution orchestration (intent -> plan -> discovery -> deterministic
    scene selection -> optional bounded imagery)
+7. Sentinel-1 SAR discovery + deterministic per-modality scene selection: each
+   requested modality executes independently against every temporal window,
+   through the existing SatelliteService (collection override). Sentinel-1
+   imagery processing remains out of scope.
 
-Current HEAD represents the completed Query Execution Orchestration phase.
+Current HEAD represents the completed Sentinel-1 Discovery phase.
 
 ## Architecture Rules
 

@@ -128,8 +128,9 @@ class QueryExecutionRequest(BaseModel):
 
 
 class ExecutedWindow(BaseModel):
-    """Discovery and selection outcome for one expanded temporal window."""
+    """Discovery and selection outcome for one (modality, temporal window) pair."""
 
+    modality: Modality
     label: str
     time_range: TimeRange
     scene_count: int
