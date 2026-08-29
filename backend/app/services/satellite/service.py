@@ -143,10 +143,12 @@ def _normalize_scene(feature: object) -> Scene:
 
 
 class SatelliteService(DomainService):
-    """Sentinel-2 optical scene discovery via the Earth Search STAC API.
+    """Satellite scene discovery via the Earth Search STAC API.
 
     The generic :meth:`run` hook stays unimplemented; :meth:`search` is the
-    typed entry point for this phase. Sentinel-1 / SAR is out of scope here.
+    typed entry point. The collection is chosen by ``SceneSearchRequest``
+    (Sentinel-2 by default, Sentinel-1 when overridden); SAR *imagery*
+    retrieval remains out of scope.
     """
 
     name = "satellite"
@@ -163,9 +165,16 @@ class SatelliteService(DomainService):
         return "Sentinel-1 SAR and Sentinel-2 optical imagery retrieval."
 
     async def search(self, request: SceneSearchRequest) -> SceneSearchResponse:
-        """Discover Sentinel-2 L2A scenes for a bounding box and date range."""
+        """Discover scenes for a bounding box and date range.
 
-        collections = [self._settings.stac_collection]
+        ``request.collection`` overrides the STAC collection when set (e.g. to
+        target Sentinel-1); otherwise the configured Sentinel-2 collection is
+        used. The optical ``eo:cloud_cover`` filter is applied only to the
+        configured Sentinel-2 collection.
+        """
+
+        collection = request.collection or self._settings.stac_collection
+        collections = [collection]
         bbox = [
             request.bbox.west,
             request.bbox.south,
@@ -178,8 +187,13 @@ class SatelliteService(DomainService):
         )
 
         stac_filter: dict[str, Any] | None = None
-        if request.max_cloud_cover is not None:
+        if (
+            request.max_cloud_cover is not None
+            and collection == self._settings.stac_collection
+        ):
             # Standard STAC "query" extension - supported by Earth Search.
+            # eo:cloud_cover is optical-only; never sent for a non-optical
+            # (e.g. Sentinel-1) collection.
             stac_filter = {"eo:cloud_cover": {"lte": request.max_cloud_cover}}
 
         body: dict[str, Any] = {
@@ -200,7 +214,7 @@ class SatelliteService(DomainService):
         scenes = [_normalize_scene(feature) for feature in features][: request.limit]
         logger.info(
             "STAC search (%s, %s) returned %d scene(s)",
-            self._settings.stac_collection,
+            collection,
             datetime_interval,
             len(scenes),
         )

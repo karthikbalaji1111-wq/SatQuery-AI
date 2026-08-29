@@ -17,13 +17,17 @@ import numpy as np
 import pytest
 import rasterio
 from app.api.routes.satellite import get_imagery_service
-from app.core.errors import InvalidInputError, UpstreamServiceError
+from app.core.errors import ImageryError, InvalidInputError, UpstreamServiceError
 from app.main import create_app
 from app.services.geospatial.schemas import BoundingBox
 from app.services.satellite import ImageryService
 from app.services.satellite import imagery as imagery_mod
 from app.services.satellite import raster as raster_mod
-from app.services.satellite.raster import RgbWindow, read_rgb_window
+from app.services.satellite.raster import (
+    RgbWindow,
+    _normalize_sar_band,
+    read_rgb_window,
+)
 from fastapi.testclient import TestClient
 from PIL import Image
 from rasterio.io import MemoryFile
@@ -43,22 +47,44 @@ _SRC_W, _SRC_H = 1200, 1600
 
 @contextmanager
 def synthetic_raster(
-    *, width: int = _SRC_W, height: int = _SRC_H, count: int = 3, dtype: str = "uint8"
+    *,
+    width: int = _SRC_W,
+    height: int = _SRC_H,
+    count: int = 3,
+    dtype: str = "uint8",
+    data: np.ndarray | None = None,
+    nodata: float | None = None,
 ) -> Iterator[MemoryFile]:
+    """A synthetic in-memory GeoTIFF.
+
+    With ``data`` (a 2D array), every band is written from it and ``width`` /
+    ``height`` are taken from its shape - used for the single-band Sentinel-1
+    Float32 tests.
+    """
+
+    if data is not None:
+        data = np.asarray(data, dtype=dtype)
+        height, width = data.shape
     transform = from_origin(_ORIGIN_X, _ORIGIN_Y, _RES, _RES)
+    open_kwargs: dict[str, Any] = {
+        "driver": "GTiff",
+        "width": width,
+        "height": height,
+        "count": count,
+        "dtype": dtype,
+        "crs": "EPSG:32644",
+        "transform": transform,
+    }
+    if nodata is not None:
+        open_kwargs["nodata"] = nodata
     with MemoryFile() as mem:
-        with mem.open(
-            driver="GTiff",
-            width=width,
-            height=height,
-            count=count,
-            dtype=dtype,
-            crs="EPSG:32644",
-            transform=transform,
-        ) as dataset:
+        with mem.open(**open_kwargs) as dataset:
             for band in range(1, count + 1):
-                fill = (band * 60) % 256
-                dataset.write(np.full((height, width), fill, dtype=dtype), band)
+                if data is not None:
+                    dataset.write(data, band)
+                else:
+                    fill = (band * 60) % 256
+                    dataset.write(np.full((height, width), fill, dtype=dtype), band)
         yield mem
 
 
@@ -531,8 +557,9 @@ def test_raster_open_failure_raises_upstream_error(monkeypatch: Any) -> None:
         )
 
 
-def test_invalid_raster_metadata_too_few_bands(monkeypatch: Any) -> None:
-    with synthetic_raster(count=1) as mem:
+def test_invalid_raster_metadata_two_bands(monkeypatch: Any) -> None:
+    # 0 or 2 bands is an unsupported structure; 1 (SAR) and 3+ (RGB) are valid.
+    with synthetic_raster(count=2) as mem:
         monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
         with pytest.raises(UpstreamServiceError):
             read_rgb_window(
@@ -586,3 +613,274 @@ def test_full_pipeline_against_synthetic_raster(monkeypatch: Any) -> None:
     assert abs(body["window"]["height"] - 90) <= 3
     assert body["source_shape"] == [_SRC_H, _SRC_W]
     assert imagery_mod is not None  # module import sanity
+
+
+# =========================================================================== #
+# Sentinel-1 VV: single-band Float32 display normalization
+# =========================================================================== #
+
+SAR_VV_HREF = "https://example.test/sentinel-1/S1A_IW_GRDH_20240214/vv.tif"
+
+
+def _grey(band: np.ndarray, *, nodata: float | None = None) -> np.ndarray:
+    """Run the display normalizer on a raw float array."""
+
+    return _normalize_sar_band(np.asarray(band, dtype="float64"), nodata=nodata)
+
+
+# --- _normalize_sar_band: value handling (pure) ---------------------------- #
+
+
+def test_normalize_sar_band_ramp_spans_full_uint8_range() -> None:
+    out = _grey(np.arange(0, 400, dtype="float32").reshape(20, 20))
+    assert out.dtype == np.uint8
+    assert out.shape == (20, 20)
+    assert out.min() == 0 and out.max() == 255
+
+
+def test_normalize_sar_band_nan_is_black_and_ignored_in_stats() -> None:
+    a = np.full((10, 10), 20.0)
+    a[0, 0] = np.nan
+    a[0, 1] = 10.0  # spread so p2 != p98
+    a[0, 2] = 30.0
+    out = _normalize_sar_band(a, nodata=None)
+    assert out.dtype == np.uint8
+    assert out[0, 0] == 0
+    assert (out > 0).any() and (out == 0).any()
+
+
+def test_normalize_sar_band_inf_does_not_poison_result() -> None:
+    a = np.full((8, 8), 5.0)
+    a[0, 0] = np.inf
+    a[0, 1] = -np.inf
+    a[1, 1] = 1.0
+    a[2, 2] = 9.0
+    out = _normalize_sar_band(a, nodata=None)
+    assert out.dtype == np.uint8
+    # +Inf must NOT be clipped to `upper` -> 255; it is excluded and blacked.
+    assert out[0, 0] == 0 and out[0, 1] == 0
+
+
+def test_normalize_sar_band_excludes_nodata_pixels() -> None:
+    a = np.full((10, 10), 15.0)
+    a[:, 0] = -9999.0
+    a[0, 1] = 10.0
+    a[0, 2] = 20.0
+    out = _normalize_sar_band(a, nodata=-9999.0)
+    assert (out[:, 0] == 0).all()  # nodata -> black
+    assert out[:, 1:].max() > 0  # real data still rendered
+
+
+def test_normalize_sar_band_constant_input_no_divide_by_zero() -> None:
+    out = _normalize_sar_band(np.full((6, 6), 7.0), nodata=None)
+    assert out.dtype == np.uint8
+    assert np.isfinite(out).all()
+    assert set(np.unique(out).tolist()) == {128}  # documented degenerate level
+
+
+def test_normalize_sar_band_two_equal_valid_pixels_is_degenerate() -> None:
+    a = np.full((4, 4), np.nan)
+    a[0, 0] = 3.0
+    a[3, 3] = 3.0
+    out = _normalize_sar_band(a, nodata=None)
+    assert out[0, 0] == 128 and out[3, 3] == 128
+    assert out[1, 1] == 0
+
+
+def test_normalize_sar_band_single_valid_pixel() -> None:
+    a = np.full((4, 4), np.nan)
+    a[1, 1] = 42.0
+    out = _normalize_sar_band(a, nodata=None)
+    assert out[1, 1] == 128
+    assert out[0, 0] == 0
+
+
+def test_normalize_sar_band_no_valid_pixels_raises_imagery_error() -> None:
+    with pytest.raises(ImageryError):
+        _normalize_sar_band(np.full((5, 5), np.nan), nodata=None)
+    with pytest.raises(ImageryError):
+        _normalize_sar_band(np.full((5, 5), -9999.0), nodata=-9999.0)
+
+
+def test_normalize_sar_band_is_deterministic() -> None:
+    a = np.linspace(-30, 5, 256, dtype="float32").reshape(16, 16)
+    assert np.array_equal(_grey(a), _grey(a))
+
+
+# --- read_rgb_window: single-band raster acceptance + windowing ----------- #
+
+
+def test_sar_one_band_float32_raster_is_accepted_and_windowed(
+    monkeypatch: Any,
+) -> None:
+    data = np.tile(np.linspace(-25, 3, 40, dtype="float32"), (30, 1))  # (30, 40)
+    seen: list[Any] = []
+    real_read = raster_mod._read_dataset_window
+
+    def spy(src: Any, indexes: Any, window: Any, out_shape: Any) -> Any:
+        seen.append((indexes, type(window).__name__))
+        return real_read(src, indexes, window, out_shape)
+
+    with synthetic_raster(count=1, dtype="float32", data=data) as mem:
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        monkeypatch.setattr(raster_mod, "_read_dataset_window", spy)
+        result = read_rgb_window(
+            SAR_VV_HREF,
+            bbox_for_window(Window(4, 4, 20, 15)),
+            max_dimension=1024,
+            max_window_pixels=50_000_000,
+        )
+
+    assert seen and seen[0] == (1, "Window")  # single-band, bounded window read
+    assert result.array.dtype == np.uint8
+    assert result.array.ndim == 3 and result.array.shape[2] == 3
+    assert np.array_equal(result.array[..., 0], result.array[..., 1])
+    assert np.array_equal(result.array[..., 1], result.array[..., 2])
+    assert result.bands == ["vv", "vv", "vv"]
+    assert "percentile" in result.normalization.lower()
+    assert result.crs == "EPSG:32644"
+    assert result.resolution == pytest.approx(10.0)
+
+
+def test_sar_dimension_cap_still_applies(monkeypatch: Any) -> None:
+    data = np.random.default_rng(0).uniform(0.0, 100.0, size=(400, 400)).astype(
+        "float32"
+    )
+    with synthetic_raster(count=1, dtype="float32", data=data) as mem:
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        result = read_rgb_window(
+            SAR_VV_HREF,
+            bbox_for_window(Window(0, 0, 400, 400)),
+            max_dimension=64,
+            max_window_pixels=50_000_000,
+        )
+    assert max(result.width, result.height) <= 64
+    assert result.window["width"] > 64  # native window recorded at full res
+
+
+def test_sar_oversized_window_is_still_rejected(monkeypatch: Any) -> None:
+    data = np.zeros((300, 300), dtype="float32")
+    with synthetic_raster(count=1, dtype="float32", data=data) as mem:
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        with pytest.raises(InvalidInputError):
+            read_rgb_window(
+                SAR_VV_HREF,
+                bbox_for_window(Window(0, 0, 300, 300)),
+                max_dimension=1024,
+                max_window_pixels=1000,
+            )
+
+
+def test_sar_window_with_no_valid_pixels_raises_imagery_error(
+    monkeypatch: Any,
+) -> None:
+    data = np.full((20, 20), np.nan, dtype="float32")
+    with synthetic_raster(count=1, dtype="float32", data=data) as mem:
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        with pytest.raises(ImageryError):
+            read_rgb_window(
+                SAR_VV_HREF,
+                bbox_for_window(Window(0, 0, 20, 20)),
+                max_dimension=1024,
+                max_window_pixels=50_000_000,
+            )
+
+
+def test_sar_nodata_pixels_excluded_end_to_end(monkeypatch: Any) -> None:
+    data = np.full((24, 24), 12.0, dtype="float32")
+    data[:, :4] = -9999.0
+    data[0, 5] = 8.0
+    data[0, 6] = 16.0
+    with synthetic_raster(
+        count=1, dtype="float32", data=data, nodata=-9999.0
+    ) as mem:
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        result = read_rgb_window(
+            SAR_VV_HREF,
+            bbox_for_window(Window(0, 0, 24, 24)),
+            max_dimension=1024,
+            max_window_pixels=50_000_000,
+        )
+    assert result.array.dtype == np.uint8
+    assert (result.array == 0).any()  # nodata rendered black
+    assert (result.array > 0).any()  # real data rendered
+
+
+# --- ImageryService route: "vv" asset acceptance + "visual" unchanged ---- #
+
+
+def sar_stac_item(*, href: str = SAR_VV_HREF, bbox: list[float]) -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "id": "S1A_IW_GRDH_1SDV_20240214",
+        "collection": "sentinel-1-grd",
+        "bbox": bbox,
+        "properties": {"datetime": "2024-02-14T00:15:10Z"},
+        "assets": {
+            "vv": {
+                "href": href,
+                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                "roles": ["data"],
+            }
+        },
+    }
+
+
+def test_vv_asset_is_accepted_and_resolved_end_to_end(monkeypatch: Any) -> None:
+    req_bbox = bbox_for_window(Window(0, 0, 40, 30))
+    item_bbox = [
+        req_bbox.west - 0.5,
+        req_bbox.south - 0.5,
+        req_bbox.east + 0.5,
+        req_bbox.north + 0.5,
+    ]
+    fetcher = RecordingFetcher(sar_stac_item(bbox=item_bbox))
+    data = np.tile(np.linspace(0.0, 500.0, 40, dtype="float32"), (30, 1))
+
+    with synthetic_raster(count=1, dtype="float32", data=data) as mem:
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        client = make_client(fetcher=fetcher, reader=read_rgb_window)
+        response = client.post(
+            IMAGERY_URL,
+            json={
+                "scene_id": "S1A_IW_GRDH_1SDV_20240214",
+                "asset": "vv",
+                "bbox": {
+                    "west": req_bbox.west,
+                    "south": req_bbox.south,
+                    "east": req_bbox.east,
+                    "north": req_bbox.north,
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["asset"] == "vv"
+    assert body["asset_href"] == SAR_VV_HREF
+    assert body["bands"] == ["vv", "vv", "vv"]
+    assert "percentile" in body["normalization"].lower()
+    assert body["media_type"] == "image/png"
+    image = decode_png(body["image_base64"])
+    assert image.mode == "RGB"
+    assert fetcher.scene_ids == ["S1A_IW_GRDH_1SDV_20240214"]
+
+
+def test_visual_asset_behaviour_is_unchanged() -> None:
+    body = make_client().post(IMAGERY_URL, json=valid_body()).json()
+    assert body["asset"] == "visual"
+    assert body["bands"] == ["red", "green", "blue"]
+    assert body["normalization"] == "none (source is 8-bit RGB)"
+
+
+def test_vh_asset_is_still_rejected() -> None:
+    rb = bbox_for_window(Window(0, 0, 40, 30))
+    item_bbox = [rb.west - 1, rb.south - 1, rb.east + 1, rb.north + 1]
+    fetcher = RecordingFetcher(sar_stac_item(bbox=item_bbox))
+    reader = RecordingReader()
+    response = make_client(fetcher=fetcher, reader=reader).post(
+        IMAGERY_URL,
+        json=valid_body(scene_id="S1A_IW_GRDH_1SDV_20240214", asset="vh"),
+    )
+    assert response.status_code == 422
+    assert reader.calls == []

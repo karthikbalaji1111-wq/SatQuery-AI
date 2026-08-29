@@ -57,12 +57,69 @@ def _open_raster(href: str):
 
 
 def _read_dataset_window(
-    src, indexes: tuple[int, int, int], window: Window, out_shape: tuple[int, int, int]
+    src,
+    indexes: int | tuple[int, ...],
+    window: Window,
+    out_shape: tuple[int, ...],
 ) -> np.ndarray:
     """Read exactly ``window`` (decimated to ``out_shape``). Isolated so tests
-    can assert the reader is given a window and never a full-dataset read."""
+    can assert the reader is given a window and never a full-dataset read.
+
+    ``indexes`` is ``(1, 2, 3)`` for Sentinel-2 RGB or ``1`` for a single-band
+    Sentinel-1 backscatter raster."""
 
     return src.read(indexes=indexes, window=window, out_shape=out_shape, boundless=False)
+
+
+# --- Sentinel-1 VV display normalization ------------------------------------ #
+
+_SAR_CLIP_PERCENTILES = (2.0, 98.0)
+_SAR_NORMALIZATION = (
+    "2nd-98th percentile clip -> min-max to 8-bit grayscale (display only, "
+    "not calibrated)"
+)
+# Deterministic level for a degenerate (constant) window: mid-grey, so a
+# uniform-return scene is visibly distinct from a no-data (black) one.
+_SAR_DEGENERATE_LEVEL = 128
+
+
+def _normalize_sar_band(band: np.ndarray, *, nodata: float | None) -> np.ndarray:
+    """Deterministic *display* normalization of one SAR band to ``uint8``.
+
+    Percentile-clip (2nd..98th) of the finite, non-nodata pixels, then min-max
+    scale to 0..255. NaN, +/-Inf and nodata pixels are excluded from the
+    statistics and rendered black (0). A constant/degenerate window (``upper``
+    <= ``lower``, e.g. one valid pixel) yields a flat mid-grey rather than
+    dividing by zero. This is not a calibrated or quantitative transform.
+
+    Raises :class:`ImageryError` when there is no finite, non-nodata pixel.
+    """
+
+    values = np.asarray(band, dtype=np.float64)
+    finite = np.isfinite(values)
+    if nodata is not None and math.isfinite(nodata):
+        finite &= values != nodata
+
+    valid = values[finite]
+    if valid.size == 0:
+        raise ImageryError(
+            "The Sentinel-1 window contains no valid (finite) pixels to display."
+        )
+
+    lower, upper = (float(x) for x in np.percentile(valid, _SAR_CLIP_PERCENTILES))
+
+    if not (math.isfinite(lower) and math.isfinite(upper)) or upper <= lower:
+        out = np.full(values.shape, _SAR_DEGENERATE_LEVEL, dtype=np.uint8)
+        out[~finite] = 0
+        return out
+
+    scaled = (np.clip(values, lower, upper) - lower) / (upper - lower)
+    # Any NaN/Inf that survived clipping (they cannot reach [0, 1]) is forced
+    # into range before the uint8 cast so no invalid value ever propagates.
+    scaled = np.nan_to_num(scaled, nan=0.0, posinf=1.0, neginf=0.0)
+    out = np.rint(scaled * 255.0).astype(np.uint8)
+    out[~finite] = 0  # NaN / Inf / nodata -> black
+    return out
 
 
 def _clamp_window_to_source(raw: Window, src_width: int, src_height: int) -> Window:
@@ -84,7 +141,12 @@ def _extract_window(
     max_dimension: int,
     max_window_pixels: int,
 ) -> RgbWindow:
-    if src.crs is None or src.transform is None or src.count < 3:
+    band_count = int(src.count)
+    if src.crs is None or src.transform is None:
+        raise UpstreamServiceError("The remote raster metadata is invalid.")
+    # 3+ bands -> RGB; exactly 1 band -> single-band SAR. Anything else
+    # (0 or 2 bands) is an unsupported structure.
+    if band_count < 3 and band_count != 1:
         raise UpstreamServiceError("The remote raster metadata is invalid.")
 
     try:
@@ -108,19 +170,34 @@ def _extract_window(
     out_w = max(1, round(int(window.width) * scale))
     out_h = max(1, round(int(window.height) * scale))
 
-    try:
-        data = _read_dataset_window(src, (1, 2, 3), window, (3, out_h, out_w))
-    except (RasterioIOError, MemoryError) as exc:
-        raise UpstreamServiceError("Failed to read the requested raster window.") from exc
+    if band_count >= 3:
+        try:
+            data = _read_dataset_window(src, (1, 2, 3), window, (3, out_h, out_w))
+        except (RasterioIOError, MemoryError) as exc:
+            raise UpstreamServiceError(
+                "Failed to read the requested raster window."
+            ) from exc
+        if data.dtype != np.uint8:
+            # `visual` is uint8 true-colour; anything else is out of scope here
+            # and we refuse rather than invent a normalization.
+            raise UpstreamServiceError(
+                f"Unsupported raster datatype {data.dtype!r}; expected 8-bit RGB."
+            )
+        rgb = np.ascontiguousarray(np.transpose(data, (1, 2, 0)))
+        bands = ["red", "green", "blue"]
+        normalization = "none (source is 8-bit RGB)"
+    else:
+        try:
+            band = _read_dataset_window(src, 1, window, (out_h, out_w))
+        except (RasterioIOError, MemoryError) as exc:
+            raise UpstreamServiceError(
+                "Failed to read the requested raster window."
+            ) from exc
+        gray = _normalize_sar_band(band, nodata=src.nodata)
+        rgb = np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))
+        bands = ["vv", "vv", "vv"]
+        normalization = _SAR_NORMALIZATION
 
-    if data.dtype != np.uint8:
-        # `visual` is uint8 true-colour; anything else is out of scope here and
-        # we refuse rather than invent a normalization.
-        raise UpstreamServiceError(
-            f"Unsupported raster datatype {data.dtype!r}; expected 8-bit RGB."
-        )
-
-    rgb = np.ascontiguousarray(np.transpose(data, (1, 2, 0)))
     resolution = abs(float(src.transform.a)) if src.transform.a else None
 
     return RgbWindow(
@@ -129,7 +206,7 @@ def _extract_window(
         height=int(rgb.shape[0]),
         crs=src.crs.to_string() if src.crs else None,
         resolution=resolution,
-        bands=["red", "green", "blue"],
+        bands=bands,
         window={
             "col_off": int(window.col_off),
             "row_off": int(window.row_off),
@@ -137,7 +214,7 @@ def _extract_window(
             "height": int(window.height),
         },
         source_shape=[int(src.height), int(src.width)],
-        normalization="none (source is 8-bit RGB)",
+        normalization=normalization,
     )
 
 
