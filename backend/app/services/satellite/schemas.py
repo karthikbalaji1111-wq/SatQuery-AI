@@ -24,6 +24,15 @@ DEFAULT_IMAGERY_ASSET = "visual"
 SAR_IMAGERY_ASSET = "vv"
 SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET)
 
+# Assets readable QUANTITATIVELY (raw values, native resolution) for analysis.
+# Deliberately a separate allowlist from the display whitelist above: display
+# and analysis are different concerns and must not be merged. These are Earth
+# Search *STAC asset keys* (common names), not Sentinel-2 band identifiers -
+# "green" is the key for band B03, "nir" for B08, "red" for B04. 20 m assets
+# ("swir16", "scl") are excluded: mixing them with 10 m bands would require
+# resampling, which this phase does not do.
+ANALYSIS_BAND_ASSETS = ("green", "nir", "red")
+
 
 class SceneSearchRequest(BaseModel):
     """Validated input for a satellite scene search.

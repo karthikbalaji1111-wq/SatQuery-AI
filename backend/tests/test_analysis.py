@@ -8,8 +8,10 @@ in memory; the route is exercised through ``dependency_overrides``.
 from __future__ import annotations
 
 import asyncio
+import pathlib
 from typing import Any
 
+import numpy as np
 import pytest
 from app.api.routes.query import (
     get_ai_service,
@@ -17,9 +19,13 @@ from app.api.routes.query import (
     get_query_execution_service,
     get_query_service,
 )
+from app.core.errors import ImageryError, NotFoundError
 from app.main import create_app
 from app.services.ai import AiService, MockIntentParser
-from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService
+from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService, engines
+from app.services.analysis import service as service_mod
+from app.services.analysis.engines import compute_ndwi_measurements
+from app.services.analysis.schemas import Measurement
 from app.services.geospatial import ResolveRequest, ResolveResponse
 from app.services.geospatial.schemas import BoundingBox
 from app.services.query import QueryService
@@ -31,8 +37,10 @@ from app.services.query.schemas import (
     SkippedModality,
     TimeRange,
 )
-from app.services.satellite.schemas import ImageryResponse, WindowInfo
+from app.services.satellite.raster import BandWindow
+from app.services.satellite.schemas import ImageryResponse, Scene, WindowInfo
 from fastapi.testclient import TestClient
+from rasterio.transform import from_origin
 
 ANALYZE_URL = "/api/v1/query/analyze"
 EXECUTE_URL = "/api/v1/query/execute"
@@ -94,13 +102,14 @@ def make_window(
     scene_count: int = 1,
     imagery: ImageryResponse | None = None,
     imagery_error: str | None = None,
+    scenes_override: list[Scene] | None = None,
 ) -> ExecutedWindow:
     return ExecutedWindow(
         modality=modality,  # type: ignore[arg-type]
         label=label,
         time_range=TimeRange.model_validate({"start_date": start, "end_date": end}),
         scene_count=scene_count,
-        scenes=[],
+        scenes=scenes_override or [],
         selected_scene_id=selected_scene_id,
         imagery=imagery,
         imagery_error=imagery_error,
@@ -240,8 +249,14 @@ def test_task_is_derived_from_the_execution_intent(
 def test_request_needs_only_the_execution_field() -> None:
     request = AnalysisRequest.model_validate(analyze_body(make_execution()))
 
-    assert set(AnalysisRequest.model_fields) == {"execution"}
+    # ``execution`` remains the ONLY required field - there is still no
+    # duplicated ``task``, and Phase 11's ``include_ndwi`` is opt-in.
+    required = {
+        name for name, field in AnalysisRequest.model_fields.items() if field.is_required()
+    }
+    assert required == {"execution"}
     assert request.execution.plan.intent.task == "visualize"
+    assert request.include_ndwi is False
 
 
 # --------------------------------------------------------------------------- #
@@ -528,3 +543,386 @@ def test_analysis_route_is_registered_alongside_the_existing_query_routes() -> N
         "/api/v1/query/execute",
         "/api/v1/query/analyze",
     } <= paths
+
+
+# =========================================================================== #
+# Phase 11: pure NDWI engine
+#
+# Small deterministic arrays only - the engine never touches STAC, COGs, HTTP
+# or the filesystem, so nothing here needs a fake service.
+# =========================================================================== #
+
+
+def band(
+    values: list[float] | np.ndarray,
+    *,
+    dtype: str = "uint16",
+    nodata: float | None = 0.0,
+) -> BandWindow:
+    """A one-row BandWindow with an explicit nodata-derived validity mask."""
+
+    array = np.asarray(values, dtype=dtype).reshape(1, -1)
+    valid = np.isfinite(array) if np.issubdtype(array.dtype, np.floating) else (
+        np.ones(array.shape, dtype=bool)
+    )
+    if nodata is not None:
+        valid = valid & (array != nodata)
+    return BandWindow(
+        values=array,
+        valid=valid,
+        width=array.shape[1],
+        height=1,
+        crs="EPSG:32644",
+        transform=from_origin(399960.0, 1500000.0, 10.0, 10.0),
+        resolution=10.0,
+        nodata=nodata,
+        window={"col_off": 0, "row_off": 0, "width": array.shape[1], "height": 1},
+        source_shape=[1, array.shape[1]],
+    )
+
+
+def named(measurements: list[Measurement]) -> dict[str, float]:
+    return {m.name: m.value for m in measurements}
+
+
+def test_ndwi_normal_case_matches_hand_computed_values() -> None:
+    # (3-1)/(3+1)=0.5 ; (4-2)/(4+2)=1/3 ; (5-5)/(5+5)=0.0
+    values = named(compute_ndwi_measurements(band([3, 4, 5]), band([1, 2, 5])))
+
+    assert values["ndwi_valid_pixel_count"] == 3
+    assert values["ndwi_max"] == pytest.approx(0.5)
+    assert values["ndwi_min"] == pytest.approx(0.0)
+    assert values["ndwi_mean"] == pytest.approx((0.5 + 1 / 3 + 0.0) / 3)
+
+
+def test_ndwi_zero_numerator_is_valid_data_not_nodata() -> None:
+    # green == nir gives NDWI 0.0; that pixel must still be counted.
+    values = named(compute_ndwi_measurements(band([5]), band([5])))
+
+    assert values["ndwi_valid_pixel_count"] == 1
+    assert values["ndwi_mean"] == pytest.approx(0.0)
+
+
+def test_ndwi_masks_green_nodata() -> None:
+    values = named(compute_ndwi_measurements(band([0, 3]), band([7, 1])))
+
+    assert values["ndwi_valid_pixel_count"] == 1  # first pixel is green nodata
+    assert values["ndwi_mean"] == pytest.approx(0.5)
+
+
+def test_ndwi_masks_nir_nodata() -> None:
+    values = named(compute_ndwi_measurements(band([3, 3]), band([0, 1])))
+
+    assert values["ndwi_valid_pixel_count"] == 1
+    assert values["ndwi_mean"] == pytest.approx(0.5)
+
+
+def test_ndwi_excludes_zero_denominator() -> None:
+    # Both bands zero -> nodata AND a zero denominator; excluded either way.
+    values = named(compute_ndwi_measurements(band([0, 4]), band([0, 2])))
+
+    assert values["ndwi_valid_pixel_count"] == 1
+    assert values["ndwi_mean"] == pytest.approx(1 / 3)
+
+
+def test_ndwi_with_no_valid_pixels_reports_a_zero_count_and_nothing_else() -> None:
+    measurements = compute_ndwi_measurements(band([0, 0]), band([0, 0]))
+
+    assert len(measurements) == 1
+    assert measurements[0].name == "ndwi_valid_pixel_count"
+    assert measurements[0].value == 0.0
+    # No fabricated statistics for an empty sample.
+    assert "ndwi_mean" not in named(measurements)
+
+
+def test_ndwi_excludes_nan_and_inf() -> None:
+    green = band([np.nan, np.inf, 3.0, 4.0], dtype="float64", nodata=None)
+    nir = band([1.0, 1.0, 1.0, 2.0], dtype="float64", nodata=None)
+    values = named(compute_ndwi_measurements(green, nir))
+
+    assert values["ndwi_valid_pixel_count"] == 2
+    assert values["ndwi_mean"] == pytest.approx((0.5 + 1 / 3) / 2)
+
+
+def test_ndwi_does_not_overflow_uint16_arithmetic() -> None:
+    # 65535 + 1 wraps to 0 in uint16 (zero denominator); 65535 - 1 is fine.
+    # Correct float64 promotion gives 65534 / 65536.
+    values = named(compute_ndwi_measurements(band([65535]), band([1])))
+
+    assert values["ndwi_valid_pixel_count"] == 1
+    assert values["ndwi_mean"] == pytest.approx(65534 / 65536)
+
+
+def test_ndwi_does_not_underflow_uint16_subtraction() -> None:
+    # 3 - 4 wraps to 65535 in uint16; float64 promotion gives -1/7.
+    values = named(compute_ndwi_measurements(band([3]), band([4])))
+
+    assert values["ndwi_mean"] == pytest.approx(-1 / 7)
+
+
+def test_ndwi_values_stay_within_the_valid_index_range() -> None:
+    rng = np.random.default_rng(0)
+    green = rng.integers(1, 65535, size=512, dtype=np.uint16)
+    nir = rng.integers(1, 65535, size=512, dtype=np.uint16)
+    values = named(compute_ndwi_measurements(band(green), band(nir)))
+
+    assert -1.0 <= values["ndwi_min"] <= 1.0
+    assert -1.0 <= values["ndwi_max"] <= 1.0
+
+
+def test_ndwi_uses_raw_dn_and_ignores_the_advertised_scale_offset() -> None:
+    green_dn, nir_dn = 3000, 1000
+    values = named(compute_ndwi_measurements(band([green_dn]), band([nir_dn])))
+
+    raw = (green_dn - nir_dn) / (green_dn + nir_dn)
+    scaled = (green_dn * 0.0001 - 0.1 - (nir_dn * 0.0001 - 0.1)) / (
+        (green_dn * 0.0001 - 0.1) + (nir_dn * 0.0001 - 0.1)
+    )
+    assert values["ndwi_mean"] == pytest.approx(raw)
+    assert values["ndwi_mean"] != pytest.approx(scaled)
+    assert engines.STAC_SCALE_OFFSET_APPLIED is False
+
+
+def test_ndwi_percent_above_threshold_is_named_as_an_index_threshold() -> None:
+    measurements = compute_ndwi_measurements(band([3, 4, 5]), band([1, 2, 5]))
+    names = [m.name for m in measurements]
+    threshold_name = (
+        f"ndwi_percent_above_index_threshold_{engines.NDWI_INDEX_THRESHOLD}"
+    )
+
+    assert threshold_name in names
+    # Honesty: nothing here may be presented as water or flood.
+    assert not any("water" in n or "flood" in n for n in names)
+    assert named(measurements)[threshold_name] == pytest.approx(200 / 3)
+
+
+def test_ndwi_is_deterministic() -> None:
+    green, nir = band([3, 4, 5]), band([1, 2, 5])
+    first = compute_ndwi_measurements(green, nir)
+    second = compute_ndwi_measurements(green, nir)
+
+    assert [m.model_dump() for m in first] == [m.model_dump() for m in second]
+
+
+def test_ndwi_rejects_mismatched_window_shapes() -> None:
+    with pytest.raises(ImageryError, match="different"):
+        compute_ndwi_measurements(band([1, 2, 3]), band([1, 2]))
+
+
+# =========================================================================== #
+# Phase 11: AnalysisService NDWI dispatch
+# =========================================================================== #
+
+
+class FakeImageryService:
+    """Records read_band calls; returns canned bands or raises."""
+
+    def __init__(
+        self,
+        *,
+        bands: dict[str, BandWindow] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self._bands = bands or {"green": band([3, 4, 5]), "nir": band([1, 2, 5])}
+        self._error = error
+
+    def read_band(
+        self,
+        *,
+        scene_id: str,
+        bbox: Any,
+        asset: str,
+        collection: str | None = None,
+    ) -> BandWindow:
+        self.calls.append(
+            {
+                "scene_id": scene_id,
+                "bbox": bbox,
+                "asset": asset,
+                "collection": collection,
+            }
+        )
+        if self._error is not None:
+            raise self._error
+        return self._bands[asset]
+
+
+def make_scene(scene_id: str, *, collection: str | None = "sentinel-2-l2a") -> Scene:
+    return Scene(
+        id=scene_id,
+        datetime="2024-01-15T05:00:00Z",
+        bbox=None,
+        geometry=None,
+        cloud_cover=1.0,
+        collection=collection,
+        platform=None,
+        processing_level="L2A",
+        thumbnail_url=None,
+        assets=[],
+    )
+
+
+def analyze_ndwi(
+    execution: QueryExecutionResult, imagery: FakeImageryService | None = None
+) -> tuple[AnalysisResult, FakeImageryService]:
+    imagery = imagery or FakeImageryService()
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(AnalysisRequest(execution=execution, include_ndwi=True))
+    )
+    return result, imagery
+
+
+def ndwi_execution(**overrides: Any) -> QueryExecutionResult:
+    window = make_window(scenes_override=[make_scene("scene-a")])
+    return make_execution(windows=[window], **overrides)
+
+
+def test_analysis_service_accepts_an_injected_imagery_service() -> None:
+    imagery = FakeImageryService()
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+
+    assert service._imagery is imagery
+    assert AnalysisService() is not None  # zero-arg construction still works
+
+
+def test_ndwi_is_not_computed_unless_requested() -> None:
+    imagery = FakeImageryService()
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(AnalysisRequest(execution=ndwi_execution()))
+    )
+
+    assert imagery.calls == []  # include_ndwi defaults to False
+    assert result.measurements == []
+    assert result.status == "ok"
+
+
+def test_ndwi_dispatch_reads_green_and_nir_and_returns_scalars() -> None:
+    result, imagery = analyze_ndwi(ndwi_execution())
+
+    assert [c["asset"] for c in imagery.calls] == ["green", "nir"]
+    values = named(result.measurements)
+    assert values["ndwi_valid_pixel_count"] == 3
+    assert values["ndwi_mean"] == pytest.approx((0.5 + 1 / 3 + 0.0) / 3)
+    assert result.status == "ok"  # visualize behaviour preserved
+    assert result.task == "visualize"
+
+
+def test_ndwi_propagates_the_selected_scene_id_and_collection() -> None:
+    _, imagery = analyze_ndwi(ndwi_execution())
+
+    assert {c["scene_id"] for c in imagery.calls} == {"scene-a"}
+    assert {c["collection"] for c in imagery.calls} == {"sentinel-2-l2a"}
+    assert all(c["bbox"] == DEFAULT_BBOX for c in imagery.calls)
+
+
+def test_ndwi_collection_falls_back_to_none_when_the_scene_is_unknown() -> None:
+    window = make_window(scenes_override=[make_scene("other-scene")])
+    _, imagery = analyze_ndwi(make_execution(windows=[window]))
+
+    # No matching Scene -> None -> ImageryService uses its configured default.
+    assert {c["collection"] for c in imagery.calls} == {None}
+
+
+def test_ndwi_skips_sar_windows() -> None:
+    windows = [
+        make_window(
+            modality="sentinel-1-sar",
+            selected_scene_id="s1-a",
+            scenes_override=[make_scene("s1-a", collection="sentinel-1-grd")],
+        ),
+        make_window(scenes_override=[make_scene("scene-a")]),
+    ]
+    _, imagery = analyze_ndwi(make_execution(windows=windows))
+
+    assert {c["scene_id"] for c in imagery.calls} == {"scene-a"}
+
+
+def test_ndwi_with_no_selected_scene_warns_and_does_not_crash() -> None:
+    window = make_window(selected_scene_id=None)
+    result, imagery = analyze_ndwi(make_execution(windows=[window]))
+
+    assert imagery.calls == []  # never invents a scene id
+    assert result.measurements == []
+    assert result.status == "ok"
+    assert any("no Sentinel-2 optical window" in w for w in result.warnings)
+    # The pre-existing missing-scene warning convention is still used too.
+    assert any("No scene was selected" in w for w in result.warnings)
+
+
+def test_ndwi_is_single_scene_and_says_so_when_more_windows_exist() -> None:
+    windows = [
+        make_window(label="baseline", scenes_override=[make_scene("scene-a")]),
+        make_window(
+            label="target",
+            selected_scene_id="scene-b",
+            scenes_override=[make_scene("scene-b")],
+        ),
+    ]
+    result, imagery = analyze_ndwi(make_execution(windows=windows))
+
+    assert {c["scene_id"] for c in imagery.calls} == {"scene-a"}  # first only
+    assert any("single-scene" in w for w in result.warnings)
+
+
+def test_ndwi_imagery_failure_is_isolated_to_a_warning() -> None:
+    imagery = FakeImageryService(error=NotFoundError("Asset 'green' is missing."))
+    result, _ = analyze_ndwi(ndwi_execution(), imagery)
+
+    assert result.measurements == []
+    assert result.status == "ok"  # the analysis itself still succeeds
+    assert any("NDWI could not be computed" in w for w in result.warnings)
+
+
+def test_ndwi_result_carries_an_honesty_warning() -> None:
+    result, _ = analyze_ndwi(ndwi_execution())
+
+    assert any(
+        "not a validated water or flood classification" in w for w in result.warnings
+    )
+    assert "water" not in result.answer.lower()
+    assert "flood" not in result.answer.lower()
+
+
+def test_ndwi_runs_for_an_unimplemented_task_without_claiming_it() -> None:
+    execution = ndwi_execution(intent=make_intent(task="change_detection"))
+    result, imagery = analyze_ndwi(execution)
+
+    assert result.status == "not_implemented"  # the TASK is still unimplemented
+    assert "not implemented" in result.answer.lower()
+    assert len(imagery.calls) == 2  # but the opt-in index still ran
+    assert named(result.measurements)["ndwi_valid_pixel_count"] == 3
+
+
+def test_ndwi_returns_only_scalars_and_never_arrays() -> None:
+    result, _ = analyze_ndwi(ndwi_execution())
+    payload = result.model_dump(mode="json")
+
+    for measurement in payload["measurements"]:
+        assert set(measurement) == {"name", "value", "unit"}
+        assert isinstance(measurement["value"], float)
+    # Nothing array-shaped anywhere in the serialised result.
+    assert not any(
+        isinstance(v, list) and v and isinstance(v[0], list)
+        for v in payload.values()
+    )
+    assert "mask" not in payload and "array" not in payload
+
+
+def test_ndwi_does_not_mutate_the_execution_result() -> None:
+    execution = ndwi_execution()
+    before = execution.model_dump(mode="json")
+    analyze_ndwi(execution)
+
+    assert execution.model_dump(mode="json") == before
+
+
+def test_analysis_service_performs_no_pixel_arithmetic() -> None:
+    source = pathlib.Path(service_mod.__file__).read_text()
+
+    # All arithmetic lives in engines.py; the service only dispatches.
+    assert "import numpy" not in source
+    assert "np." not in source
+    assert "compute_ndwi_measurements" in source

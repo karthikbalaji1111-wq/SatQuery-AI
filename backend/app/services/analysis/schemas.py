@@ -68,9 +68,17 @@ class AnalysisRequest(BaseModel):
     ``execution`` is the contract ``/query/execute`` produces, reused verbatim
     and re-validated. There is no separate ``task`` field - see the module
     docstring.
+
+    ``include_ndwi`` opts in to single-scene Sentinel-2 NDWI statistics. It is a
+    flag rather than a new :data:`QueryTask` value deliberately: a spectral
+    index is a descriptive add-on, not one of the three user intents, and a new
+    task value would have to propagate into ``SatQueryIntent``, the intent
+    parser's instructions and the frontend task list. Defaulting to ``False``
+    keeps every existing request byte-identical in behaviour.
     """
 
     execution: QueryExecutionResult
+    include_ndwi: bool = False
 
 
 class AnalysisResult(BaseModel):

@@ -13,8 +13,10 @@ from dataclasses import dataclass
 import numpy as np
 import rasterio
 from rasterio.errors import RasterioIOError
+from rasterio.transform import Affine
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window, from_bounds
+from rasterio.windows import transform as window_transform
 
 from app.core.errors import ImageryError, InvalidInputError, UpstreamServiceError
 from app.core.logging import get_logger
@@ -246,6 +248,162 @@ def read_rgb_window(
         result.window["width"],
         result.window["height"],
         result.source_shape,
+        href,
+    )
+    return result
+
+
+# =========================================================================== #
+# Quantitative single-band reads
+#
+# Deliberately SEPARATE from the display path above. ``_extract_window`` routes
+# any single-band raster through ``_normalize_sar_band``, which percentile-clips
+# it to ``uint8`` - correct for Sentinel-1 display, destructive for a Sentinel-2
+# spectral band. Nothing below touches ``_extract_window``, ``read_rgb_window``
+# or ``_normalize_sar_band``; only the low-level geographic/window helpers are
+# shared.
+#
+# Quantitative reads are NEVER decimated: the returned array always has the
+# native shape of the clamped source window, so a "10 m" index really is
+# computed at 10 m. ``max_dimension`` and ``max_window_pixels`` are therefore
+# enforced as rejection bounds rather than as a decimation target.
+# =========================================================================== #
+
+
+@dataclass(frozen=True)
+class BandWindow:
+    """Result of a bounded, quantitative single-band read.
+
+    ``values`` holds the raw stored pixel values at the source dtype and the
+    source's native resolution. No scaling, offsetting, normalization or
+    resampling is applied - see ``app.services.analysis.engines`` for why the
+    STAC-advertised ``scale``/``offset`` are deliberately not used.
+
+    ``valid`` is an explicit boolean mask: ``False`` for the source ``nodata``
+    value and for non-finite samples. Consumers must mask with it rather than
+    inferring validity from the values themselves.
+    """
+
+    values: np.ndarray  # (height, width), source dtype preserved
+    valid: np.ndarray  # (height, width), bool
+    width: int
+    height: int
+    crs: str | None
+    transform: Affine  # affine of THIS window, in the source CRS
+    resolution: float | None  # native source GSD (CRS units per pixel)
+    nodata: float | None
+    window: dict[str, int]
+    source_shape: list[int]  # [height, width] of the full source raster
+
+
+def _band_validity(values: np.ndarray, nodata: float | None) -> np.ndarray:
+    """Explicit validity mask: finite, and not equal to the source nodata."""
+
+    if np.issubdtype(values.dtype, np.floating):
+        valid = np.isfinite(values)
+    else:
+        valid = np.ones(values.shape, dtype=bool)
+    if nodata is not None and math.isfinite(float(nodata)):
+        valid &= values != nodata
+    return valid
+
+
+def _extract_band_window(
+    src,
+    bbox: BoundingBox,
+    *,
+    max_dimension: int,
+    max_window_pixels: int,
+) -> BandWindow:
+    """Read one band of ``src`` over ``bbox`` at native resolution."""
+
+    if src.crs is None or src.transform is None or int(src.count) < 1:
+        raise UpstreamServiceError("The remote raster metadata is invalid.")
+
+    try:
+        proj_bounds = transform_bounds(
+            _WGS84, src.crs, bbox.west, bbox.south, bbox.east, bbox.north, densify_pts=21
+        )
+        raw_window = from_bounds(*proj_bounds, transform=src.transform)
+    except (ValueError, RasterioIOError) as exc:
+        raise ImageryError("Could not map the bbox onto the raster grid.") from exc
+
+    window = _clamp_window_to_source(raw_window, src.width, src.height)
+
+    native_w, native_h = int(window.width), int(window.height)
+    native_pixels = native_w * native_h
+    if native_pixels > max_window_pixels:
+        raise InvalidInputError(
+            "The requested window exceeds the maximum supported size "
+            f"({native_pixels} px > {max_window_pixels} px). Use a smaller bbox."
+        )
+    if max(native_w, native_h) > max_dimension:
+        # Quantitative reads are never decimated, so an oversized window is
+        # refused rather than silently resampled to a coarser grid.
+        raise InvalidInputError(
+            "The requested window exceeds the maximum quantitative read "
+            f"dimension ({max(native_w, native_h)} px > {max_dimension} px). "
+            "Quantitative reads are not decimated; use a smaller bbox."
+        )
+
+    try:
+        # NATIVE out_shape - deliberately not the display path's decimated shape.
+        values = _read_dataset_window(src, 1, window, (native_h, native_w))
+    except (RasterioIOError, MemoryError) as exc:
+        raise UpstreamServiceError("Failed to read the requested raster window.") from exc
+
+    nodata = None if src.nodata is None else float(src.nodata)
+
+    return BandWindow(
+        values=values,
+        valid=_band_validity(values, nodata),
+        width=native_w,
+        height=native_h,
+        crs=src.crs.to_string() if src.crs else None,
+        transform=window_transform(window, src.transform),
+        resolution=abs(float(src.transform.a)) if src.transform.a else None,
+        nodata=nodata,
+        window={
+            "col_off": int(window.col_off),
+            "row_off": int(window.row_off),
+            "width": native_w,
+            "height": native_h,
+        },
+        source_shape=[int(src.height), int(src.width)],
+    )
+
+
+def read_band_window(
+    href: str,
+    bbox: BoundingBox,
+    *,
+    max_dimension: int,
+    max_window_pixels: int,
+) -> BandWindow:
+    """Open ``href`` remotely and read band 1 over ``bbox``, values preserved.
+
+    The quantitative sibling of :func:`read_rgb_window`. It shares the window
+    mathematics but never the display normalization, and never decimates.
+    """
+
+    try:
+        with rasterio.Env(**_GDAL_ENV), _open_raster(href) as src:
+            result = _extract_band_window(
+                src,
+                bbox,
+                max_dimension=max_dimension,
+                max_window_pixels=max_window_pixels,
+            )
+    except RasterioIOError as exc:
+        logger.warning("Raster open failed for %s: %s", href, exc)
+        raise UpstreamServiceError("Could not open the remote raster.") from exc
+
+    logger.info(
+        "Read quantitative %sx%s window (%s, native %s m/px) from %s",
+        result.width,
+        result.height,
+        result.values.dtype,
+        result.resolution,
         href,
     )
     return result

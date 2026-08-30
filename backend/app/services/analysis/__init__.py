@@ -1,9 +1,11 @@
 """Analysis boundary over an already-computed query execution.
 
 Implemented so far: the contract itself (:class:`AnalysisRequest` ->
-:class:`AnalysisResult`) plus a deterministic ``visualize`` summary. No analysis
-engine exists yet; ``multimodal`` (fusion) and ``temporal`` (change detection)
-remain the future homes for the engines this service will dispatch to.
+:class:`AnalysisResult`), a deterministic ``visualize`` summary, and one pure
+engine - opt-in single-scene Sentinel-2 NDWI statistics
+(:mod:`app.services.analysis.engines`). ``multimodal`` (fusion) and ``temporal``
+(change detection) remain the future homes for engines needing more than one
+scene.
 
 Dependency direction is ``analysis -> query -> satellite``; nothing in ``query``
 may import this package.
