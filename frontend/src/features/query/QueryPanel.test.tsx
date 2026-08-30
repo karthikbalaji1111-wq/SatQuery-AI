@@ -1414,3 +1414,146 @@ describe("QueryPanel - NDWI opt-in", () => {
     });
   });
 });
+
+const TEMPORAL_COMPARISON = {
+  first: {
+    window_label: "baseline",
+    scene_id: "S2B_44PLA_20240115_0_L2A",
+    acquired_at: "2024-01-15T05:12:34Z",
+    cloud_cover: 3.1,
+    measurements: [
+      { name: "ndwi_valid_pixel_count", value: 1000, unit: "pixels" },
+      { name: "ndwi_mean", value: -0.42, unit: "index" },
+    ],
+  },
+  second: {
+    window_label: "target",
+    scene_id: "S2B_44PLA_20240715_0_L2A",
+    acquired_at: "2024-07-15T05:12:34Z",
+    cloud_cover: 8.4,
+    measurements: [
+      { name: "ndwi_valid_pixel_count", value: 1000, unit: "pixels" },
+      { name: "ndwi_mean", value: 0.18, unit: "index" },
+    ],
+  },
+  compatibility: {
+    same_modality: true,
+    temporal_separation_days: 182,
+    bbox_overlap: "full",
+    crs_match: "unknown",
+    resolution_match: "unknown",
+    processing_level_match: "same",
+    limitations: ["This report is derived from metadata only."],
+    co_registration_status: "not_evaluated",
+  },
+  differences: [{ name: "mean_ndwi_difference", value: 0.6, unit: "index" }],
+  warnings: ["mean_ndwi_difference is the difference between two aggregates."],
+};
+
+function enableTemporalNdwi() {
+  fireEvent.click(
+    screen.getByLabelText("Compute temporal NDWI statistics (two Sentinel-2 dates)"),
+  );
+}
+
+describe("QueryPanel - temporal NDWI opt-in", () => {
+  it("offers an unchecked temporal NDWI control by default", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    expect(
+      screen.getByLabelText(
+        "Compute temporal NDWI statistics (two Sentinel-2 dates)",
+      ),
+    ).not.toBeChecked();
+  });
+
+  it("omits include_temporal_ndwi entirely when the control is off", async () => {
+    const execution = executionResult();
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: execution },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    const body = analyzeBody(fetchMock);
+    expect(body).toEqual({ execution });
+    expect("include_temporal_ndwi" in body).toBe(false);
+  });
+
+  it("sends include_temporal_ndwi=true when the control is on", async () => {
+    const execution = executionResult();
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: execution },
+      "/query/analyze": {
+        body: analysisResult({ temporal_comparison: TEMPORAL_COMPARISON }),
+      },
+    });
+    render(<QueryPanel />);
+
+    enableTemporalNdwi();
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    expect(analyzeBody(fetchMock)).toEqual({
+      execution,
+      include_temporal_ndwi: true,
+    });
+  });
+
+  it("renders both observations, the difference and the limitations", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({ temporal_comparison: TEMPORAL_COMPARISON }),
+      },
+    });
+    render(<QueryPanel />);
+
+    enableTemporalNdwi();
+    runFullQuery();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Temporal NDWI Statistics" }),
+      ).toBeInTheDocument(),
+    );
+
+    expect(screen.getByText("baseline")).toBeInTheDocument();
+    expect(screen.getByText("target")).toBeInTheDocument();
+    expect(screen.getByText("Mean NDWI Difference")).toBeInTheDocument();
+    expect(
+      screen.getByText(/This report is derived from metadata only/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/difference between two aggregates/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no temporal section when the backend returns none", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult({ temporal_comparison: null }) },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Temporal NDWI Statistics" }),
+    ).not.toBeInTheDocument();
+  });
+});

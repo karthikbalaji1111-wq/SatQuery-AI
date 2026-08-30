@@ -226,6 +226,45 @@ export interface AnalysisWindowRef {
   selected_scene_id: string | null;
 }
 
+/**
+ * Compatibility between two observations, established from METADATA ONLY.
+ * `"unknown"` never means `"different"`, and no combination of matches implies
+ * co-registration - `co_registration_status` is derived from modality alone.
+ */
+export interface CompatibilityReport {
+  same_modality: boolean;
+  temporal_separation_days: number | null;
+  bbox_overlap: "none" | "partial" | "full" | "unknown";
+  crs_match: "same" | "different" | "unknown";
+  resolution_match: "same" | "different" | "unknown";
+  processing_level_match: "same" | "different" | "unknown";
+  limitations: string[];
+  co_registration_status: "not_evaluated" | "not_supported_cross_modal";
+}
+
+/** Index statistics for ONE observation, computed on its own pixels. */
+export interface ObservationIndexResult {
+  window_label: string;
+  scene_id: string;
+  acquired_at: string | null;
+  cloud_cover: number | null;
+  measurements: Measurement[];
+}
+
+/**
+ * Two independently indexed observations, side by side. `differences` holds at
+ * most one entry - the difference between the two aggregate means. It is a
+ * difference of statistics over two separate sets of pixels, not a spatial
+ * comparison, and it is suppressed entirely when that framing would mislead.
+ */
+export interface TemporalIndexComparison {
+  first: ObservationIndexResult;
+  second: ObservationIndexResult;
+  compatibility: CompatibilityReport;
+  differences: Measurement[];
+  warnings: string[];
+}
+
 /** The task is derived from `execution.plan.intent.task`; there is no task field. */
 export interface AnalysisRequest {
   execution: QueryExecutionResult;
@@ -235,6 +274,12 @@ export interface AnalysisRequest {
    * defaults it to `false`.
    */
   include_ndwi?: boolean;
+  /**
+   * Opt in to Temporal NDWI Statistics for one deterministic Sentinel-2
+   * observation pair. Independent of `include_ndwi`; the backend defaults it to
+   * `false`.
+   */
+  include_temporal_ndwi?: boolean;
 }
 
 export interface AnalysisResult {
@@ -244,4 +289,10 @@ export interface AnalysisResult {
   windows_considered: AnalysisWindowRef[];
   warnings: string[];
   measurements: Measurement[];
+  /**
+   * Temporal NDWI Statistics for one observation pair. `null` when the feature
+   * was not requested, or was requested but could not produce a valid
+   * comparison - the reason is then in `warnings`.
+   */
+  temporal_comparison?: TemporalIndexComparison | null;
 }

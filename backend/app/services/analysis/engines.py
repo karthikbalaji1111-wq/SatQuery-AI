@@ -1,8 +1,10 @@
 """Pure numerical analysis engines.
 
-Everything here is a deterministic function over arrays that were already read
-by the imagery layer. No network, no STAC, no COG access, no filesystem, no
-FastAPI, no orchestration - only arithmetic. Engines are what
+Everything here is a deterministic function over data that was already read by
+the imagery layer - raster arrays, or (since the temporal comparison below)
+``Measurement``s those arrays produced. No network, no STAC, no COG access, no
+filesystem, no FastAPI, no orchestration - only arithmetic and the decisions
+that arithmetic implies. Engines are what
 :class:`~app.services.analysis.service.AnalysisService` dispatches to; the
 service itself never performs pixel arithmetic.
 """
@@ -12,7 +14,11 @@ from __future__ import annotations
 import numpy as np
 
 from app.core.errors import ImageryError
-from app.services.analysis.schemas import Measurement
+from app.services.analysis.schemas import (
+    Measurement,
+    ObservationIndexResult,
+)
+from app.services.query.compatibility import CompatibilityReport
 from app.services.satellite.raster import BandWindow
 
 # --------------------------------------------------------------------------- #
@@ -117,3 +123,135 @@ def compute_ndwi_measurements(
         ]
     )
     return measurements
+
+
+# --------------------------------------------------------------------------- #
+# Temporal NDWI Statistics
+#
+# Two observations, each already indexed on its OWN pixels, summarised side by
+# side. The single derived value is
+#
+#     mean_ndwi_difference = second.ndwi_mean - first.ndwi_mean
+#
+# a difference between two aggregate statistics. No pixel is compared against
+# another pixel; no grid is aligned; nothing is resampled. Where that framing
+# would mislead - the footprints do not overlap, one side has no valid pixels,
+# or both sides resolved to the same scene - the value is suppressed rather
+# than reported with a caveat, because a number a reader can see is a number a
+# reader will use.
+# --------------------------------------------------------------------------- #
+
+#: The one derived measurement this engine may emit.
+MEAN_NDWI_DIFFERENCE = "mean_ndwi_difference"
+
+#: Above this reported scene cloud cover the statistics get an explicit warning.
+#: The index is never cloud-masked, so this is context, not a correction.
+HIGH_CLOUD_COVER_PERCENT = 30.0
+
+_MEAN_NAME = "ndwi_mean"
+_COUNT_NAME = "ndwi_valid_pixel_count"
+
+_WARN_AGGREGATE = (
+    "mean_ndwi_difference is the difference between two independently computed "
+    "aggregate statistics, each summarising its own set of pixels. No pixels "
+    "were compared against one another, and the value describes the statistics "
+    "only."
+)
+_WARN_NO_MEAN = (
+    "At least one observation has no valid pixels and therefore no mean NDWI, "
+    "so no difference was computed."
+)
+_WARN_NO_OVERLAP = (
+    "The two scene footprints do not overlap, so the two sets of statistics "
+    "describe separate areas and no difference was computed."
+)
+_WARN_PARTIAL_OVERLAP = (
+    "The two scene footprints overlap only partially, so the two sets of "
+    "statistics summarise different sets of pixels."
+)
+
+
+def _named(measurements: list[Measurement]) -> dict[str, float]:
+    return {m.name: m.value for m in measurements}
+
+
+def _cloud_warnings(observation: ObservationIndexResult) -> list[str]:
+    cover = observation.cloud_cover
+    label = observation.window_label
+    if cover is None:
+        return [
+            f"Observation {label!r} reports no cloud cover metadata, so cloud "
+            "contamination is unknown; the index is not cloud-masked."
+        ]
+    if cover > HIGH_CLOUD_COVER_PERCENT:
+        return [
+            f"Observation {label!r} reports {cover}% cloud cover; the index is "
+            "not cloud-masked, so its statistics may reflect cloud rather than "
+            "ground."
+        ]
+    return []
+
+
+def _sample_warnings(observation: ObservationIndexResult) -> list[str]:
+    count = _named(observation.measurements).get(_COUNT_NAME)
+    if count is not None and 0 < count <= 1:
+        return [
+            f"Observation {observation.window_label!r} has only {int(count)} "
+            "valid pixel(s), so its statistics are not meaningful."
+        ]
+    return []
+
+
+def compare_ndwi_observations(
+    *,
+    first: ObservationIndexResult,
+    second: ObservationIndexResult,
+    compatibility: CompatibilityReport,
+) -> tuple[list[Measurement], list[str]]:
+    """Difference of two aggregate NDWI means, plus what qualifies it.
+
+    Returns ``(differences, warnings)``. ``differences`` holds at most one
+    measurement and is empty whenever the comparison would misinform. Inputs are
+    never mutated, and the output is deterministic: warnings are emitted in a
+    fixed order.
+    """
+
+    warnings = [_WARN_AGGREGATE]
+
+    first_mean = _named(first.measurements).get(_MEAN_NAME)
+    second_mean = _named(second.measurements).get(_MEAN_NAME)
+
+    # Suppression - at most one reason, checked in a fixed order.
+    suppressed: str | None = None
+    if first_mean is None or second_mean is None:
+        suppressed = _WARN_NO_MEAN
+    elif compatibility.bbox_overlap == "none":
+        suppressed = _WARN_NO_OVERLAP
+    elif first.scene_id == second.scene_id:
+        suppressed = (
+            f"Both observations resolved to the same scene {first.scene_id!r}, "
+            "so a difference would be trivially zero and none was computed."
+        )
+
+    if suppressed is not None:
+        warnings.append(suppressed)
+
+    if compatibility.bbox_overlap == "partial":
+        warnings.append(_WARN_PARTIAL_OVERLAP)
+
+    for observation in (first, second):
+        warnings.extend(_cloud_warnings(observation))
+    for observation in (first, second):
+        warnings.extend(_sample_warnings(observation))
+
+    if suppressed is not None:
+        return [], warnings
+
+    # Both means are known here; mypy cannot see it through the branch above.
+    assert first_mean is not None and second_mean is not None
+    difference = Measurement(
+        name=MEAN_NDWI_DIFFERENCE,
+        value=float(second_mean - first_mean),
+        unit=_INDEX_UNIT,
+    )
+    return [difference], warnings

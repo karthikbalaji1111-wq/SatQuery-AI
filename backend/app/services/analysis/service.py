@@ -18,9 +18,10 @@ selection and STAC access remain outside this service.)
 execution actually retrieved; every other task is reported as
 ``not_implemented`` (see ``analysis/schemas.py`` for why that is a 200 body
 rather than a 501 error). Independently of the task, ``include_ndwi`` opts in to
-single-scene Sentinel-2 NDWI statistics. Future engines (change detection,
-object identification, fusion) are dispatched from here without changing this
-contract.
+single-scene Sentinel-2 NDWI statistics, and ``include_temporal_ndwi`` opts in
+to Temporal NDWI Statistics for one deterministic Sentinel-2 pair - two
+observations indexed independently, never compared pixel by pixel. Future
+engines are dispatched from here without changing this contract.
 """
 
 from __future__ import annotations
@@ -29,15 +30,28 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.services.analysis.engines import compute_ndwi_measurements
+from app.services.analysis.engines import (
+    compare_ndwi_observations,
+    compute_ndwi_measurements,
+)
 from app.services.analysis.schemas import (
     AnalysisRequest,
     AnalysisResult,
     AnalysisWindowRef,
     Measurement,
+    ObservationIndexResult,
+    TemporalIndexComparison,
 )
 from app.services.base import DomainService
-from app.services.query.schemas import ExecutedWindow, QueryExecutionResult, QueryTask
+from app.services.geospatial.schemas import BoundingBox
+from app.services.query.compatibility import compute_compatibility, pair_observations
+from app.services.query.schemas import (
+    ExecutedWindow,
+    Observation,
+    ObservationSet,
+    QueryExecutionResult,
+    QueryTask,
+)
 from app.services.satellite import ImageryService
 
 logger = get_logger("analysis")
@@ -172,8 +186,9 @@ class AnalysisService(DomainService):
     def describe(self) -> str:
         return (
             "Deterministic interpretation of an executed SatQuery result: "
-            "status, templated answer, window traceability, warnings, and "
-            "opt-in single-scene Sentinel-2 NDWI statistics."
+            "status, templated answer, window traceability, warnings, "
+            "opt-in single-scene Sentinel-2 NDWI statistics, and opt-in "
+            "Temporal NDWI Statistics for one Sentinel-2 observation pair."
         )
 
     async def _ndwi_measurements(
@@ -239,6 +254,117 @@ class AnalysisService(DomainService):
         )
         return measurements, warnings
 
+    async def _observation_index(
+        self, observation: Observation, bbox: BoundingBox
+    ) -> ObservationIndexResult:
+        """Index ONE observation on its own pixels. Two reads, no comparison.
+
+        Uses the unchanged ``ImageryService.read_band`` path - raw values at
+        native resolution, never the display path. The collection comes straight
+        off the acquired scene.
+        """
+
+        green = await run_in_threadpool(
+            self._imagery.read_band,
+            scene_id=observation.scene_id,
+            bbox=bbox,
+            asset=_NDWI_GREEN_ASSET,
+            collection=observation.collection,
+        )
+        nir = await run_in_threadpool(
+            self._imagery.read_band,
+            scene_id=observation.scene_id,
+            bbox=bbox,
+            asset=_NDWI_NIR_ASSET,
+            collection=observation.collection,
+        )
+        return ObservationIndexResult(
+            window_label=observation.window_label,
+            scene_id=observation.scene_id,
+            acquired_at=observation.acquired_at,
+            cloud_cover=observation.scene.cloud_cover,
+            measurements=compute_ndwi_measurements(green, nir),
+        )
+
+    async def _temporal_ndwi(
+        self, execution: QueryExecutionResult
+    ) -> tuple[TemporalIndexComparison | None, list[str]]:
+        """Temporal NDWI Statistics for ONE deterministic Sentinel-2 pair.
+
+        Orchestration only: select the pair (Phase 13, read-only), read the
+        bands (Phase 11, unchanged), then hand both summaries to the pure engine.
+        Returns ``(comparison, orchestration_warnings)``; the comparison's own
+        warnings live on the returned model.
+        """
+
+        observations = execution.observations
+        optical = [
+            observation
+            for observation in observations.observations
+            if observation.modality == _OPTICAL_MODALITY
+        ]
+        # SAR is filtered out before pairing: Sentinel-1 is not comparable to
+        # Sentinel-2 without terrain correction, and NDWI is optical-only.
+        pairs, failures = pair_observations(
+            ObservationSet(
+                requested_bbox=observations.requested_bbox, observations=optical
+            )
+        )
+
+        warnings: list[str] = []
+        if not pairs:
+            reasons = [failure.reason for failure in failures] or [
+                "no Sentinel-2 observation pair was available."
+            ]
+            warnings.extend(
+                "Temporal NDWI statistics were requested but no Sentinel-2 pair "
+                f"could be formed: {reason}"
+                for reason in reasons
+            )
+            return None, warnings
+
+        pair = pairs[0]
+        if len(pairs) > 1:
+            warnings.append(
+                "Temporal NDWI statistics cover one observation pair "
+                f"({pair.first.window_label!r} and {pair.second.window_label!r}); "
+                f"{len(pairs) - 1} further consecutive pair(s) were not analysed."
+            )
+
+        bbox = execution.plan.bbox
+        try:
+            first = await self._observation_index(pair.first, bbox)
+            second = await self._observation_index(pair.second, bbox)
+        except AppError as exc:
+            logger.info(
+                "Temporal NDWI unavailable for pair %s/%s [%s]: %s",
+                pair.first.window_label,
+                pair.second.window_label,
+                exc.code,
+                exc.message,
+            )
+            warnings.append(
+                "Temporal NDWI statistics could not be computed for the pair "
+                f"{pair.first.window_label!r} / {pair.second.window_label!r}: "
+                f"{exc.message}"
+            )
+            return None, warnings
+
+        compatibility = compute_compatibility(pair.first, pair.second)
+        differences, comparison_warnings = compare_ndwi_observations(
+            first=first, second=second, compatibility=compatibility
+        )
+        return (
+            TemporalIndexComparison(
+                first=first,
+                second=second,
+                compatibility=compatibility,
+                differences=differences,
+                warnings=comparison_warnings,
+            ),
+            warnings,
+        )
+
     async def analyze(self, request: AnalysisRequest) -> AnalysisResult:
         """Interpret ``request.execution``; the task comes from its intent."""
 
@@ -264,14 +390,28 @@ class AnalysisService(DomainService):
                     "Sentinel-2 scene at native 10 m resolution."
                 )
 
+        temporal_comparison: TemporalIndexComparison | None = None
+        if request.include_temporal_ndwi:
+            temporal_comparison, temporal_warnings = await self._temporal_ndwi(
+                execution
+            )
+            warnings.extend(temporal_warnings)
+            if temporal_comparison is not None:
+                answer = (
+                    f"{answer} Temporal NDWI statistics were computed for two "
+                    "Sentinel-2 observations, each indexed independently at "
+                    "native 10 m resolution."
+                )
+
         logger.info(
             "Analysed execution (task=%s, status=%s, windows=%d, warnings=%d, "
-            "measurements=%d)",
+            "measurements=%d, temporal=%s)",
             task,
             status,
             len(refs),
             len(warnings),
             len(measurements),
+            temporal_comparison is not None,
         )
 
         return AnalysisResult(
@@ -281,4 +421,5 @@ class AnalysisService(DomainService):
             windows_considered=refs,
             warnings=warnings,
             measurements=measurements,
+            temporal_comparison=temporal_comparison,
         )

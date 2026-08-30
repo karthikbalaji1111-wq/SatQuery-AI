@@ -23,6 +23,7 @@ import type {
   SatQueryIntent,
   SceneSearchResponse,
   TemporalComparison,
+  TemporalIndexComparison,
   TemporalMode,
 } from "../../api/types";
 
@@ -119,6 +120,7 @@ export function QueryPanel() {
   const [planState, setPlanState] = useState<PlanState>({ status: "idle" });
   const [includeImagery, setIncludeImagery] = useState(false);
   const [includeNdwi, setIncludeNdwi] = useState(false);
+  const [includeTemporalNdwi, setIncludeTemporalNdwi] = useState(false);
   const [executeState, setExecuteState] = useState<ExecuteState>({
     status: "idle",
   });
@@ -280,6 +282,7 @@ export function QueryPanel() {
         // Omitted when off, so a non-NDWI request is byte-identical
         // to the pre-NDWI behaviour.
         ...(includeNdwi ? { include_ndwi: true } : {}),
+        ...(includeTemporalNdwi ? { include_temporal_ndwi: true } : {}),
       });
       setAnalyzeState({ status: "done", result: analysis });
     } catch (error) {
@@ -541,6 +544,15 @@ export function QueryPanel() {
             onChange={(event) => setIncludeNdwi(event.target.checked)}
           />
           Compute NDWI index statistics (Sentinel-2)
+        </label>
+        <label className="include-temporal-ndwi">
+          <input
+            type="checkbox"
+            name="include_temporal_ndwi"
+            checked={includeTemporalNdwi}
+            onChange={(event) => setIncludeTemporalNdwi(event.target.checked)}
+          />
+          Compute temporal NDWI statistics (two Sentinel-2 dates)
         </label>
         <button type="button" onClick={handleExecute} disabled={!canExecute}>
           {executeState.status === "loading" ? "Running…" : "Run full query"}
@@ -825,9 +837,95 @@ function AnalysisView({ result }: { result: AnalysisResult }) {
         </dl>
       )}
 
+      {result.temporal_comparison && (
+        <TemporalComparisonView comparison={result.temporal_comparison} />
+      )}
+
       {result.warnings.map((warning) => (
         <p key={warning} className="hint">
           Warning: {warning}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Temporal NDWI Statistics: two Sentinel-2 observations, each indexed on its
+ * own pixels, shown side by side. The Mean NDWI Difference is a difference
+ * between two aggregate statistics - no pixels were compared with one another,
+ * nothing was co-registered, and the backend suppresses the value entirely when
+ * that framing would mislead. Text only: no map, overlay or mask.
+ */
+function TemporalComparisonView({
+  comparison,
+}: {
+  comparison: TemporalIndexComparison;
+}) {
+  const { first, second, compatibility, differences, warnings } = comparison;
+
+  return (
+    <div className="temporal-comparison">
+      <h4>Temporal NDWI Statistics</h4>
+
+      <ul className="temporal-observations">
+        {[first, second].map((observation) => (
+          <li key={`${observation.window_label}:${observation.scene_id}`}>
+            <h5>{observation.window_label}</h5>
+            <dl>
+              <div>
+                <dt>Scene</dt>
+                <dd>{observation.scene_id}</dd>
+              </div>
+              <div>
+                <dt>Acquired</dt>
+                <dd>{observation.acquired_at ?? "— unknown —"}</dd>
+              </div>
+              <div>
+                <dt>Cloud cover</dt>
+                <dd>
+                  {observation.cloud_cover === null
+                    ? "— unknown —"
+                    : `${observation.cloud_cover}%`}
+                </dd>
+              </div>
+              {observation.measurements.map((measurement) => (
+                <div key={measurement.name}>
+                  <dt>{measurement.name}</dt>
+                  <dd>
+                    {measurement.value} {measurement.unit}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ul>
+
+      {differences.length > 0 && (
+        <dl className="temporal-differences">
+          {differences.map((difference) => (
+            <div key={difference.name}>
+              <dt>Mean NDWI Difference</dt>
+              <dd>
+                {difference.value} {difference.unit}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      <p className="hint">
+        Compatibility: {compatibility.co_registration_status} · footprint
+        overlap {compatibility.bbox_overlap} · CRS {compatibility.crs_match} ·
+        resolution {compatibility.resolution_match}
+        {compatibility.temporal_separation_days !== null &&
+          ` · ${compatibility.temporal_separation_days} days apart`}
+      </p>
+
+      {[...warnings, ...compatibility.limitations].map((note) => (
+        <p key={note} className="hint">
+          Note: {note}
         </p>
       ))}
     </div>
