@@ -80,10 +80,51 @@ function formatBbox(bbox: BoundingBox): string {
   );
 }
 
+/**
+ * Presentation-layer number formatting. The API representation and the backend
+ * values are never rounded - only what the user reads is.
+ *
+ * Unit-driven, because the backend already labels every Measurement: an index
+ * keeps 4 decimals (NDWI is meaningful to ~1e-4), a percentage 1, a pixel count
+ * is an integer with thousands separators.
+ */
+function formatMeasurement(value: number, unit: string): string {
+  if (!Number.isFinite(value)) return String(value);
+  switch (unit) {
+    case "index":
+      return value.toFixed(4);
+    case "%":
+      return value.toFixed(1);
+    case "pixels":
+      return Math.round(value).toLocaleString("en-US");
+    default:
+      return String(value);
+  }
+}
+
+/** Day intervals: whole-day precision is what an acquisition gap warrants. */
+function formatDays(days: number): string {
+  return Number.isFinite(days) ? days.toFixed(1) : String(days);
+}
+
+/** Cloud cover, matching the existing scene-list presentation. */
+function formatPercent(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : String(value);
+}
+
+/**
+ * Only `visualize` has an analysis engine. The other two are valid intents the
+ * backend accepts and answers with `status: "not_implemented"`, so they stay
+ * selectable - but they are labelled so no one reads Temporal NDWI Statistics
+ * as a change-detection result.
+ */
 const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
   { value: "visualize", label: "Visualize" },
-  { value: "change_detection", label: "Change Detection" },
-  { value: "object_identification", label: "Object Identification" },
+  { value: "change_detection", label: "Change Detection (unavailable)" },
+  {
+    value: "object_identification",
+    label: "Object Identification (unavailable)",
+  },
 ];
 
 /**
@@ -830,7 +871,8 @@ function AnalysisView({ result }: { result: AnalysisResult }) {
             <div key={measurement.name}>
               <dt>{measurement.name}</dt>
               <dd>
-                {measurement.value} {measurement.unit}
+                {formatMeasurement(measurement.value, measurement.unit)}{" "}
+                {measurement.unit}
               </dd>
             </div>
           ))}
@@ -886,14 +928,15 @@ function TemporalComparisonView({
                 <dd>
                   {observation.cloud_cover === null
                     ? "— unknown —"
-                    : `${observation.cloud_cover}%`}
+                    : `${formatPercent(observation.cloud_cover)}%`}
                 </dd>
               </div>
               {observation.measurements.map((measurement) => (
                 <div key={measurement.name}>
                   <dt>{measurement.name}</dt>
                   <dd>
-                    {measurement.value} {measurement.unit}
+                    {formatMeasurement(measurement.value, measurement.unit)}{" "}
+                    {measurement.unit}
                   </dd>
                 </div>
               ))}
@@ -908,7 +951,8 @@ function TemporalComparisonView({
             <div key={difference.name}>
               <dt>Mean NDWI Difference</dt>
               <dd>
-                {difference.value} {difference.unit}
+                {formatMeasurement(difference.value, difference.unit)}{" "}
+                {difference.unit}
               </dd>
             </div>
           ))}
@@ -920,7 +964,7 @@ function TemporalComparisonView({
         overlap {compatibility.bbox_overlap} · CRS {compatibility.crs_match} ·
         resolution {compatibility.resolution_match}
         {compatibility.temporal_separation_days !== null &&
-          ` · ${compatibility.temporal_separation_days} days apart`}
+          ` · ${formatDays(compatibility.temporal_separation_days)} days apart`}
       </p>
 
       {[...warnings, ...compatibility.limitations].map((note) => (

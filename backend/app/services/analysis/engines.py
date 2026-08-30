@@ -171,6 +171,66 @@ _WARN_PARTIAL_OVERLAP = (
 )
 
 
+def _coverage_warning(
+    first: ObservationIndexResult, second: ObservationIndexResult
+) -> list[str]:
+    """State how much of the AOI each observation actually contributed.
+
+    A scene footprint is not AOI coverage. Each quantitative read is clamped to
+    its own scene and masked by its own nodata, so two observations over the
+    SAME requested bbox can analyse very different numbers of pixels - even when
+    the footprints report ``bbox_overlap == "full"``.
+
+    This states the measured coverage and stops there. No threshold is applied
+    and no suppression is triggered: the repository has no scientifically
+    defensible basis for a "materially different coverage" cut-off, and
+    inventing one would replace an honest report with a fabricated judgement.
+    """
+
+    parts = []
+    for observation in (first, second):
+        window = observation.window_pixel_count
+        valid = _named(observation.measurements).get(_COUNT_NAME)
+        if window is None or valid is None or window <= 0:
+            return []
+        parts.append(
+            f"{observation.window_label!r} analysed {int(valid)} valid of "
+            f"{window} AOI pixels ({valid / window * 100.0:.1f}%)"
+        )
+
+    return [
+        "Equal AOI coverage is NOT established: "
+        + "; ".join(parts)
+        + ". Scene footprint overlap does not establish equal coverage, and "
+        "the two means summarise different samples."
+    ]
+
+
+def _grid_warning(
+    first: ObservationIndexResult, second: ObservationIndexResult
+) -> list[str]:
+    """Report the CRS and resolution the reads ACTUALLY used, when known.
+
+    Independent of the metadata-only compatibility report, which sees only
+    ``ImageryResponse`` and therefore reports ``"unknown"`` whenever bounded
+    display imagery was not retrieved.
+    """
+
+    if first.crs is None or second.crs is None:
+        return []
+    if first.crs == second.crs and first.resolution == second.resolution:
+        return [
+            f"Both observations were read in {first.crs} at "
+            f"{first.resolution} m/px."
+        ]
+    return [
+        "The two observations were read on different grids "
+        f"({first.crs} at {first.resolution} m/px versus {second.crs} at "
+        f"{second.resolution} m/px); nothing was reprojected or aligned, so "
+        "each statistic summarises its own grid."
+    ]
+
+
 def _named(measurements: list[Measurement]) -> dict[str, float]:
     return {m.name: m.value for m in measurements}
 
@@ -238,6 +298,9 @@ def compare_ndwi_observations(
 
     if compatibility.bbox_overlap == "partial":
         warnings.append(_WARN_PARTIAL_OVERLAP)
+
+    warnings.extend(_coverage_warning(first, second))
+    warnings.extend(_grid_warning(first, second))
 
     for observation in (first, second):
         warnings.extend(_cloud_warnings(observation))

@@ -955,3 +955,113 @@ def test_rasterio_is_not_imported_by_the_analysis_service() -> None:
     source = pathlib.Path(service_mod.__file__).read_text()
     assert "rasterio" not in source
     assert rasterio is not None  # the import above is for the integration test only
+
+
+# =========================================================================== #
+# Phase 14.1 - AOI coverage evidence
+#
+# Scene footprint overlap is NOT AOI coverage. Two observations can have
+# identical footprints (bbox_overlap == "full") and still have analysed very
+# different numbers of AOI pixels, because the quantitative read clamps to the
+# source and masks nodata independently for each scene. The evidence needed to
+# say so already exists in the BandWindow; these tests pin that it reaches the
+# report instead of being discarded.
+#
+# No threshold is invented and no new suppression rule is introduced: the
+# correction is to state the coverage, not to judge it.
+# =========================================================================== #
+
+
+def index_result_with_evidence(
+    *,
+    window_label: str = "baseline",
+    scene_id: str = "scene-a",
+    mean: float | None = 0.2,
+    valid: float = 4200.0,
+    window_pixels: int | None = 4489,
+    crs: str | None = "EPSG:32644",
+    resolution: float | None = 10.0,
+) -> ObservationIndexResult:
+    measurements = [
+        Measurement(name="ndwi_valid_pixel_count", value=valid, unit="pixels")
+    ]
+    if mean is not None:
+        measurements.append(Measurement(name="ndwi_mean", value=mean, unit="index"))
+    return ObservationIndexResult(
+        window_label=window_label,
+        scene_id=scene_id,
+        acquired_at=None,
+        cloud_cover=1.0,
+        measurements=measurements,
+        crs=crs,
+        resolution=resolution,
+        window_pixel_count=window_pixels,
+    )
+
+
+def test_coverage_is_reported_even_when_footprints_fully_overlap() -> None:
+    """The adversarial case: identical footprints, wildly different coverage."""
+
+    differences, warnings = compare_ndwi_observations(
+        first=index_result_with_evidence(scene_id="a", valid=4200.0),
+        second=index_result_with_evidence(
+            window_label="target", scene_id="b", mean=0.5, valid=210.0
+        ),
+        compatibility=compat(),
+    )
+
+    assert compat().bbox_overlap == "full"  # footprints say "fully overlapping"
+    # ...yet the analysed samples differ by an order of magnitude, and the
+    # report must say so with the actual numbers.
+    coverage = [w for w in warnings if "coverage" in w.lower()]
+    assert coverage, "expected an explicit AOI-coverage statement"
+    assert "4200" in coverage[0] and "210" in coverage[0]
+    assert "4489" in coverage[0]
+    # No invented threshold: the difference is still reported, not suppressed.
+    assert len(differences) == 1
+
+
+def test_coverage_statement_names_both_window_labels() -> None:
+    _, warnings = compare_ndwi_observations(
+        first=index_result_with_evidence(window_label="baseline", scene_id="a"),
+        second=index_result_with_evidence(
+            window_label="target", scene_id="b", mean=0.5
+        ),
+        compatibility=compat(),
+    )
+    coverage = [w for w in warnings if "coverage" in w.lower()][0]
+    assert "baseline" in coverage and "target" in coverage
+
+
+def test_actual_read_crs_and_resolution_are_reported_when_known() -> None:
+    _, warnings = compare_ndwi_observations(
+        first=index_result_with_evidence(scene_id="a", crs="EPSG:32644"),
+        second=index_result_with_evidence(
+            window_label="target", scene_id="b", mean=0.5, crs="EPSG:32643"
+        ),
+        compatibility=compat(),
+    )
+    # The metadata-only compatibility report cannot know this; the reads can.
+    assert compat().crs_match == "unknown"
+    grid = [w for w in warnings if "EPSG:32644" in w and "EPSG:32643" in w]
+    assert grid, "expected the actual read CRSs to be reported"
+
+
+def test_coverage_statement_is_absent_when_evidence_is_missing() -> None:
+    _, warnings = compare(
+        first=index_result(mean=0.2, scene_id="a"),
+        second=index_result(mean=0.5, scene_id="b"),
+    )
+    # Nothing is fabricated when the BandWindow evidence was not carried.
+    assert not [w for w in warnings if "AOI pixels" in w]
+
+
+def test_service_carries_band_window_evidence_into_the_result() -> None:
+    result, _ = analyze_temporal(two_window_execution())
+    comparison = result.temporal_comparison
+
+    assert comparison is not None
+    for side in (comparison.first, comparison.second):
+        assert side.crs == "EPSG:32644"
+        assert side.resolution == 10.0
+        assert side.window_pixel_count == 1  # the 1x1 synthetic band fixture

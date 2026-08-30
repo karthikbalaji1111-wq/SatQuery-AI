@@ -503,11 +503,16 @@ describe("QueryPanel - query plan", () => {
 
     const taskSelect = screen.getByLabelText("Task") as HTMLSelectElement;
     expect(taskSelect.value).toBe("visualize");
+    // Phase 14.1: still selectable (the backend answers them with
+    // status "not_implemented"), but labelled so neither is mistaken for a
+    // capability the system has.
     expect(
-      screen.getByRole("option", { name: "Change Detection" }),
+      screen.getByRole("option", { name: "Change Detection (unavailable)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "Object Identification" }),
+      screen.getByRole("option", {
+        name: "Object Identification (unavailable)",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -1345,7 +1350,7 @@ describe("QueryPanel - NDWI opt-in", () => {
       expect(screen.getByText(name)).toBeInTheDocument();
     }
     expect(screen.getByText("0.2777 index")).toBeInTheDocument();
-    expect(screen.getByText("1234 pixels")).toBeInTheDocument();
+    expect(screen.getByText("1,234 pixels")).toBeInTheDocument();
     expect(screen.getByText("12.5 %")).toBeInTheDocument();
     // The index threshold is never presented as water/flood detection.
     expect(screen.queryByText(/water detect/i)).not.toBeInTheDocument();
@@ -1555,5 +1560,119 @@ describe("QueryPanel - temporal NDWI opt-in", () => {
     expect(
       screen.queryByRole("heading", { name: "Temporal NDWI Statistics" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// ===========================================================================
+// Phase 14.1 - presentation fixes
+//
+// Formatting is a PRESENTATION concern only: the API representation and the
+// backend values are unchanged, and these tests assert the rendered text.
+// ===========================================================================
+
+const UGLY_COMPARISON = {
+  ...TEMPORAL_COMPARISON,
+  first: {
+    ...TEMPORAL_COMPARISON.first,
+    cloud_cover: 3.14159265,
+    measurements: [
+      { name: "ndwi_valid_pixel_count", value: 1234567, unit: "pixels" },
+      { name: "ndwi_mean", value: -0.5794832165498732, unit: "index" },
+      {
+        name: "ndwi_percent_above_index_threshold_0.3",
+        value: 44.03472222222222,
+        unit: "%",
+      },
+    ],
+  },
+  compatibility: {
+    ...TEMPORAL_COMPARISON.compatibility,
+    temporal_separation_days: 44.03472222222222,
+  },
+  differences: [
+    { name: "mean_ndwi_difference", value: -0.5794832165498732, unit: "index" },
+  ],
+};
+
+describe("QueryPanel - numeric presentation", () => {
+  it("formats index, percentage, count and day values readably", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({ temporal_comparison: UGLY_COMPARISON }),
+      },
+    });
+    render(<QueryPanel />);
+
+    enableTemporalNdwi();
+    runFullQuery();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Temporal NDWI Statistics" }),
+      ).toBeInTheDocument(),
+    );
+
+    // Machine precision must not reach the user.
+    expect(screen.queryByText(/0\.5794832165498732/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/44\.03472222222222/)).not.toBeInTheDocument();
+
+    // Index values keep useful precision.
+    expect(screen.getAllByText(/-0\.5795/).length).toBeGreaterThan(0);
+    // Percentages to one decimal.
+    expect(screen.getByText(/44\.0\s*%/)).toBeInTheDocument();
+    // Counts as integers with separators.
+    expect(screen.getByText(/1,234,567/)).toBeInTheDocument();
+    // Day intervals to sensible precision.
+    expect(screen.getByText(/44\.0 days apart/)).toBeInTheDocument();
+    // Cloud cover to one decimal.
+    expect(screen.getByText(/3\.1%/)).toBeInTheDocument();
+  });
+
+  it("formats single-scene NDWI measurements too", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({
+          measurements: [
+            { name: "ndwi_mean", value: 0.27770000123456, unit: "index" },
+            { name: "ndwi_valid_pixel_count", value: 1234567, unit: "pixels" },
+          ],
+        }),
+      },
+    });
+    render(<QueryPanel />);
+
+    enableNdwi();
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    expect(screen.queryByText(/0\.27770000123456/)).not.toBeInTheDocument();
+    expect(screen.getByText(/0\.2777/)).toBeInTheDocument();
+    expect(screen.getByText(/1,234,567/)).toBeInTheDocument();
+  });
+});
+
+describe("QueryPanel - unsupported task labelling", () => {
+  it("marks change detection and object identification as unavailable", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    const select = screen.getByLabelText("Task") as HTMLSelectElement;
+    const labels = Array.from(select.options).map((o) => o.text);
+
+    expect(labels.some((l) => /Visualize/.test(l))).toBe(true);
+    // The user must not read "Change Detection" as something the system does.
+    expect(
+      labels.some((l) => /Change Detection.*(unavailable|not implemented)/i.test(l)),
+    ).toBe(true);
+    expect(
+      labels.some((l) =>
+        /Object Identification.*(unavailable|not implemented)/i.test(l),
+      ),
+    ).toBe(true);
   });
 });
