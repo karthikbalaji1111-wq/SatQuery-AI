@@ -44,8 +44,21 @@ Core intended capabilities:
    (`status="ok"`, templated summary); `change_detection` and
    `object_identification` return `status="not_implemented"` in a 200 body. No
    analysis engine exists yet.
+10. Single-scene Sentinel-2 NDWI: a quantitative raster path
+   (`BandWindow` / `read_band_window` / `ImageryService.read_band`) reads raw
+   `uint16` bands at native resolution - never through the display path and
+   never decimated - and a pure engine returns scalar NDWI `Measurement`s via
+   the opt-in `AnalysisRequest.include_ndwi` flag. Index statistics only; not a
+   validated water or flood classification.
+11. Temporal observation model (domain representation only): `Observation` and
+   `ObservationSet` distinguish a *requested* `TimeRange` from an *acquired*
+   scene, and are derived from `ExecutedWindow`s as `QueryExecutionResult.
+   observations`. Carries acquisition time, scene id, collection, modality,
+   footprint, assets and any retrieved imagery so a later phase can establish
+   alignment explicitly. No co-registration, no comparison, no resampling -
+   observations are NOT assumed to share a CRS, grid or resolution.
 
-Current HEAD represents the completed Analysis Boundary phase.
+Current HEAD represents the completed Temporal Observation Model phase.
 
 ## Architecture Rules
 
@@ -176,6 +189,11 @@ Inspect the repository first and adapt to the actual codebase.
   `AnalysisService` via the opt-in `AnalysisRequest.include_ndwi` flag, and
   surfaced in the UI by an NDWI checkbox in `QueryPanel`. No other analysis
   engine exists.
+- **Phase 12: IMPLEMENTED.** Temporal observation model - `Observation` /
+  `ObservationSet` in `query/schemas.py`, exposed additively as the derived
+  `QueryExecutionResult.observations`. Domain representation only: no temporal
+  analysis, no differencing, no co-registration, no resampling, and no
+  assumption that observations are spatially aligned or share a resolution.
 
 ## 3. Architectural state — VERIFIED
 
