@@ -63,8 +63,17 @@ Core intended capabilities:
    what cannot. It establishes the COMPATIBILITY BOUNDARY, not an alignment
    mechanism. Pure domain capability: no API route, no frontend, no
    `AnalysisService` involvement.
+13. Temporal NDWI Statistics: for ONE deterministic same-modality Sentinel-2
+   pair, each observation is indexed **independently** at native 10 m
+   resolution and the two summaries are reported side by side with their Phase
+   13 `CompatibilityReport`. The single derived value is
+   `mean_ndwi_difference = second.ndwi_mean - first.ndwi_mean` - a difference
+   between two aggregate statistics over two separate sets of pixels. No pixel
+   is compared against another pixel, nothing is aligned or resampled, and the
+   value is suppressed when that framing would mislead. Opt-in via
+   `AnalysisRequest.include_temporal_ndwi`.
 
-Current HEAD represents the completed Observation Compatibility Reporting phase.
+Current HEAD represents the completed Temporal NDWI Statistics phase.
 
 ## Architecture Rules
 
@@ -207,6 +216,12 @@ Inspect the repository first and adapt to the actual codebase.
   pixel comparison, and co-registration is never claimed. Pure domain
   capability - no route, no frontend, no `AnalysisService` change. See
   section 13.
+- **Phase 14: IMPLEMENTED.** Temporal NDWI Statistics - one deterministic
+  Sentinel-2 pair, each observation indexed independently, reported side by
+  side with its Phase 13 compatibility report plus a single aggregate
+  `mean_ndwi_difference`. Opt-in (`include_temporal_ndwi`), additive on the
+  existing `/query/analyze` contract. No co-registration, no resampling, no
+  pixel comparison. See section 14.
 
 ## 3. Architectural state — VERIFIED
 
@@ -559,3 +574,93 @@ key that anchors a naive datetime to UTC **for ordering only**. Note the
 deliberate asymmetry: `temporal_separation_days` refuses that assumption and
 returns `None` for a mixed pair, because a *reported measurement* must not
 invent a time zone.
+
+## 14. Phase 14 — Temporal NDWI Statistics — IMPLEMENTED
+
+The first capability in SatQuery that **reasons across two observations**. It
+does so without any raster alignment, because it never needs one: each
+observation is indexed on its own pixels and only the resulting *scalars* are
+placed side by side.
+
+**Objective.** For ONE deterministic same-modality Sentinel-2 pair, compute NDWI
+statistics independently per observation at native 10 m resolution, and report
+them together with the pair's Phase 13 `CompatibilityReport`.
+
+**The one derived value:**
+
+```
+mean_ndwi_difference = second.ndwi_mean - first.ndwi_mean
+```
+
+It is a difference between two **aggregate statistics**, each summarising a
+different set of pixels. It is NOT per-pixel change detection, NOT spatial
+change detection, NOT detected physical change, NOT a change mask, and NOT
+evidence of land-cover change. User-facing terminology is **"Temporal NDWI
+Statistics"** and **"Mean NDWI Difference"**. A test scans every user-facing
+string against a forbidden-phrase list; the disclaimers are worded so they never
+need those phrases themselves.
+
+**Suppression.** The difference is withheld entirely - not annotated - when the
+framing would mislead: either observation has no valid pixels, the footprints do
+not overlap (`bbox_overlap == "none"`), or both observations resolved to the same
+scene. A number a reader can see is a number a reader will use.
+
+**Pair selection.** Optical observations only (SAR is filtered out *before*
+pairing - NDWI is optical-only and S1 is not comparable without terrain
+correction). Then Phase 13's `pair_observations`, read-only:
+
+| Eligible optical observations | Behaviour |
+| --- | --- |
+| 0 or 1 | Warning, `temporal_comparison = None`, **zero band reads** |
+| exactly 2 | Those two are compared |
+| 3+ | `pairs[0]` only, with a warning naming the unanalysed pairs |
+
+`first`/`second` mean *acquired earlier* / *acquired later*, never
+baseline/target - roles stay readable via `window_label`.
+
+**Contract** (additive on the existing `/query/analyze`; **no new endpoint**):
+
+```python
+AnalysisRequest.include_temporal_ndwi: bool = False        # opt-in
+AnalysisResult.temporal_comparison: TemporalIndexComparison | None = None
+
+class ObservationIndexResult:   # window_label, scene_id, acquired_at,
+                                # cloud_cover, measurements
+class TemporalIndexComparison:  # first, second, compatibility,
+                                # differences, warnings
+```
+
+`Measurement` and `CompatibilityReport` are reused verbatim.
+
+**Warning split.** `TemporalIndexComparison.warnings` carries the comparison's
+own qualifications (aggregate framing, suppression reason, partial overlap,
+cloud, tiny sample). `AnalysisResult.warnings` carries orchestration outcomes
+(no pair formed, a band read failed, further pairs not analysed). No duplication.
+
+**Cloud.** `Scene.cloud_cover` is reported as context and warned on above 30%.
+The index is **never cloud-masked** - `scl` remains deferred - and unknown cloud
+cover is reported as unknown, never assumed clear.
+
+**Reads.** Exactly four per comparison: `green` + `nir` per observation, through
+the **unchanged** `ImageryService.read_band`. Deliberately not optimised - no
+batching, no caching, no multi-band redesign. `raster.py` and `imagery.py` are
+untouched.
+
+**Architecture.** `AnalysisService` orchestrates only: select the pair (Phase 13,
+read-only), read the bands (Phase 11, unchanged), delegate every arithmetic and
+suppression decision to `compare_ndwi_observations` in `engines.py`. A test
+asserts the service source contains no `numpy` and no `np.`.
+
+**Phase 14 does NOT contain:** co-registration · grid alignment · resampling ·
+`WarpedVRT` · `rasterio.warp` · per-pixel differencing · change masks · change
+detection · cloud masking · NDVI or any second index · SWIR/20 m bands · SAR
+analysis · cross-modal comparison · a general time-series framework · caching or
+persistence · georeferencing changes · overlays/GeoJSON · MapLibre · ML/VLM ·
+new dependencies · new endpoints. `raster.py`, `imagery.py`, `query/schemas.py`,
+`query/execution.py` and `query/compatibility.py` are unmodified.
+
+**Backward compatibility.** `include_temporal_ndwi` defaults `False`. When false:
+existing response fields retain identical values and semantics, **no temporal
+band read is performed**, and `temporal_comparison` is `null`. The only
+intentional serialized difference is that new optional field with value `null`
+(Option A - deliberately no custom `model_serializer`).

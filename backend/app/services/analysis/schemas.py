@@ -18,10 +18,12 @@ still surface through the existing error handlers.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.query.compatibility import CompatibilityReport
 from app.services.query.schemas import (
     Modality,
     QueryExecutionResult,
@@ -62,6 +64,50 @@ class AnalysisWindowRef(BaseModel):
     selected_scene_id: str | None
 
 
+class ObservationIndexResult(BaseModel):
+    """Index statistics computed for ONE observation, on its own.
+
+    Each observation is read and indexed independently, at its own native
+    resolution, over its own pixels. Two of these placed side by side are two
+    separate summaries - they are not a spatial comparison and nothing here is
+    resampled onto a shared grid.
+
+    ``cloud_cover`` is carried straight from ``Scene`` as context: the index is
+    NOT cloud-masked, so a reader needs it to judge the statistics.
+    """
+
+    window_label: str
+    scene_id: str
+    #: ``Observation.acquired_at`` - the real acquisition time, not the
+    #: requested window. ``None`` when absent or unparseable.
+    acquired_at: datetime | None
+    cloud_cover: float | None
+    measurements: list[Measurement] = Field(default_factory=list)
+
+
+class TemporalIndexComparison(BaseModel):
+    """Two independently indexed observations, reported side by side.
+
+    ``differences`` holds at most one measurement - the difference between the
+    two aggregate means. It is a difference of *statistics*, computed from two
+    separate sets of pixels; no pixel was ever compared against another pixel,
+    and the value is suppressed entirely when that framing would mislead (no
+    overlap, no valid pixels, or the same scene on both sides).
+
+    ``compatibility`` is the Phase 13 report for this pair, carried verbatim so
+    its ``limitations`` travel with the numbers rather than beside them.
+    ``warnings`` are the comparison's own; orchestration warnings (no pair
+    formed, a band read failed, further pairs not analysed) stay on
+    :attr:`AnalysisResult.warnings`.
+    """
+
+    first: ObservationIndexResult
+    second: ObservationIndexResult
+    compatibility: CompatibilityReport
+    differences: list[Measurement] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class AnalysisRequest(BaseModel):
     """Input to the analysis boundary.
 
@@ -75,10 +121,17 @@ class AnalysisRequest(BaseModel):
     task value would have to propagate into ``SatQueryIntent``, the intent
     parser's instructions and the frontend task list. Defaulting to ``False``
     keeps every existing request byte-identical in behaviour.
+
+    ``include_temporal_ndwi`` opts in to Temporal NDWI Statistics: ONE
+    deterministic same-modality Sentinel-2 pair, each observation indexed
+    independently. It is separate from ``include_ndwi`` (single-scene) and the
+    two may be requested together. Defaulting to ``False`` means no temporal
+    band read happens unless it is asked for.
     """
 
     execution: QueryExecutionResult
     include_ndwi: bool = False
+    include_temporal_ndwi: bool = False
 
 
 class AnalysisResult(BaseModel):
@@ -90,3 +143,7 @@ class AnalysisResult(BaseModel):
     windows_considered: list[AnalysisWindowRef]
     warnings: list[str] = Field(default_factory=list)
     measurements: list[Measurement] = Field(default_factory=list)
+    #: Temporal NDWI Statistics for one observation pair. ``None`` whenever the
+    #: feature was not requested, or was requested but could not produce a valid
+    #: comparison - the reason is then on :attr:`warnings`.
+    temporal_comparison: TemporalIndexComparison | None = None

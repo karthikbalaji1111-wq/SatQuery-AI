@@ -1,12 +1,23 @@
 # SatQuery
 
-Natural-language satellite query platform — **foundation build** for
-Smart India Hackathon 2026, Problem Statement **26167**.
+Natural-language satellite query platform for Smart India Hackathon 2026,
+Problem Statement **26167**.
 
-This repository is the architectural skeleton only. AI models, Sentinel-1 SAR /
-Sentinel-2 optical retrieval, multimodal analysis, change detection, and map
-rendering are **not implemented yet** — the code establishes clean module
-boundaries and a working frontend ⇄ backend connection for later phases.
+## Status
+
+Implemented and tested end to end: natural-language intent parsing (Gemini),
+geocoding and AOI grounding (Nominatim), Sentinel-2 optical **and** Sentinel-1
+SAR scene discovery (Earth Search STAC), deterministic per-modality scene
+selection, bounded windowed imagery retrieval (COG range reads → PNG),
+quantitative raw-value band access, single-scene Sentinel-2 NDWI statistics,
+metadata-only observation compatibility reporting, and Temporal NDWI Statistics
+across two Sentinel-2 dates.
+
+Not implemented: raster co-registration or resampling, per-pixel change
+detection, optical/SAR fusion, vision-language reasoning, object detection, and
+map rendering (`MapPanel` is still a placeholder; there is no MapLibre
+dependency). See `CLAUDE.md` for the authoritative phase-by-phase state and the
+boundaries each phase deliberately did not cross.
 
 ## Stack
 
@@ -24,8 +35,8 @@ SatQuery/
 │   ├── app/
 │   │   ├── main.py          app factory (CORS, routers, error handlers)
 │   │   ├── core/            config, logging, error types
-│   │   ├── api/             routers — currently /health
-│   │   └── services/        domain boundaries (stubs, no logic):
+│   │   ├── api/             routers — health, geospatial, satellite, query
+│   │   └── services/        domain boundaries:
 │   │       ├── query/       natural-language query orchestration
 │   │       ├── satellite/   Sentinel-1 SAR + Sentinel-2 optical retrieval
 │   │       ├── multimodal/  SAR + optical + text fusion
@@ -40,7 +51,7 @@ SatQuery/
 │       ├── config/          env.ts — reads VITE_API_BASE_URL
 │       ├── components/      BackendStatus (live /health check)
 │       └── features/
-│           ├── query/       QueryPanel (disabled until query service lands)
+│           ├── query/       QueryPanel (parse → plan → execute → analyse)
 │           └── map/         MapPanel (MapLibre mount point)
 ├── scripts/                 setup.sh · dev.sh · check.sh
 ├── docker-compose.yml       local backend + frontend stack

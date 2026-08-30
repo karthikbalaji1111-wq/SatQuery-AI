@@ -2,7 +2,8 @@
 
 Implemented so far: the contract itself (:class:`AnalysisRequest` ->
 :class:`AnalysisResult`), a deterministic ``visualize`` summary, and one pure
-engine - opt-in single-scene Sentinel-2 NDWI statistics
+engine - opt-in single-scene Sentinel-2 NDWI statistics, and opt-in Temporal
+NDWI Statistics for one deterministic Sentinel-2 observation pair
 (:mod:`app.services.analysis.engines`). ``multimodal`` (fusion) and ``temporal``
 (change detection) remain the future homes for engines needing more than one
 scene.
@@ -17,6 +18,8 @@ from app.services.analysis.schemas import (
     AnalysisStatus,
     AnalysisWindowRef,
     Measurement,
+    ObservationIndexResult,
+    TemporalIndexComparison,
 )
 from app.services.analysis.service import AnalysisService
 
@@ -27,4 +30,6 @@ __all__ = [
     "AnalysisStatus",
     "AnalysisWindowRef",
     "Measurement",
+    "ObservationIndexResult",
+    "TemporalIndexComparison",
 ]

@@ -68,6 +68,11 @@ export function executeQuery(
  * Sentinel-2 NDWI statistics, returned as scalar
  * {@link AnalysisResult.measurements}. Omitting it leaves the request
  * unchanged.
+ *
+ * Set {@link AnalysisRequest.include_temporal_ndwi} to additionally compute
+ * Temporal NDWI Statistics for one deterministic Sentinel-2 observation pair,
+ * returned as {@link AnalysisResult.temporal_comparison}. Each observation is
+ * indexed independently; no pixels are compared and nothing is co-registered.
  */
 export function analyzeQuery(
   request: AnalysisRequest,

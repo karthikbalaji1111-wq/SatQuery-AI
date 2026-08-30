@@ -421,10 +421,14 @@ def test_analyze_endpoint_returns_the_expected_contract() -> None:
         "windows_considered",
         "warnings",
         "measurements",
+        # Phase 14, additive by design: the field is always serialized and is
+        # null whenever temporal NDWI was not requested.
+        "temporal_comparison",
     }
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
     assert body["measurements"] == []
+    assert body["temporal_comparison"] is None
     window = body["windows_considered"][0]
     assert set(window) == {"modality", "label", "time_range", "selected_scene_id"}
     assert window["modality"] == "sentinel-2-optical"
