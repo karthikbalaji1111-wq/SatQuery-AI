@@ -4,6 +4,8 @@ from app.services.query.execution import QueryExecutionService
 from app.services.query.schemas import (
     ExecutedWindow,
     Modality,
+    Observation,
+    ObservationSet,
     QueryExecutionRequest,
     QueryExecutionResult,
     QueryTask,
@@ -19,6 +21,8 @@ from app.services.query.service import QueryService
 __all__ = [
     "ExecutedWindow",
     "Modality",
+    "Observation",
+    "ObservationSet",
     "QueryExecutionRequest",
     "QueryExecutionResult",
     "QueryExecutionService",

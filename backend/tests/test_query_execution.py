@@ -28,7 +28,11 @@ from app.services.ai import AiService, MockIntentParser
 from app.services.geospatial import ResolveRequest, ResolveResponse
 from app.services.geospatial.schemas import BoundingBox
 from app.services.query import (
+    ExecutedWindow,
+    Observation,
+    ObservationSet,
     QueryExecutionRequest,
+    QueryExecutionResult,
     QueryExecutionService,
     QueryService,
 )
@@ -37,7 +41,7 @@ from app.services.query.execution import (
     _select_scene,
     _select_scene_sar,
 )
-from app.services.query.schemas import SatQueryIntent
+from app.services.query.schemas import ResolvedQueryPlan, SatQueryIntent, TimeRange
 from app.services.satellite.schemas import (
     ImageryResponse,
     QueryEcho,
@@ -1081,6 +1085,7 @@ def test_execute_endpoint_with_dependency_override() -> None:
         "skipped_modalities",
         "windows",
         "catalog",
+        "observations",  # Phase 12: derived from windows, additive
     }
     assert body["plan"]["bbox"] == {
         "west": pytest.approx(80.10),
@@ -1220,3 +1225,297 @@ def test_build_plan_endpoint_still_returns_only_plan_fields() -> None:
     assert set(body) == {"intent", "bbox"}
     assert body["intent"]["location_query"] == "Chennai"
     assert len(fake_geo.calls) == 1
+
+
+# =========================================================================== #
+# Phase 12: temporal observation model
+#
+# A requested window and an actual observation are different things. These
+# tests pin that distinction and prove the model carries enough metadata for a
+# later co-registration / comparison phase WITHOUT asserting any alignment.
+# =========================================================================== #
+
+
+def observed_window(
+    *,
+    modality: str = "sentinel-2-optical",
+    label: str = "single",
+    scene_id: str | None = "scene-a",
+    moment: str | None = "2024-01-15T05:12:34Z",
+    collection: str = "sentinel-2-l2a",
+    start: str = "2024-01-01",
+    end: str = "2024-01-31",
+    imagery: ImageryResponse | None = None,
+) -> ExecutedWindow:
+    """An executed window that did (or did not) select a scene."""
+
+    scenes = (
+        []
+        if scene_id is None
+        else [make_scene(scene_id, moment=moment, collection=collection)]
+    )
+    return ExecutedWindow(
+        modality=modality,  # type: ignore[arg-type]
+        label=label,
+        time_range=TimeRange.model_validate({"start_date": start, "end_date": end}),
+        scene_count=len(scenes),
+        scenes=scenes,
+        selected_scene_id=scene_id,
+        imagery=imagery,
+    )
+
+
+def observation_set(*windows: ExecutedWindow) -> ObservationSet:
+    return ObservationSet.from_windows(DEFAULT_BBOX, list(windows))
+
+
+def test_a_single_observation_can_be_represented() -> None:
+    result = observation_set(observed_window())
+
+    assert len(result.observations) == 1
+    observation = result.observations[0]
+    assert observation.scene_id == "scene-a"
+    assert observation.modality == "sentinel-2-optical"
+    assert observation.window_label == "single"
+
+
+def test_multiple_observations_can_be_represented() -> None:
+    result = observation_set(
+        observed_window(label="series[0]", scene_id="s0", moment="2024-01-15T05:00:00Z"),
+        observed_window(label="series[1]", scene_id="s1", moment="2024-02-15T05:00:00Z"),
+        observed_window(label="series[2]", scene_id="s2", moment="2024-03-15T05:00:00Z"),
+    )
+
+    assert [o.scene_id for o in result.observations] == ["s0", "s1", "s2"]
+    assert [o.window_label for o in result.observations] == [
+        "series[0]",
+        "series[1]",
+        "series[2]",
+    ]
+
+
+def test_observation_preserves_the_acquired_scene_metadata() -> None:
+    observation = observation_set(observed_window()).observations[0]
+
+    # The Scene is embedded verbatim - not copied field by field.
+    assert observation.scene.id == "scene-a"
+    assert observation.scene.datetime == "2024-01-15T05:12:34Z"
+    assert observation.scene.collection == "sentinel-2-l2a"
+    assert observation.scene.processing_level == "L2A"
+    assert observation.collection == "sentinel-2-l2a"  # convenience accessor
+
+
+def test_observation_carries_its_imagery_when_retrieved() -> None:
+    imagery = make_imagery_response("scene-a")
+    with_imagery = observation_set(observed_window(imagery=imagery)).observations[0]
+    without = observation_set(observed_window()).observations[0]
+
+    assert with_imagery.imagery is not None
+    assert with_imagery.imagery.scene_id == "scene-a"
+    assert without.imagery is None
+
+
+def test_sentinel_1_and_sentinel_2_observations_coexist() -> None:
+    result = observation_set(
+        observed_window(scene_id="s2-a", collection="sentinel-2-l2a"),
+        observed_window(
+            modality="sentinel-1-sar",
+            scene_id="s1-a",
+            collection="sentinel-1-grd",
+            moment="2024-01-12T00:15:00Z",
+        ),
+    )
+
+    assert len(result.observations) == 2
+    assert [o.scene_id for o in result.for_modality("sentinel-2-optical")] == ["s2-a"]
+    assert [o.scene_id for o in result.for_modality("sentinel-1-sar")] == ["s1-a"]
+    # Each keeps its own collection - the two are not merged or paired.
+    assert {o.collection for o in result.observations} == {
+        "sentinel-2-l2a",
+        "sentinel-1-grd",
+    }
+
+
+def test_different_acquisition_times_coexist_and_can_be_ordered() -> None:
+    result = observation_set(
+        observed_window(label="target", scene_id="late", moment="2024-06-20T05:00:00Z"),
+        observed_window(label="baseline", scene_id="early", moment="2024-01-12T05:00:00Z"),
+        observed_window(label="unknown", scene_id="undated", moment=None),
+    )
+
+    assert [o.scene_id for o in result.ordered_by_acquisition()] == [
+        "early",
+        "late",
+        "undated",  # unknown acquisition time sorts last
+    ]
+    early, late, undated = (
+        result.observations[1],
+        result.observations[0],
+        result.observations[2],
+    )
+    assert early.acquired_at is not None and late.acquired_at is not None
+    assert early.acquired_at < late.acquired_at
+    assert undated.acquired_at is None
+
+
+def test_requested_window_is_distinct_from_the_acquisition_time() -> None:
+    observation = observation_set(
+        observed_window(
+            start="2024-01-01", end="2024-01-31", moment="2024-01-15T05:12:34Z"
+        )
+    ).observations[0]
+
+    # The window is what was ASKED FOR; the acquisition is what was RECEIVED.
+    assert observation.requested_window.start_date.isoformat() == "2024-01-01"
+    assert observation.requested_window.end_date.isoformat() == "2024-01-31"
+    assert observation.acquired_at is not None
+    assert observation.acquired_at.date().isoformat() == "2024-01-15"
+    assert observation.acquired_at.date() != observation.requested_window.start_date
+
+
+def test_a_window_with_no_selected_scene_yields_no_observation() -> None:
+    result = observation_set(
+        observed_window(label="found", scene_id="scene-a"),
+        observed_window(label="empty", scene_id=None),
+    )
+
+    # A requested window without data is a legitimate outcome, not an observation.
+    assert [o.window_label for o in result.observations] == ["found"]
+
+
+def test_observations_are_grouped_per_window_across_modalities() -> None:
+    result = observation_set(
+        observed_window(label="baseline", scene_id="s2-base"),
+        observed_window(
+            modality="sentinel-1-sar", label="baseline", scene_id="s1-base",
+            collection="sentinel-1-grd",
+        ),
+        observed_window(label="target", scene_id="s2-target"),
+    )
+
+    baseline = result.for_window_label("baseline")
+    assert {(o.modality, o.scene_id) for o in baseline} == {
+        ("sentinel-2-optical", "s2-base"),
+        ("sentinel-1-sar", "s1-base"),
+    }
+    assert [o.scene_id for o in result.for_window_label("target")] == ["s2-target"]
+
+
+def test_observation_set_records_the_requested_aoi_not_an_alignment_claim() -> None:
+    result = observation_set(
+        observed_window(scene_id="s2-a"),
+        observed_window(
+            modality="sentinel-1-sar", scene_id="s1-a", collection="sentinel-1-grd"
+        ),
+    )
+
+    assert result.requested_bbox == DEFAULT_BBOX
+    # Nothing in the model asserts a shared grid, CRS, resolution or footprint.
+    for field in ("crs", "resolution", "transform", "aligned", "common_grid"):
+        assert field not in ObservationSet.model_fields
+        assert field not in Observation.model_fields
+
+
+def test_observation_contract_carries_no_raster_arrays() -> None:
+    imagery = make_imagery_response("scene-a")
+    result = observation_set(observed_window(imagery=imagery))
+    payload = result.model_dump(mode="json")
+
+    def has_nested_list(value: Any) -> bool:
+        if isinstance(value, list):
+            return any(isinstance(item, list) for item in value) or any(
+                has_nested_list(item) for item in value
+            )
+        if isinstance(value, dict):
+            return any(has_nested_list(item) for item in value.values())
+        return False
+
+    # source_shape is a flat [h, w] pair; nothing 2-D, no arrays, no masks.
+    assert not has_nested_list(payload)
+    assert "array" not in str(payload) and "mask" not in str(payload)
+    # Imagery is still the existing display PNG contract, not raw pixels.
+    observation = payload["observations"][0]
+    assert observation["imagery"]["media_type"] == "image/png"
+
+
+# --- integration with the existing execution result ------------------------ #
+
+
+def test_execution_result_derives_observations_from_its_windows() -> None:
+    satellite = FakeSatelliteService(
+        responses=make_search_response(
+            make_scene("scene-a", cloud_cover=5.0, moment="2024-01-15T05:00:00Z")
+        )
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent())
+        )
+    )
+
+    assert len(result.observations.observations) == 1
+    observation = result.observations.observations[0]
+    assert observation.scene_id == "scene-a"
+    assert observation.window_label == result.windows[0].label
+    assert observation.modality == result.windows[0].modality
+    assert result.observations.requested_bbox == result.plan.bbox
+
+
+def test_execution_result_observations_cannot_drift_from_windows() -> None:
+    intent = make_intent()
+    plan = ResolvedQueryPlan(intent=intent, bbox=DEFAULT_BBOX)
+    result = QueryExecutionResult(
+        plan=plan,
+        executed_modalities=["sentinel-2-optical"],
+        skipped_modalities=[],
+        windows=[observed_window()],
+        catalog=CATALOG,
+        # A caller cannot inject a contradictory set - it is always derived.
+        observations={"requested_bbox": DEFAULT_BBOX, "observations": []},  # type: ignore[call-arg]
+    )
+
+    assert len(result.observations.observations) == 1
+    assert result.observations.observations[0].scene_id == "scene-a"
+
+
+def test_existing_single_window_execution_behaviour_is_unchanged() -> None:
+    satellite = FakeSatelliteService(
+        responses=make_search_response(make_scene("scene-a", cloud_cover=5.0))
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent())
+        )
+    )
+
+    # Every pre-Phase-12 field keeps its exact meaning.
+    assert result.executed_modalities == ["sentinel-2-optical"]
+    assert result.skipped_modalities == []
+    assert result.catalog == CATALOG
+    assert len(result.windows) == 1
+    window = result.windows[0]
+    assert window.label == "single"
+    assert window.selected_scene_id == "scene-a"
+    assert window.scene_count == 1
+
+
+def test_execution_result_round_trips_through_json_with_observations() -> None:
+    satellite = FakeSatelliteService(
+        responses=make_search_response(
+            make_scene("scene-a", cloud_cover=5.0, moment="2024-01-15T05:00:00Z")
+        )
+    )
+    result = run(
+        build_service(satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent())
+        )
+    )
+
+    payload = result.model_dump(mode="json")
+    assert "observations" in payload
+
+    # A client echoing the whole result back (which the frontend does) still
+    # validates, and observations are recomputed rather than trusted.
+    restored = QueryExecutionResult.model_validate(payload)
+    assert restored.model_dump(mode="json") == payload
+    assert restored.observations.observations[0].scene_id == "scene-a"

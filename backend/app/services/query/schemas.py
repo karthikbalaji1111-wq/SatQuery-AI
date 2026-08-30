@@ -8,10 +8,16 @@ the existing Geospatial Service; the :class:`BoundingBox` type is reused verbati
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.services.geospatial.schemas import BoundingBox
 from app.services.satellite.schemas import (
@@ -140,6 +146,137 @@ class ExecutedWindow(BaseModel):
     imagery_error: str | None = None
 
 
+# --------------------------------------------------------------------------- #
+# Temporal observation model
+#
+# A temporal *window* and an *observation* are deliberately different things:
+#
+#   TimeRange / ExecutedWindow.time_range -> what the USER ASKED FOR. A request.
+#   Observation                           -> what was ACTUALLY ACQUIRED. Data.
+#
+# One requested window yields zero or one observation per modality: zero when
+# discovery found nothing to select, one when a scene was selected. The two must
+# never be conflated - a window with no observation is a legitimate outcome.
+#
+# Nothing here assumes observations are comparable. They may differ in CRS,
+# native resolution, pixel grid, acquisition time and sensor, and they are NOT
+# co-registered. The model exists to carry enough metadata for a later phase to
+# establish alignment explicitly; it performs no alignment, no resampling and no
+# comparison of its own.
+# --------------------------------------------------------------------------- #
+
+
+class Observation(BaseModel):
+    """One actual satellite acquisition selected for one requested window.
+
+    The acquired scene is embedded verbatim rather than copied field by field,
+    so ``Scene`` stays the single canonical description of a scene (id,
+    acquisition datetime, collection, footprint, geometry, platform, cloud
+    cover, processing level, assets).
+    """
+
+    modality: Modality
+    #: Label of the requested window this observation answers ("single",
+    #: "baseline", "target", "series[0]", ...).
+    window_label: str
+    #: The window that was REQUESTED. The actual acquisition time is
+    #: ``scene.datetime`` / :attr:`acquired_at` and will differ.
+    requested_window: TimeRange
+    #: The acquisition itself, exactly as discovery normalised it.
+    scene: Scene
+    #: Bounded imagery for this observation, when it was retrieved. Display
+    #: rendering only - never raw raster arrays.
+    imagery: ImageryResponse | None = None
+
+    @property
+    def scene_id(self) -> str:
+        return self.scene.id
+
+    @property
+    def collection(self) -> str | None:
+        """STAC collection, straight from the acquired scene."""
+
+        return self.scene.collection
+
+    @property
+    def acquired_at(self) -> datetime | None:
+        """``scene.datetime`` parsed, for ordering. ``None`` if absent/unparseable.
+
+        A typed accessor over the canonical string - the string remains the
+        stored representation, this is not a second copy of it.
+        """
+
+        raw = self.scene.datetime
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+
+
+class ObservationSet(BaseModel):
+    """The observations produced by one execution, over one requested AOI.
+
+    ``requested_bbox`` is the AOI that was *asked for*. It is emphatically not a
+    claim that every observation covers exactly that extent, shares a grid, or
+    is co-registered - see the module note above.
+    """
+
+    requested_bbox: BoundingBox
+    observations: list[Observation] = Field(default_factory=list)
+
+    @classmethod
+    def from_windows(
+        cls, requested_bbox: BoundingBox, windows: list[ExecutedWindow]
+    ) -> ObservationSet:
+        """Derive observations from executed windows.
+
+        A window contributes an observation only when it actually selected a
+        scene and that scene is present in its discovery results; windows that
+        found nothing contribute nothing. Window order is preserved.
+        """
+
+        observations: list[Observation] = []
+        for window in windows:
+            if window.selected_scene_id is None:
+                continue
+            scene = next(
+                (s for s in window.scenes if s.id == window.selected_scene_id), None
+            )
+            if scene is None:
+                continue
+            observations.append(
+                Observation(
+                    modality=window.modality,
+                    window_label=window.label,
+                    requested_window=window.time_range,
+                    scene=scene,
+                    imagery=window.imagery,
+                )
+            )
+        return cls(requested_bbox=requested_bbox, observations=observations)
+
+    def for_modality(self, modality: Modality) -> list[Observation]:
+        return [o for o in self.observations if o.modality == modality]
+
+    def for_window_label(self, label: str) -> list[Observation]:
+        """All observations answering one requested window, across modalities."""
+
+        return [o for o in self.observations if o.window_label == label]
+
+    def ordered_by_acquisition(self) -> list[Observation]:
+        """Observations sorted by actual acquisition time; unknown times last.
+
+        Ordering only - it implies nothing about comparability.
+        """
+
+        return sorted(
+            self.observations,
+            key=lambda o: (o.acquired_at is None, o.acquired_at or datetime.min),
+        )
+
+
 class QueryExecutionResult(BaseModel):
     """Structured, deterministic result of executing a :class:`SatQueryIntent`."""
 
@@ -148,3 +285,15 @@ class QueryExecutionResult(BaseModel):
     skipped_modalities: list[SkippedModality]
     windows: list[ExecutedWindow]
     catalog: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def observations(self) -> ObservationSet:
+        """The actual acquisitions behind :attr:`windows`.
+
+        Derived rather than stored, so it can never drift from ``windows``.
+        Existing callers construct this model exactly as before; the field is
+        additive on the wire and is recomputed on input rather than trusted.
+        """
+
+        return ObservationSet.from_windows(self.plan.bbox, self.windows)

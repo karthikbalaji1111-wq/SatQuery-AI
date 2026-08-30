@@ -170,12 +170,40 @@ export interface QueryExecutionRequest {
   limit?: number;
 }
 
+/**
+ * One actual satellite acquisition selected for one requested window.
+ *
+ * A `TimeRange` is what was *requested*; an `Observation` is what was
+ * *acquired*. `scene.datetime` is the real acquisition time and will differ
+ * from `requested_window`. Observations are NOT co-registered and may differ in
+ * CRS, resolution and footprint.
+ */
+export interface Observation {
+  modality: Modality;
+  window_label: string;
+  requested_window: TimeRange;
+  scene: SatelliteScene;
+  imagery: ImageryResponse | null;
+}
+
+/** The observations from one execution. `requested_bbox` is the AOI asked for. */
+export interface ObservationSet {
+  requested_bbox: BoundingBox;
+  observations: Observation[];
+}
+
 export interface QueryExecutionResult {
   plan: ResolvedQueryPlan;
   executed_modalities: Modality[];
   skipped_modalities: SkippedModality[];
   windows: ExecutedWindow[];
   catalog: string;
+  /**
+   * Derived server-side from `windows`; the backend always sends it and
+   * recomputes it on input. Optional here so existing fixtures and consumers
+   * remain valid - no UI reads it yet.
+   */
+  observations?: ObservationSet;
 }
 
 /**
