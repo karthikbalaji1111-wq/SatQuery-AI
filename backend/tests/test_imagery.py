@@ -1624,3 +1624,182 @@ def test_integration_display_path_still_normalises_the_same_geotiff(
     assert not np.array_equal(
         quantitative.values.astype(np.uint8), display.array[..., 0]
     )
+
+
+# =========================================================================== #
+# Phase 14.1 - STAC identifier hardening
+#
+# ``scene_id`` and ``collection`` are interpolated into the STAC item URL. They
+# reach that URL from a client-supplied ``QueryExecutionResult`` via
+# /query/analyze, so they are untrusted input at this boundary.
+#
+# The host always comes from ``settings.stac_base_url``, so this is NOT
+# arbitrary-host SSRF. What IS reachable without validation is fixed-host path
+# manipulation (``collection="../../../search"`` rewrites the request path) and
+# remote-read resource abuse (unbounded, arbitrary identifiers driving outbound
+# requests). These tests pin that such values are refused before any network
+# call is made.
+# =========================================================================== #
+
+TRAVERSAL_VALUES = [
+    "../../../search",
+    "..",
+    "a/b",
+    "a\\b",
+    "//evil.example.com/x",
+    "x?limit=9999",
+    "x#frag",
+    "a b",
+    "",
+    "x" * 300,
+]
+
+
+class _NeverCalledFetcher:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, scene_id: str, collection: str) -> dict[str, Any]:
+        self.calls += 1  # pragma: no cover - must never happen
+        raise AssertionError("a rejected identifier must not reach the catalog")
+
+
+@pytest.mark.parametrize("bad", TRAVERSAL_VALUES)
+def test_read_band_rejects_unsafe_scene_id(bad: str) -> None:
+    fetcher = _NeverCalledFetcher()
+    service = ImageryService(stac_item_fetcher=fetcher)
+
+    with pytest.raises(InvalidInputError):
+        service.read_band(
+            scene_id=bad,
+            bbox=DEFAULT_BAND_BBOX,
+            asset="green",
+            collection="sentinel-2-l2a",
+        )
+    assert fetcher.calls == 0
+
+
+@pytest.mark.parametrize("bad", [v for v in TRAVERSAL_VALUES if v != ""])
+def test_read_band_rejects_unsafe_collection(bad: str) -> None:
+    fetcher = _NeverCalledFetcher()
+    service = ImageryService(stac_item_fetcher=fetcher)
+
+    with pytest.raises(InvalidInputError):
+        service.read_band(
+            scene_id="S2B_44PLV_20241026_0_L2A",
+            bbox=DEFAULT_BAND_BBOX,
+            asset="green",
+            collection=bad,
+        )
+    assert fetcher.calls == 0
+
+
+@pytest.mark.parametrize("bad", ["../../../search", "a/b", "x" * 300, "a b"])
+def test_retrieve_rejects_unsafe_collection(bad: str) -> None:
+    fetcher = _NeverCalledFetcher()
+    service = ImageryService(stac_item_fetcher=fetcher)
+
+    with pytest.raises(InvalidInputError):
+        service.retrieve(
+            ImageryRequest(
+                scene_id="S2B_44PLV_20241026_0_L2A",
+                bbox=DEFAULT_BAND_BBOX,
+                asset="visual",
+                collection=bad,
+            )
+        )
+    assert fetcher.calls == 0
+
+
+@pytest.mark.parametrize(
+    "scene_id,collection",
+    [
+        ("S2B_44PLV_20241026_0_L2A", "sentinel-2-l2a"),
+        ("S1A_IW_GRDH_1SDV_20240101T000000_20240101T000030_051234_062ABC_1234",
+         "sentinel-1-grd"),
+        ("a.b-c_D1", "col.lection-1_X"),
+    ],
+)
+def test_real_stac_identifiers_are_accepted(scene_id: str, collection: str) -> None:
+    """Hardening must not reject the identifiers the catalog actually uses."""
+
+    recorded: list[tuple[str, str]] = []
+
+    def fetcher(sid: str, col: str) -> dict[str, Any]:
+        recorded.append((sid, col))
+        return stac_item(
+            scene_id=sid,
+            assets={
+                "green": {
+                    "href": VISUAL_HREF,
+                    "type": (
+                        "image/tiff; application=geotiff; profile=cloud-optimized"
+                    ),
+                }
+            },
+        )
+
+    service = ImageryService(
+        stac_item_fetcher=fetcher, band_reader=lambda *a, **k: fake_band_window()
+    )
+    service.read_band(
+        scene_id=scene_id,
+        bbox=DEFAULT_BAND_BBOX,
+        asset="green",
+        collection=collection,
+    )
+    assert recorded == [(scene_id, collection)]
+
+
+def fake_band_window() -> BandWindow:
+    """A canned quantitative read, for tests that never touch a raster."""
+
+    values = np.ones((2, 2), dtype=np.uint16)
+    return BandWindow(
+        values=values,
+        valid=np.ones((2, 2), dtype=bool),
+        width=2,
+        height=2,
+        crs="EPSG:32644",
+        transform=from_origin(399960.0, 1500000.0, 10.0, 10.0),
+        resolution=10.0,
+        nodata=0.0,
+        window={"col_off": 0, "row_off": 0, "width": 2, "height": 2},
+        source_shape=[10, 10],
+    )
+
+
+def test_empty_collection_resolves_to_the_configured_default() -> None:
+    """An unspecified collection is not an unsafe one.
+
+    ``collection=""`` is falsy and falls back to ``settings.stac_collection`` -
+    a server-controlled value - exactly as ``None`` does. No traversal is
+    possible, so this is accepted rather than rejected.
+    """
+
+    recorded: list[tuple[str, str]] = []
+
+    def fetcher(sid: str, col: str) -> dict[str, Any]:
+        recorded.append((sid, col))
+        return stac_item(
+            scene_id=sid,
+            assets={
+                "green": {
+                    "href": VISUAL_HREF,
+                    "type": (
+                        "image/tiff; application=geotiff; profile=cloud-optimized"
+                    ),
+                }
+            },
+        )
+
+    service = ImageryService(
+        stac_item_fetcher=fetcher, band_reader=lambda *a, **k: fake_band_window()
+    )
+    service.read_band(
+        scene_id="S2B_44PLV_20241026_0_L2A",
+        bbox=DEFAULT_BAND_BBOX,
+        asset="green",
+        collection="",
+    )
+    assert recorded == [("S2B_44PLV_20241026_0_L2A", "sentinel-2-l2a")]

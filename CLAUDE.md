@@ -185,7 +185,10 @@ Inspect the repository first and adapt to the actual codebase.
 ## 1. Repository state — VERIFIED
 
 - Branch: `main`
-- HEAD: `6036768` — `feat(analysis): add single-scene Sentinel-2 NDWI`
+- HEAD: `36eb5cc` — `feat(analysis): add temporal NDWI statistics`
+  (this section was written during Phase 11; the lines below describing
+  `6036768` as HEAD and Phase 11 work as uncommitted are HISTORICAL and
+  no longer true — see sections 13 and 14 for the current state.)
   (Phase 10 baseline was `43f06ee`)
 - `main` is in sync with `origin/main`; Phase 10 and the Phase 11 backend are
   **pushed**. The Phase 11 frontend integration and raster integration tests are
@@ -251,7 +254,7 @@ NL query -> POST /api/v1/query/parse      -> AiService/GeminiIntentParser -> Sat
 
 Any Phase 11 work must keep these green and must not reduce them:
 
-| Check | Baseline at `43f06ee` |
+| Check | Baseline at `43f06ee` (HISTORICAL — current figures in section 14.1) |
 | --- | --- |
 | `pytest -q` (backend) | **240 passed**, 1 pre-existing StarletteDeprecationWarning |
 | `ruff check .` | All checks passed |
@@ -559,6 +562,7 @@ subset of `{__future__, math, datetime, typing, pydantic, app}`.
 
 **Baseline after Phase 13:** `pytest -q` **376 passed** (was 312), `ruff check .`
 clean, `git diff --check` clean; frontend untouched (**50 passed**, 3 files).
+(Superseded by Phase 14 and 14.1 — see section 14.1 for the current figures.)
 Note the pre-Phase-13 checkpoint above records a stale backend baseline of 240;
 the real figure at `185320a` was 312.
 
@@ -664,3 +668,108 @@ existing response fields retain identical values and semantics, **no temporal
 band read is performed**, and `temporal_comparison` is `null`. The only
 intentional serialized difference is that new optional field with value `null`
 (Option A - deliberately no custom `model_serializer`).
+
+## 14.1 Audit remediation — IMPLEMENTED
+
+An independent audit of the Phase 14 checkpoint (`36eb5cc`) raised ten findings.
+Each was verified against the actual code before any change; three were
+confirmed and fixed, three were presentation/documentation corrections, and
+four were rejected or deliberately deferred with the reason recorded.
+
+### Confirmed and fixed
+
+**AOI coverage was not established (audit finding A) — CONFIRMED.**
+`bbox_overlap` compares the two *scene footprints* to each other. It says
+nothing about how much of the *requested AOI* each observation actually
+analysed: each quantitative read is clamped to its own scene by
+`_clamp_window_to_source` and masked by its own nodata, so two observations
+over the same bbox can analyse wildly different pixel counts while reporting
+`bbox_overlap == "full"`. `ObservationIndexResult` now carries
+`window_pixel_count` (the clamped AOI window, width x height) alongside the
+existing `ndwi_valid_pixel_count`, and the pure engine emits an explicit
+statement of both observations' coverage.
+
+**No threshold was invented.** The repository has no scientifically defensible
+basis for a "materially different coverage" cut-off, so the correction states
+the measured coverage and stops. The difference is NOT suppressed on a coverage
+ratio — replacing an honest report with a fabricated judgement would be worse
+than the gap it closes. The existing suppression rules (no valid pixels, no
+footprint overlap, same scene) are unchanged.
+
+**BandWindow evidence was discarded (audit finding, section 3) — CONFIRMED.**
+`_observation_index` read `crs`, `resolution`, `width` and `height` from the
+`BandWindow` and kept only the measurements. `ObservationIndexResult` now
+carries `crs` and `resolution` from the actual read, and the engine reports
+whether the two reads used the same grid.
+
+`query/compatibility.py` was NOT modified. Phase 13 remains metadata-only and
+will still report `crs_match: "unknown"` when bounded display imagery was not
+retrieved. That is not a contradiction: the compatibility report and the
+observation results are two different evidence sources — STAC metadata versus
+the raster read — and Phase 14.1 keeps them clearly separated rather than
+feeding raster metadata into the metadata-only layer.
+
+**/query/analyze trust boundary (audit finding C) — CONFIRMED, with corrected
+terminology.** A client can submit a fabricated `QueryExecutionResult`; its
+`selected_scene_id` and `Scene.collection` reach `ImageryService.read_band` and
+are interpolated into the STAC item URL. Verified empirically with `httpx`:
+
+| Class | Reachable? | Evidence |
+| --- | --- | --- |
+| Arbitrary-host SSRF | **NO** | the host is always `settings.stac_base_url`; no input reaches it |
+| Fixed-host path manipulation | **YES** | `collection="../../../search"` rewrote the path to `/search/items/x`; `?`/`#` split off a query/fragment |
+| Remote-read resource abuse | **YES** | unbounded, arbitrary identifiers drove outbound requests |
+
+Hardened at the URL-building boundary in `satellite/imagery.py`:
+`_validate_stac_identifier` allows `[A-Za-z0-9._-]{1,200}` and refuses the
+reserved segments `.` and `..`, applied to `scene_id` and the resolved
+`collection` in both `retrieve` and `read_band`, **before** any catalog call.
+Real Earth Search identifiers pass unchanged. No authentication was added and
+no endpoint changed. An empty `collection` still falls back to the configured
+default — a server-controlled value, so it is accepted, not rejected.
+
+### Presentation corrections
+
+- **Number formatting** is now applied at the presentation layer only. The API
+  representation and backend values are unrounded and unchanged. Unit-driven:
+  `index` -> 4 dp, `%` -> 1 dp, `pixels` -> integer with separators; day
+  intervals -> 1 dp; cloud cover -> 1 dp, matching the existing scene list.
+- **Unsupported tasks are labelled.** `change_detection` and
+  `object_identification` remain selectable (the backend answers them with
+  `status: "not_implemented"`), but read "Change Detection (unavailable)" and
+  "Object Identification (unavailable)" so Temporal NDWI Statistics can never be
+  mistaken for a change-detection result. No change detection was implemented,
+  nothing was renamed, and no fake result was added.
+- **`ObservationSet.for_modality`** is now reused by `_temporal_ndwi` instead of
+  an inline comprehension. Identical behaviour; the domain model already
+  exposed exactly this query.
+
+### Rejected or deferred, with reasons
+
+- **Sample-size warning threshold — NOT CHANGED.** `_sample_warnings` fires at
+  `0 < count <= 1`. It communicates a degenerate sample (min == max == mean),
+  which is exact and needs no constant. Any stronger threshold ("at least N
+  pixels for a meaningful mean") would depend on spatial autocorrelation and
+  the effective sample size, neither of which this system estimates. Inventing
+  one would be an arbitrary scientific constant. **KNOWN LIMITATION:** a small
+  but >1-pixel sample is reported without a statistical-power caveat.
+- **Performance — NOT CHANGED.** Sequential discovery, four sequential band
+  reads per comparison, and no caching are all real. They are correctness-
+  neutral and were explicitly out of scope. **FUTURE ENGINEERING WORK.**
+- **Mixed aware/naive datetime issue — NOT FIXED**, as documented in section 13.
+  Still dormant (Earth Search is consistently `Z`-suffixed) and still confined
+  to `ObservationSet.ordered_by_acquisition`; `pair_observations` and
+  `compute_compatibility` remain unaffected.
+
+### Baseline after Phase 14.1 — VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **458 passed** (426 at `36eb5cc`) |
+| `ruff check .` | clean |
+| `git diff --check` | clean |
+| `npm run lint` / `typecheck` / `test` / `build` | clean / clean / **58 passed** / builds |
+
+Two existing frontend assertions were updated — not weakened — to the
+deliberately changed presentation: the task-option label, and a pixel count now
+rendered with thousands separators. No backend test was weakened or removed.

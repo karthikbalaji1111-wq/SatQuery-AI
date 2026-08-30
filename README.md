@@ -39,11 +39,11 @@ SatQuery/
 │   │   └── services/        domain boundaries:
 │   │       ├── query/       natural-language query orchestration
 │   │       ├── satellite/   Sentinel-1 SAR + Sentinel-2 optical retrieval
-│   │       ├── multimodal/  SAR + optical + text fusion
-│   │       ├── temporal/    multitemporal change detection
+│   │       ├── multimodal/  SAR + optical + text fusion (STUB - not implemented)
+│   │       ├── temporal/    multitemporal change detection (STUB - not implemented)
 │   │       ├── geospatial/  geocoding, AOI, spatial grounding
-│   │       ├── ai/          model inference and reasoning
-│   │       └── map/         map layer / tile preparation
+│   │       ├── ai/          Gemini-backed intent parsing (no vision model)
+│   │       └── map/         map layer / tile preparation (STUB - not implemented)
 │   └── tests/
 ├── frontend/                React app
 │   └── src/
@@ -52,7 +52,7 @@ SatQuery/
 │       ├── components/      BackendStatus (live /health check)
 │       └── features/
 │           ├── query/       QueryPanel (parse → plan → execute → analyse)
-│           └── map/         MapPanel (MapLibre mount point)
+│           └── map/         MapPanel (placeholder; no MapLibre dependency)
 ├── scripts/                 setup.sh · dev.sh · check.sh
 ├── docker-compose.yml       local backend + frontend stack
 └── .github/workflows/ci.yml lint · typecheck · test · build

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -45,6 +46,49 @@ RasterReader = Callable[..., RgbWindow]
 BandReader = Callable[..., BandWindow]
 
 _COG_TYPE_HINT = "geotiff"
+
+# --------------------------------------------------------------------------- #
+# STAC identifier validation
+#
+# ``scene_id`` and ``collection`` are interpolated into the STAC item URL by
+# ``_default_fetch_item``. They arrive from a client-supplied
+# ``QueryExecutionResult`` through /query/analyze, so at this boundary they are
+# untrusted input.
+#
+# The HOST is always ``settings.stac_base_url`` and is never taken from the
+# request, so this is NOT arbitrary-host SSRF. What is reachable without
+# validation is:
+#
+#   * fixed-host path manipulation - ``collection="../../../search"`` rewrites
+#     the request path from /collections/{c}/items/{id} to /search/items/{id};
+#     a ``?`` or ``#`` likewise splits off a query or fragment;
+#   * remote-read resource abuse - unbounded, arbitrary identifiers driving
+#     outbound requests on the server's behalf.
+#
+# Real Earth Search identifiers ("S2B_44PLV_20241026_0_L2A", "sentinel-2-l2a")
+# are covered by this allowlist, so the check refuses malformed input without
+# constraining legitimate use.
+# --------------------------------------------------------------------------- #
+
+_STAC_IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,200}")
+#: Path segments that would traverse even though their characters are allowed.
+_RESERVED_SEGMENTS = frozenset({".", ".."})
+
+
+def _validate_stac_identifier(value: str, field: str) -> str:
+    """Return ``value`` if it is a safe single URL path segment, else raise."""
+
+    if (
+        not isinstance(value, str)
+        or _STAC_IDENTIFIER.fullmatch(value) is None
+        or value in _RESERVED_SEGMENTS
+    ):
+        shown = value[:80] if isinstance(value, str) else value
+        raise InvalidInputError(
+            f"{field} {shown!r} is not a valid STAC identifier. Expected 1-200 "
+            "characters from A-Z, a-z, 0-9, '.', '_' or '-'."
+        )
+    return value
 
 
 def _bbox_intersects(a: BoundingBox, b: list[float]) -> bool:
@@ -147,8 +191,11 @@ class ImageryService(DomainService):
                 f"retrieval. Supported: {', '.join(SUPPORTED_IMAGERY_ASSETS)}."
             )
 
-        collection = request.collection or self._settings.stac_collection
-        item = self._fetch_item(request.scene_id, collection)
+        collection = _validate_stac_identifier(
+            request.collection or self._settings.stac_collection, "collection"
+        )
+        scene_id = _validate_stac_identifier(request.scene_id, "scene_id")
+        item = self._fetch_item(scene_id, collection)
         scene_bbox = item.get("bbox")
         if isinstance(scene_bbox, list) and not _bbox_intersects(request.bbox, scene_bbox):
             raise InvalidInputError(
@@ -228,7 +275,10 @@ class ImageryService(DomainService):
                 f"reads. Supported: {', '.join(ANALYSIS_BAND_ASSETS)}."
             )
 
-        resolved_collection = collection or self._settings.stac_collection
+        resolved_collection = _validate_stac_identifier(
+            collection or self._settings.stac_collection, "collection"
+        )
+        scene_id = _validate_stac_identifier(scene_id, "scene_id")
         item = self._fetch_item(scene_id, resolved_collection)
         scene_bbox = item.get("bbox")
         if isinstance(scene_bbox, list) and not _bbox_intersects(bbox, scene_bbox):

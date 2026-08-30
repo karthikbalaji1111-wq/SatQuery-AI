@@ -47,6 +47,7 @@ from app.services.geospatial.schemas import BoundingBox
 from app.services.query.compatibility import compute_compatibility, pair_observations
 from app.services.query.schemas import (
     ExecutedWindow,
+    Modality,
     Observation,
     ObservationSet,
     QueryExecutionResult,
@@ -58,7 +59,7 @@ logger = get_logger("analysis")
 
 _IMPLEMENTED_TASK: QueryTask = "visualize"
 
-_OPTICAL_MODALITY = "sentinel-2-optical"
+_OPTICAL_MODALITY: Modality = "sentinel-2-optical"
 #: Earth Search STAC asset keys (common names) for the two 10 m bands NDWI
 #: needs: "green" is band B03, "nir" is band B08. Both come from the SAME scene,
 #: so they share one grid and need no resampling or co-registration.
@@ -284,6 +285,13 @@ class AnalysisService(DomainService):
             acquired_at=observation.acquired_at,
             cloud_cover=observation.scene.cloud_cover,
             measurements=compute_ndwi_measurements(green, nir),
+            # Evidence from the read itself. Both bands come from one scene and
+            # share a grid, so ``green`` describes the read; carrying it lets
+            # the engine state the AOI coverage and the grid actually used
+            # instead of discarding what the read already established.
+            crs=green.crs,
+            resolution=green.resolution,
+            window_pixel_count=green.width * green.height,
         )
 
     async def _temporal_ndwi(
@@ -298,16 +306,14 @@ class AnalysisService(DomainService):
         """
 
         observations = execution.observations
-        optical = [
-            observation
-            for observation in observations.observations
-            if observation.modality == _OPTICAL_MODALITY
-        ]
         # SAR is filtered out before pairing: Sentinel-1 is not comparable to
         # Sentinel-2 without terrain correction, and NDWI is optical-only.
+        # ``for_modality`` is the domain model's own query for exactly this -
+        # reused rather than reimplemented.
         pairs, failures = pair_observations(
             ObservationSet(
-                requested_bbox=observations.requested_bbox, observations=optical
+                requested_bbox=observations.requested_bbox,
+                observations=observations.for_modality(_OPTICAL_MODALITY),
             )
         )
 

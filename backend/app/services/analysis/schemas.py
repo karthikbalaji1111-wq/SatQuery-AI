@@ -83,6 +83,17 @@ class ObservationIndexResult(BaseModel):
     acquired_at: datetime | None
     cloud_cover: float | None
     measurements: list[Measurement] = Field(default_factory=list)
+    #: Evidence from the ACTUAL quantitative read, not from STAC metadata. The
+    #: Phase 13 compatibility report can only see metadata and will often say
+    #: ``"unknown"`` for CRS and resolution; these fields say what the read
+    #: really used. The two are different evidence sources, not a contradiction.
+    crs: str | None = None
+    resolution: float | None = None
+    #: Pixels in the AOI window actually read for this observation (width x
+    #: height after clamping to the scene). Together with
+    #: ``ndwi_valid_pixel_count`` this is what makes AOI coverage inspectable:
+    #: a scene footprint says nothing about how much of the AOI carried data.
+    window_pixel_count: int | None = None
 
 
 class TemporalIndexComparison(BaseModel):
