@@ -1458,3 +1458,169 @@ def test_retrieve_still_uses_the_display_reader_not_the_band_reader() -> None:
     assert response.bands == ["red", "green", "blue"]
     assert len(display.calls) == 1
     assert band.calls == []  # the quantitative path is untouched by retrieve()
+
+
+# =========================================================================== #
+# Phase 11: quantitative raster INTEGRATION
+#
+# Unlike the tests above, these write a real GeoTIFF to disk and let the
+# production path open it with NO monkeypatching at all: rasterio.Env ->
+# _open_raster -> rasterio.open -> a genuine GDAL windowed read. Nothing about
+# the raster reader is faked, so a regression in the real I/O path is caught.
+# =========================================================================== #
+
+INTEGRATION_W, INTEGRATION_H = 60, 50
+
+
+def write_geotiff(
+    path: Any,
+    data: np.ndarray,
+    *,
+    dtype: str = "uint16",
+    nodata: float | None = 0.0,
+    crs: str = "EPSG:32644",
+) -> str:
+    """Write a real single-band GeoTIFF and return its path."""
+
+    height, width = data.shape
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=width,
+        height=height,
+        count=1,
+        dtype=dtype,
+        crs=crs,
+        transform=from_origin(_ORIGIN_X, _ORIGIN_Y, _RES, _RES),
+        nodata=nodata,
+    ) as dataset:
+        dataset.write(data.astype(dtype), 1)
+    return str(path)
+
+
+def integration_band(offset: int = 900) -> np.ndarray:
+    """Known uint16 values, all well above the 8-bit range."""
+
+    return (
+        np.arange(INTEGRATION_H * INTEGRATION_W, dtype="uint16").reshape(
+            INTEGRATION_H, INTEGRATION_W
+        )
+        + offset
+    ).astype("uint16")
+
+
+def test_integration_read_band_window_against_a_real_geotiff(tmp_path: Any) -> None:
+    """End-to-end through rasterio/GDAL - no fakes, no monkeypatching."""
+
+    data = integration_band()
+    href = write_geotiff(tmp_path / "B03.tif", data)
+    target = Window(col_off=10, row_off=5, width=20, height=15)
+
+    result = read_band_window(
+        href,
+        bbox_for_window(target),
+        max_dimension=4096,
+        max_window_pixels=50_000_000,
+    )
+
+    # 1. dtype remains uint16 - no display conversion anywhere in the path.
+    assert result.values.dtype == np.uint16
+
+    # 2. values remain unchanged - byte-for-byte against the source array.
+    w = result.window
+    expected = data[
+        w["row_off"] : w["row_off"] + w["height"],
+        w["col_off"] : w["col_off"] + w["width"],
+    ]
+    assert np.array_equal(result.values, expected)
+    assert result.values.max() > 255  # would be impossible after an 8-bit stretch
+
+    # 3. native dimensions preserved - the array is exactly the source window.
+    assert result.values.shape == (w["height"], w["width"])
+    assert (result.height, result.width) == (w["height"], w["width"])
+
+    # 4. affine transform describes THIS window in the source CRS.
+    assert result.crs == "EPSG:32644"
+    assert result.resolution == pytest.approx(_RES)
+    assert result.transform.a == pytest.approx(_RES)
+    assert result.transform.e == pytest.approx(-_RES)
+    assert result.transform.c == pytest.approx(_ORIGIN_X + w["col_off"] * _RES)
+    assert result.transform.f == pytest.approx(_ORIGIN_Y - w["row_off"] * _RES)
+
+    # 5. no display-style uint8 conversion.
+    assert result.values.dtype != np.uint8
+    assert not hasattr(result, "normalization")
+
+    # 6. the requested geographic window was respected: the clamped window
+    #    tightly brackets the target (reprojection + floor/ceil add a few px)
+    #    and is a small fraction of the full raster.
+    assert abs(w["col_off"] - target.col_off) <= 3
+    assert abs(w["row_off"] - target.row_off) <= 3
+    assert abs(w["width"] - target.width) <= 6
+    assert abs(w["height"] - target.height) <= 6
+    assert w["width"] * w["height"] < INTEGRATION_W * INTEGRATION_H
+    assert result.source_shape == [INTEGRATION_H, INTEGRATION_W]
+
+
+def test_integration_read_band_window_honours_nodata_on_a_real_geotiff(
+    tmp_path: Any,
+) -> None:
+    data = integration_band()
+    data[0, :6] = 0  # declared nodata
+    href = write_geotiff(tmp_path / "B03_nodata.tif", data, nodata=0.0)
+
+    result = read_band_window(
+        href,
+        bbox_for_window(Window(0, 0, 12, 8)),
+        max_dimension=4096,
+        max_window_pixels=50_000_000,
+    )
+
+    assert result.nodata == 0.0
+    zeros = result.values == 0
+    assert zeros.any()
+    assert not result.valid[zeros].any()  # nodata is masked
+    assert result.valid[~zeros].all()  # everything else is usable
+    assert (result.values[zeros] == 0).all()  # values are masked, not rewritten
+
+
+def test_integration_display_path_still_normalises_the_same_geotiff(
+    tmp_path: Any,
+) -> None:
+    """Regression: the display path is INTENTIONALLY different, and stays so.
+
+    The same real single-band uint16 GeoTIFF must keep producing an 8-bit,
+    percentile-normalised, 3-channel display image, while the quantitative
+    reader preserves the raw values. The display behaviour must never be
+    relaxed to accommodate NDWI.
+    """
+
+    data = integration_band()
+    href = write_geotiff(tmp_path / "shared.tif", data)
+    bbox = bbox_for_window(Window(0, 0, INTEGRATION_W, INTEGRATION_H))
+
+    display = read_rgb_window(
+        href, bbox, max_dimension=1024, max_window_pixels=50_000_000
+    )
+    quantitative = read_band_window(
+        href, bbox, max_dimension=4096, max_window_pixels=50_000_000
+    )
+
+    # Display path: unchanged Phase 9 semantics.
+    assert display.array.dtype == np.uint8
+    assert display.array.ndim == 3 and display.array.shape[2] == 3
+    assert display.bands == ["vv", "vv", "vv"]
+    assert "percentile" in display.normalization.lower()
+    assert display.array.max() <= 255
+
+    # Quantitative path: raw values, single band, no normalization at all.
+    assert quantitative.values.dtype == np.uint16
+    assert quantitative.values.ndim == 2
+    assert quantitative.values.max() > 255
+
+    # Same geographic window, deliberately different representations.
+    assert quantitative.values.shape == display.array.shape[:2]
+    assert not np.array_equal(
+        quantitative.values.astype(np.uint8), display.array[..., 0]
+    )

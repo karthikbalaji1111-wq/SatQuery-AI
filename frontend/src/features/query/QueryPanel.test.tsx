@@ -1244,3 +1244,173 @@ describe("QueryPanel - analysis", () => {
     ).toBe(false);
   });
 });
+
+const NDWI_MEASUREMENTS = [
+  { name: "ndwi_valid_pixel_count", value: 1234, unit: "pixels" },
+  { name: "ndwi_mean", value: 0.2777, unit: "index" },
+  { name: "ndwi_min", value: -0.41, unit: "index" },
+  { name: "ndwi_max", value: 0.5, unit: "index" },
+  { name: "ndwi_percent_above_index_threshold_0.3", value: 12.5, unit: "%" },
+];
+
+function enableNdwi() {
+  fireEvent.click(
+    screen.getByLabelText("Compute NDWI index statistics (Sentinel-2)"),
+  );
+}
+
+function analyzeBody(fetchMock: ReturnType<typeof stubRouter>) {
+  const call = fetchMock.mock.calls.find((c) =>
+    String(c[0]).includes("/query/analyze"),
+  );
+  expect(call).toBeDefined();
+  return JSON.parse((call![1] as RequestInit).body as string);
+}
+
+describe("QueryPanel - NDWI opt-in", () => {
+  it("offers an unchecked NDWI control by default", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    expect(
+      screen.getByLabelText("Compute NDWI index statistics (Sentinel-2)"),
+    ).not.toBeChecked();
+  });
+
+  it("omits include_ndwi entirely when the control is off", async () => {
+    const execution = executionResult();
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: execution },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    // Byte-identical to the pre-NDWI request: the key is absent, not false.
+    const body = analyzeBody(fetchMock);
+    expect(body).toEqual({ execution });
+    expect("include_ndwi" in body).toBe(false);
+  });
+
+  it("sends include_ndwi=true when the control is on", async () => {
+    const execution = executionResult();
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: execution },
+      "/query/analyze": {
+        body: analysisResult({ measurements: NDWI_MEASUREMENTS }),
+      },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    enableNdwi();
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+    expect(analyzeBody(fetchMock)).toEqual({ execution, include_ndwi: true });
+  });
+
+  it("renders the NDWI measurements returned by the backend", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({ measurements: NDWI_MEASUREMENTS }),
+      },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    enableNdwi();
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText("ndwi_mean")).toBeInTheDocument(),
+    );
+    for (const name of NDWI_MEASUREMENTS.map((m) => m.name)) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    expect(screen.getByText("0.2777 index")).toBeInTheDocument();
+    expect(screen.getByText("1234 pixels")).toBeInTheDocument();
+    expect(screen.getByText("12.5 %")).toBeInTheDocument();
+    // The index threshold is never presented as water/flood detection.
+    expect(screen.queryByText(/water detect/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/flood/i)).not.toBeInTheDocument();
+  });
+
+  it("still renders the analysis when NDWI produced no measurements", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({
+          measurements: [],
+          warnings: ["NDWI was requested but no Sentinel-2 window was available."],
+        }),
+      },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    enableNdwi();
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Warning: NDWI was requested but no Sentinel-2 window/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument();
+  });
+
+  it("does not change the /query/execute request", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    enableNdwi();
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/query/execute"),
+    );
+    // NDWI is an analysis concern only - execution is untouched.
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+      intent: {
+        location_query: "Chennai",
+        temporal_mode: "single",
+        time_windows: [{ start_date: "2024-07-01", end_date: "2024-07-01" }],
+        modalities: ["sentinel-2-optical"],
+        task: "visualize",
+      },
+      include_imagery: false,
+    });
+  });
+});

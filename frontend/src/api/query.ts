@@ -43,7 +43,9 @@ export function buildQueryPlan(
  * run Sentinel-2 discovery once per temporal window, deterministically select a
  * scene, and - when {@link QueryExecutionRequest.include_imagery} is set -
  * retrieve one bounded RGB window per selected scene. Sentinel-1 SAR is
- * reported as skipped, not executed.
+ * executed too: it is discovered and selected per window against its own STAC
+ * collection, and its VV asset is retrieved as a display-normalised greyscale
+ * PNG when imagery is requested.
  */
 export function executeQuery(
   request: QueryExecutionRequest,
@@ -59,8 +61,13 @@ export function executeQuery(
 /**
  * Interpret an already-computed {@link QueryExecutionResult}. The analysis task
  * is derived from `execution.plan.intent.task`. The backend performs no
- * discovery, no imagery retrieval, and no model inference here; a task with no
- * engine yet comes back as `status: "not_implemented"` in a 200 response.
+ * discovery and no model inference here; a task with no engine yet comes back
+ * as `status: "not_implemented"` in a 200 response.
+ *
+ * Set {@link AnalysisRequest.include_ndwi} to additionally compute single-scene
+ * Sentinel-2 NDWI statistics, returned as scalar
+ * {@link AnalysisResult.measurements}. Omitting it leaves the request
+ * unchanged.
  */
 export function analyzeQuery(
   request: AnalysisRequest,

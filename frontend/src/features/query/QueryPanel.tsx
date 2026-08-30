@@ -118,6 +118,7 @@ export function QueryPanel() {
   const [task, setTask] = useState<QueryTask>("visualize");
   const [planState, setPlanState] = useState<PlanState>({ status: "idle" });
   const [includeImagery, setIncludeImagery] = useState(false);
+  const [includeNdwi, setIncludeNdwi] = useState(false);
   const [executeState, setExecuteState] = useState<ExecuteState>({
     status: "idle",
   });
@@ -274,7 +275,12 @@ export function QueryPanel() {
     // execution result that is already rendered.
     setAnalyzeState({ status: "loading" });
     try {
-      const analysis = await analyzeQuery({ execution: result });
+      const analysis = await analyzeQuery({
+        execution: result,
+        // Omitted when off, so a non-NDWI request is byte-identical
+        // to the pre-NDWI behaviour.
+        ...(includeNdwi ? { include_ndwi: true } : {}),
+      });
       setAnalyzeState({ status: "done", result: analysis });
     } catch (error) {
       setAnalyzeState({ status: "error", message: errorMessage(error) });
@@ -526,6 +532,15 @@ export function QueryPanel() {
             onChange={(event) => setIncludeImagery(event.target.checked)}
           />
           Include bounded imagery preview
+        </label>
+        <label className="include-ndwi">
+          <input
+            type="checkbox"
+            name="include_ndwi"
+            checked={includeNdwi}
+            onChange={(event) => setIncludeNdwi(event.target.checked)}
+          />
+          Compute NDWI index statistics (Sentinel-2)
         </label>
         <button type="button" onClick={handleExecute} disabled={!canExecute}>
           {executeState.status === "loading" ? "Running…" : "Run full query"}

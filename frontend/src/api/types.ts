@@ -201,6 +201,12 @@ export interface AnalysisWindowRef {
 /** The task is derived from `execution.plan.intent.task`; there is no task field. */
 export interface AnalysisRequest {
   execution: QueryExecutionResult;
+  /**
+   * Opt in to single-scene Sentinel-2 NDWI statistics. Omitted (or `false`)
+   * leaves the request identical to the pre-NDWI behaviour; the backend
+   * defaults it to `false`.
+   */
+  include_ndwi?: boolean;
 }
 
 export interface AnalysisResult {
