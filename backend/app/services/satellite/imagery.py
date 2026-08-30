@@ -24,8 +24,14 @@ from app.core.errors import (
 from app.core.logging import get_logger
 from app.services.base import DomainService
 from app.services.geospatial.schemas import BoundingBox
-from app.services.satellite.raster import RgbWindow, read_rgb_window
+from app.services.satellite.raster import (
+    BandWindow,
+    RgbWindow,
+    read_band_window,
+    read_rgb_window,
+)
 from app.services.satellite.schemas import (
+    ANALYSIS_BAND_ASSETS,
     SUPPORTED_IMAGERY_ASSETS,
     ImageryRequest,
     ImageryResponse,
@@ -36,6 +42,7 @@ logger = get_logger("satellite.imagery")
 
 StacItemFetcher = Callable[[str, str], dict[str, Any]]
 RasterReader = Callable[..., RgbWindow]
+BandReader = Callable[..., BandWindow]
 
 _COG_TYPE_HINT = "geotiff"
 
@@ -59,11 +66,13 @@ class ImageryService(DomainService):
         transport: httpx.AsyncBaseTransport | None = None,
         stac_item_fetcher: StacItemFetcher | None = None,
         raster_reader: RasterReader | None = None,
+        band_reader: BandReader | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._transport = transport
         self._fetch_item = stac_item_fetcher or self._default_fetch_item
         self._read_window = raster_reader or read_rgb_window
+        self._read_band = band_reader or read_band_window
 
     def describe(self) -> str:
         return "Bounded Sentinel-2 RGB imagery retrieval via windowed COG reads."
@@ -186,6 +195,67 @@ class ImageryService(DomainService):
             source_shape=window.source_shape,
             image_base64=image_b64,
         )
+
+
+    # -- quantitative band access (analysis path) -------------------------- #
+
+    def read_band(
+        self,
+        *,
+        scene_id: str,
+        bbox: BoundingBox,
+        asset: str,
+        collection: str | None = None,
+    ) -> BandWindow:
+        """Blocking: read one band's raw values over ``bbox`` at native GSD.
+
+        The quantitative sibling of :meth:`retrieve`, and the ONLY quantitative
+        imagery-access boundary. It reuses the same collection-aware STAC item
+        lookup and asset resolution (so non-GeoTIFF assets such as the ``-jp2``
+        variants are refused), but reads through
+        :func:`~app.services.satellite.raster.read_band_window` - never through
+        the display path, and never decimated.
+
+        ``asset`` is an Earth Search STAC asset key and must be in
+        ``ANALYSIS_BAND_ASSETS``; the display whitelist does not apply here.
+        The STAC-advertised ``scale``/``offset`` are deliberately NOT read or
+        applied - see ``app.services.analysis.engines``.
+        """
+
+        if asset not in ANALYSIS_BAND_ASSETS:
+            raise InvalidInputError(
+                f"Asset {asset!r} is not supported for quantitative band "
+                f"reads. Supported: {', '.join(ANALYSIS_BAND_ASSETS)}."
+            )
+
+        resolved_collection = collection or self._settings.stac_collection
+        item = self._fetch_item(scene_id, resolved_collection)
+        scene_bbox = item.get("bbox")
+        if isinstance(scene_bbox, list) and not _bbox_intersects(bbox, scene_bbox):
+            raise InvalidInputError(
+                "The requested bbox does not intersect the selected scene."
+            )
+
+        href = self._resolve_asset_href(item, asset)
+
+        band = self._read_band(
+            href,
+            bbox,
+            # Rejection bounds, not a decimation target: quantitative reads stay
+            # at native resolution, so an oversized window is refused.
+            max_dimension=self._settings.imagery_hard_max_dimension,
+            max_window_pixels=self._settings.imagery_max_window_pixels,
+        )
+        logger.info(
+            "Band %s for %s (%s): %sx%s px at %s m/px",
+            asset,
+            scene_id,
+            resolved_collection,
+            band.width,
+            band.height,
+            band.resolution,
+        )
+        return band
 
 
 def _encode_png(array: Any) -> str:

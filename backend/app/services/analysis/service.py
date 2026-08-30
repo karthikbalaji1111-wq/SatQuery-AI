@@ -2,32 +2,54 @@
 
     QueryExecutionResult -> AnalysisService.analyze() -> AnalysisResult
 
-This is a *pure* boundary. It performs no discovery, no STAC calls, no imagery
-retrieval, no raster I/O, and no LLM/VLM inference; it holds no collaborators
-and touches no network. It only reads the supplied execution result.
+This service performs no discovery, no STAC calls of its own, and no LLM/VLM
+inference. It is the **dispatcher**: it reads the supplied execution result,
+decides what to compute, obtains any pixels it needs through
+:class:`~app.services.satellite.imagery.ImageryService`, and delegates all
+arithmetic to the pure functions in :mod:`app.services.analysis.engines`. It
+never performs pixel arithmetic itself.
 
-This phase implements no analysis engine. ``visualize`` is answered with a
-deterministic, templated summary of what the execution actually retrieved;
-every other task is reported as ``not_implemented`` (see
-``analysis/schemas.py`` for why that is a 200 body rather than a 501 error).
-Future engines (change detection, object identification, fusion) are dispatched
-from here without changing this contract.
+(Amends the Phase 10 docstring, which stated this service holds no collaborators
+and performs no imagery/raster I/O. Since Phase 11 it holds exactly one
+collaborator - ``ImageryService`` - and reads bands through it. Discovery, scene
+selection and STAC access remain outside this service.)
+
+``visualize`` is answered with a deterministic, templated summary of what the
+execution actually retrieved; every other task is reported as
+``not_implemented`` (see ``analysis/schemas.py`` for why that is a 200 body
+rather than a 501 error). Independently of the task, ``include_ndwi`` opts in to
+single-scene Sentinel-2 NDWI statistics. Future engines (change detection,
+object identification, fusion) are dispatched from here without changing this
+contract.
 """
 
 from __future__ import annotations
 
+from fastapi.concurrency import run_in_threadpool
+
+from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.services.analysis.engines import compute_ndwi_measurements
 from app.services.analysis.schemas import (
     AnalysisRequest,
     AnalysisResult,
     AnalysisWindowRef,
+    Measurement,
 )
 from app.services.base import DomainService
 from app.services.query.schemas import ExecutedWindow, QueryExecutionResult, QueryTask
+from app.services.satellite import ImageryService
 
 logger = get_logger("analysis")
 
 _IMPLEMENTED_TASK: QueryTask = "visualize"
+
+_OPTICAL_MODALITY = "sentinel-2-optical"
+#: Earth Search STAC asset keys (common names) for the two 10 m bands NDWI
+#: needs: "green" is band B03, "nir" is band B08. Both come from the SAME scene,
+#: so they share one grid and need no resampling or co-registration.
+_NDWI_GREEN_ASSET = "green"
+_NDWI_NIR_ASSET = "nir"
 
 
 def _window_ref(window: ExecutedWindow) -> AnalysisWindowRef:
@@ -108,22 +130,114 @@ def _not_implemented_answer(task: QueryTask, window_count: int) -> str:
     )
 
 
+def _scene_collection(window: ExecutedWindow) -> str | None:
+    """STAC collection of the window's selected scene, from discovery itself.
+
+    ``ExecutedWindow`` does not carry the collection, but each discovered
+    :class:`Scene` does, so it is recovered by matching the selected id. ``None``
+    lets ``ImageryService`` fall back to its configured default, which is exactly
+    what ``QueryExecutionService`` passes for an optical window.
+    """
+
+    for scene in window.scenes:
+        if scene.id == window.selected_scene_id:
+            return scene.collection
+    return None
+
+
+def _ndwi_candidates(execution: QueryExecutionResult) -> list[ExecutedWindow]:
+    """Optical windows that actually have a scene to read."""
+
+    return [
+        window
+        for window in execution.windows
+        if window.modality == _OPTICAL_MODALITY and window.selected_scene_id is not None
+    ]
+
+
 class AnalysisService(DomainService):
     """Interprets a :class:`QueryExecutionResult` into an :class:`AnalysisResult`.
 
     The generic :meth:`run` hook stays unimplemented; :meth:`analyze` is the
-    typed entry point. Constructed with no arguments - this service has no
-    collaborators, no settings, and no external dependencies.
+    typed entry point. ``ImageryService`` is injected with a real default, so
+    zero-argument construction keeps working (the ``DomainService`` contract
+    test relies on it) while tests can substitute a fake.
     """
 
     name = "analysis"
 
+    def __init__(self, *, imagery_service: ImageryService | None = None) -> None:
+        self._imagery = imagery_service or ImageryService()
+
     def describe(self) -> str:
         return (
             "Deterministic interpretation of an executed SatQuery result: "
-            "status, templated answer, window traceability, and warnings. "
-            "No analysis engine, no imagery processing, no model inference."
+            "status, templated answer, window traceability, warnings, and "
+            "opt-in single-scene Sentinel-2 NDWI statistics."
         )
+
+    async def _ndwi_measurements(
+        self, execution: QueryExecutionResult
+    ) -> tuple[list[Measurement], list[str]]:
+        """Single-scene NDWI for one optical window. Returns (measurements, warnings).
+
+        Pixels are read server-side through ``ImageryService`` and the arithmetic
+        is delegated to the pure engine; this method performs none itself.
+        """
+
+        candidates = _ndwi_candidates(execution)
+        if not candidates:
+            return [], [
+                "NDWI was requested but no Sentinel-2 optical window with a "
+                "selected scene was available; no index was computed."
+            ]
+
+        window = candidates[0]
+        warnings: list[str] = []
+        if len(candidates) > 1:
+            warnings.append(
+                "NDWI is single-scene in this phase: it was computed only for "
+                f"the {window.modality} window {window.label!r}; "
+                f"{len(candidates) - 1} other optical window(s) were not analysed."
+            )
+
+        bbox = execution.plan.bbox
+        collection = _scene_collection(window)
+        try:
+            green = await run_in_threadpool(
+                self._imagery.read_band,
+                scene_id=window.selected_scene_id,
+                bbox=bbox,
+                asset=_NDWI_GREEN_ASSET,
+                collection=collection,
+            )
+            nir = await run_in_threadpool(
+                self._imagery.read_band,
+                scene_id=window.selected_scene_id,
+                bbox=bbox,
+                asset=_NDWI_NIR_ASSET,
+                collection=collection,
+            )
+            measurements = compute_ndwi_measurements(green, nir)
+        except AppError as exc:
+            logger.info(
+                "NDWI unavailable for window %s [%s]: %s",
+                window.label,
+                exc.code,
+                exc.message,
+            )
+            warnings.append(
+                f"NDWI could not be computed for the {window.modality} window "
+                f"{window.label!r}: {exc.message}"
+            )
+            return [], warnings
+
+        warnings.append(
+            "NDWI values are a spectral index computed from raw Sentinel-2 "
+            "digital numbers; they are not a validated water or flood "
+            "classification."
+        )
+        return measurements, warnings
 
     async def analyze(self, request: AnalysisRequest) -> AnalysisResult:
         """Interpret ``request.execution``; the task comes from its intent."""
@@ -140,12 +254,24 @@ class AnalysisService(DomainService):
             status = "not_implemented"
             answer = _not_implemented_answer(task, len(refs))
 
+        measurements: list[Measurement] = []
+        if request.include_ndwi:
+            measurements, ndwi_warnings = await self._ndwi_measurements(execution)
+            warnings.extend(ndwi_warnings)
+            if measurements:
+                answer = (
+                    f"{answer} NDWI index statistics were computed for one "
+                    "Sentinel-2 scene at native 10 m resolution."
+                )
+
         logger.info(
-            "Analysed execution (task=%s, status=%s, windows=%d, warnings=%d)",
+            "Analysed execution (task=%s, status=%s, windows=%d, warnings=%d, "
+            "measurements=%d)",
             task,
             status,
             len(refs),
             len(warnings),
+            len(measurements),
         )
 
         return AnalysisResult(
@@ -154,5 +280,5 @@ class AnalysisService(DomainService):
             answer=answer,
             windows_considered=refs,
             warnings=warnings,
-            measurements=[],
+            measurements=measurements,
         )
