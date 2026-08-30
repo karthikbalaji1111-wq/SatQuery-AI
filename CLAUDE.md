@@ -57,8 +57,14 @@ Core intended capabilities:
    footprint, assets and any retrieved imagery so a later phase can establish
    alignment explicitly. No co-registration, no comparison, no resampling -
    observations are NOT assumed to share a CRS, grid or resolution.
+12. Observation compatibility reporting (metadata only): given two
+   `Observation`s, `app/services/query/compatibility.py` reports what can
+   honestly be established from metadata the system already holds - and names
+   what cannot. It establishes the COMPATIBILITY BOUNDARY, not an alignment
+   mechanism. Pure domain capability: no API route, no frontend, no
+   `AnalysisService` involvement.
 
-Current HEAD represents the completed Temporal Observation Model phase.
+Current HEAD represents the completed Observation Compatibility Reporting phase.
 
 ## Architecture Rules
 
@@ -194,6 +200,13 @@ Inspect the repository first and adapt to the actual codebase.
   `QueryExecutionResult.observations`. Domain representation only: no temporal
   analysis, no differencing, no co-registration, no resampling, and no
   assumption that observations are spatially aligned or share a resolution.
+- **Phase 13: IMPLEMENTED.** Observation compatibility reporting -
+  `CompatibilityReport` / `ObservationPair` / `PairingFailure` /
+  `compute_compatibility` / `pair_observations` in
+  `query/compatibility.py`. Metadata only: no raster I/O, no resampling, no
+  pixel comparison, and co-registration is never claimed. Pure domain
+  capability - no route, no frontend, no `AnalysisService` change. See
+  section 13.
 
 ## 3. Architectural state — VERIFIED
 
@@ -430,3 +443,119 @@ detection". A threshold, if reported at all, must be labelled explicitly as an
 validated water or flood classification. `scl` can later provide an independent
 validation reference, but that is deferred. Do not claim an analysis the system
 did not perform.
+
+## 13. Phase 13 — Observation Compatibility Reporting — IMPLEMENTED
+
+Metadata-only. Establishes the **compatibility boundary**, not an alignment
+mechanism. Raster-level co-registration and resampling remain deferred to a
+later phase.
+
+**Location:** `backend/app/services/query/compatibility.py` (pure domain module,
+sibling of the `Observation`/`ObservationSet` models it reports over). Owned by
+the query domain deliberately: compatibility is a relationship between
+observations, independent of any particular analysis, so future analysis modules
+**consume** this layer rather than own it. Dependency direction `analysis ->
+query` is unchanged; this module imports nothing from `services/analysis`.
+
+**Public API** (re-exported from `app.services.query`):
+
+```python
+MatchStatus          = Literal["same", "different", "unknown"]
+BboxOverlapStatus    = Literal["none", "partial", "full", "unknown"]
+CoRegistrationStatus = Literal["not_evaluated", "not_supported_cross_modal"]
+
+class CompatibilityReport(BaseModel)   # 8 fields, listed below
+class ObservationPair(BaseModel)       # first, second
+class PairingFailure(BaseModel)        # modality: Modality | None, reason: str
+
+def compute_compatibility(first: Observation, second: Observation) -> CompatibilityReport
+def pair_observations(observations: ObservationSet)
+    -> tuple[list[ObservationPair], list[PairingFailure]]
+```
+
+`CompatibilityReport` fields: `same_modality`, `temporal_separation_days`,
+`bbox_overlap`, `crs_match`, `resolution_match`, `processing_level_match`,
+`limitations`, `co_registration_status`. No intersection geometry is emitted.
+
+**Co-registration is NEVER claimed.** `co_registration_status` is assigned
+*structurally* from modality alone, before any match is evaluated, and no later
+code path can upgrade it. There is deliberately no value meaning
+"co-registered" — this layer cannot establish that, so it cannot report it.
+
+    same modality != co-registration      same CRS        != co-registration
+    same bbox     != co-registration      same resolution != co-registration
+
+- same modality -> `co_registration_status = "not_evaluated"`
+- S1 + S2       -> `co_registration_status = "not_supported_cross_modal"`
+
+**Unknown must never become "different".** Every `MatchStatus` helper returns
+`"unknown"` on a missing input before reaching its equality branch.
+
+**What the metadata actually supports — VERIFIED.** `_normalize_scene`
+(`satellite/service.py`) keeps only `datetime`, `bbox`, `geometry`,
+`eo:cloud_cover`, `collection`, `platform` and `processing:level`; the STAC
+item's `proj:epsg` and `gsd` are **dropped**. The only in-repo source of a CRS
+or resolution is `ImageryResponse`, which exists solely when bounded imagery was
+retrieved. Therefore **with `include_imagery=False` — the common case —
+`crs_match` and `resolution_match` are always `"unknown"`.** That is the correct
+report, not a gap to work around. Separately, `processing_level` may be *derived
+from the collection name* rather than read from the item, so a `"same"` verdict
+says nothing about the processing baseline; this is stated in `limitations`
+whenever the field is not unknown.
+
+**`bbox_overlap`** is a coarse WGS84 relation between whole-scene footprints:
+`full` = one contains the other (identical included), `partial` = positive-area
+intersection with neither containing, `none` = no positive-area intersection (a
+shared edge has zero area and is `none`), `unknown` = a footprint is absent. No
+area and no percentage — degrees are not an equal-area unit.
+
+**Pairing — deterministic, same-modality, consecutive.** Within each modality,
+observations are ordered by **acquisition time** ascending (unknown times last,
+ties broken by window label then scene id) and paired consecutively, so *n*
+observations yield *n - 1* pairs. Modalities are visited in order of first
+appearance. Fewer than two observations in a modality yields a `PairingFailure`;
+an empty set yields one failure with `modality=None`.
+
+`first`/`second` mean *acquired earlier* / *acquired later*. They do **not** mean
+baseline/target: `TemporalComparison` does not require the baseline window to
+precede the target, so an inverted comparison pairs as `first=target`. Requested
+roles remain readable as `Observation.window_label`.
+
+**Cross-modal pairs are NOT produced by `pair_observations()`** — exclusion is
+structural (pairing only ever zips within one modality group), not a filter.
+Proposing an S1/S2 pair would assert that comparing them is coherent, and it is
+not without SAR terrain correction, which is out of scope. **Cross-modal
+compatibility is still directly reportable** via
+`compute_compatibility(s2_obs, s1_obs)`, which returns
+`not_supported_cross_modal` — an explicit refusal is information, not a
+proposal. Pairing *proposes*; `compute_compatibility` *qualifies*.
+
+**Phase 13 does NOT contain:** raster I/O · rasterio imports · WarpedVRT ·
+reprojection · resampling · `GridSpec` · aligned raster reads · pixel overlap ·
+pixel differences · co-valid pixel counts · change detection · API endpoint or
+route change · frontend change · `AnalysisService` change · `ImageryService`
+change · any change to the raster reading path · `include_alignment`.
+Enforced by tests that parse the module's imports with `ast` and assert them a
+subset of `{__future__, math, datetime, typing, pydantic, app}`.
+
+**Files:** `app/services/query/compatibility.py` (new),
+`tests/test_compatibility.py` (new, 64 tests),
+`app/services/query/__init__.py` (exports only — no behaviour change).
+
+**Baseline after Phase 13:** `pytest -q` **376 passed** (was 312), `ruff check .`
+clean, `git diff --check` clean; frontend untouched (**50 passed**, 3 files).
+Note the pre-Phase-13 checkpoint above records a stale backend baseline of 240;
+the real figure at `185320a` was 312.
+
+### Known issue — NOT fixed in Phase 13
+
+`ObservationSet.ordered_by_acquisition()` (`query/schemas.py`) raises
+`TypeError: can't compare offset-naive and offset-aware datetimes` when one
+scene's `datetime` carries a `Z` suffix and another does not. Reproduced live.
+It is dormant because Earth Search is consistently `Z`-suffixed. This is
+**Phase 12 code and was deliberately left untouched**; it remains a separate
+known issue. `pair_observations()` is unaffected — it uses its own guarded sort
+key that anchors a naive datetime to UTC **for ordering only**. Note the
+deliberate asymmetry: `temporal_separation_days` refuses that assumption and
+returns `None` for a mixed pair, because a *reported measurement* must not
+invent a time zone.
