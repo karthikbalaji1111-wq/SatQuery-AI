@@ -296,3 +296,105 @@ export interface AnalysisResult {
    */
   temporal_comparison?: TemporalIndexComparison | null;
 }
+
+// --------------------------------------------------------------------------- //
+// Agentic orchestration (POST /api/v1/query/agent)
+//
+// Mirrors the backend contracts exactly. No business logic is reimplemented
+// here: the frontend renders what the server established and decides nothing.
+// --------------------------------------------------------------------------- //
+
+/** The closed set of tools a planner may select. */
+export type AgentToolName =
+  | "execute_query"
+  | "ndwi_statistics"
+  | "temporal_ndwi_statistics";
+
+/** Parameters for the discovery tool. Note there is no server `limit` here. */
+export interface ExecuteQueryParams {
+  tool: "execute_query";
+  intent: SatQueryIntent;
+  include_imagery: boolean;
+  max_cloud_cover: number | null;
+}
+
+export interface NdwiParams {
+  tool: "ndwi_statistics";
+}
+
+export interface TemporalNdwiParams {
+  tool: "temporal_ndwi_statistics";
+}
+
+export type AgentToolCall =
+  | ExecuteQueryParams
+  | NdwiParams
+  | TemporalNdwiParams;
+
+/** The validated plan. 1-3 steps, `execute_query` first. */
+export interface AgentPlan {
+  steps: AgentToolCall[];
+}
+
+/** What actually happened to one step - observable outcome only. */
+export interface AgentToolStep {
+  status: "ok" | "rejected" | "failed" | "skipped";
+  parameters: AgentToolCall;
+  rejection_reason: string | null;
+  error_message: string | null;
+}
+
+/** Outcome of each mechanical check applied to the generated answer. */
+export interface AnswerValidation {
+  numeric_grounding: "pass" | "fail" | "not_run";
+  forbidden_terms: "pass" | "fail" | "not_run";
+  evidence_refs: "pass" | "fail" | "not_run";
+}
+
+/**
+ * Observable decisions and results only. There is deliberately no field for
+ * reasoning, and none may be added: the UI shows what happened, never why the
+ * model thought so.
+ */
+export interface AgentTrace {
+  plan: AgentPlan | null;
+  steps: AgentToolStep[];
+  evidence_refs: string[];
+  answer_validation: AnswerValidation | null;
+}
+
+/** One citable fact: a measurement, or qualifying text. */
+export interface EvidenceItem {
+  id: string;
+  source: "execution" | "ndwi" | "temporal_ndwi" | "compatibility" | "model";
+  measurement: Measurement | null;
+  text: string | null;
+  produced_by: string | null;
+}
+
+export interface AgentEvidence {
+  items: EvidenceItem[];
+  execution: QueryExecutionResult | null;
+  analysis: AnalysisResult | null;
+}
+
+/**
+ * `ok` carries an answer. The other three do not: the answer is withheld or
+ * was never produced, and the deterministic evidence is returned instead.
+ */
+export type AgentStatus =
+  | "ok"
+  | "planner_unavailable"
+  | "synthesis_unavailable"
+  | "answer_withheld";
+
+export interface AgentQuestionRequest {
+  question: string;
+}
+
+export interface AgentResult {
+  status: AgentStatus;
+  answer: string | null;
+  trace: AgentTrace;
+  evidence: AgentEvidence;
+}
