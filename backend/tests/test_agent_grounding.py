@@ -579,3 +579,96 @@ def test_the_module_documents_containment_rather_than_proof() -> None:
     doc = grounding_mod.__doc__ or ""
     assert "containment" in doc.lower()
     assert "not proof" in doc.lower() or "not a proof" in doc.lower()
+
+
+# =========================================================================== #
+# Post-Phase-15 hardening
+#
+# MEDIUM-3: only the REQUESTED windows were allowlisted, so an answer citing
+# the date a scene was actually acquired - a fact the evidence carries - was
+# withheld as ungrounded.
+#
+# MEDIUM-4: the number pattern could not match scientific notation, so such a
+# value was skipped entirely rather than checked. A skipped number is an
+# unchecked claim, which is the one thing this validator exists to prevent.
+# =========================================================================== #
+
+
+def test_an_actual_acquisition_date_is_accepted() -> None:
+    """The scene was acquired 2024-01-15; the request asked for 01-01..01-31."""
+
+    result = check("The scene was acquired on 2024-01-15.")
+    assert result.numeric_grounding == "pass"
+
+
+def test_an_acquisition_date_outside_the_evidence_is_still_rejected() -> None:
+    """Widened for real acquisitions only - not for arbitrary dates."""
+
+    assert check("The scene was acquired on 2024-07-04.").numeric_grounding == "fail"
+
+
+def test_the_acquisition_month_and_year_are_accepted() -> None:
+    assert check("Acquired in January 2024.").numeric_grounding == "pass"
+
+
+def test_acquisition_dates_come_from_the_evidence_not_from_the_answer() -> None:
+    """With no execution there is no acquisition to allowlist."""
+
+    evidence = AgentEvidence.model_validate(
+        {"items": [measurement_item("ndwi.ndwi_mean", "ndwi_mean", 0.2777, "index")]}
+    )
+    result = validate_answer(
+        draft("The scene was acquired on 2024-01-15.", ["ndwi.ndwi_mean"]), evidence
+    )
+    assert result.numeric_grounding == "fail"
+
+
+@pytest.mark.parametrize("literal", ["1.5e10", "2E5", "-3.2e-4", "1e3"])
+def test_scientific_notation_is_extracted_rather_than_skipped(literal: str) -> None:
+    """Whatever the verdict, the number must be CHECKED, not ignored."""
+
+    from app.services.agent.grounding import _NUMBER
+
+    assert [m.group(0) for m in _NUMBER.finditer(f"value {literal} here")] == [
+        literal
+    ]
+
+
+@pytest.mark.parametrize("literal", ["1.5e10", "2E5", "-3.2e-4"])
+def test_an_ungrounded_scientific_number_is_rejected(literal: str) -> None:
+    assert check(f"The value was {literal}.").numeric_grounding == "fail"
+
+
+def test_a_grounded_scientific_number_is_accepted() -> None:
+    """1234567 written as 1.234567e6 is the same measurement."""
+
+    result = check(
+        "1.234567e6 valid pixels were analysed.",
+        refs=["ndwi.ndwi_valid_pixel_count"],
+    )
+    assert result.numeric_grounding == "pass"
+
+
+def test_scientific_notation_matches_at_its_own_precision() -> None:
+    evidence = make_evidence(
+        items=[measurement_item("ndwi.count", "ndwi_valid_pixel_count", 1234567.0, "pixels")]
+    )
+    # 1.2e6 -> 1200000 at that precision; 1234567 rounds to 1200000. Accepted.
+    assert (
+        validate_answer(draft("1.2e6 pixels.", ["ndwi.count"]), evidence)
+        .numeric_grounding
+        == "pass"
+    )
+    # 9.9e6 does not.
+    assert (
+        validate_answer(draft("9.9e6 pixels.", ["ndwi.count"]), evidence)
+        .numeric_grounding
+        == "fail"
+    )
+
+
+def test_ordinary_prose_containing_e_is_unaffected() -> None:
+    """The widened pattern must not start matching words."""
+
+    assert check("5 elephants were not counted.").numeric_grounding == "fail"
+    assert check("No numeric claim here at all.").numeric_grounding == "pass"

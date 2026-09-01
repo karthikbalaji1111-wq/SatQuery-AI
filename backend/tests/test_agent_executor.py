@@ -649,7 +649,8 @@ def test_scene_counts_are_recorded_as_execution_evidence() -> None:
     outcome, _, _ = run(make_plan())
 
     by_id = {item.id: item for item in outcome.evidence.items}
-    key = "execution.single.scene_count"
+    # Namespaced by modality so a two-modality query cannot collide.
+    key = "execution.sentinel-2-optical.single.scene_count"
     assert key in by_id
     assert by_id[key].source == "execution"
     assert by_id[key].measurement is not None
@@ -763,3 +764,115 @@ def test_the_api_layer_is_the_one_that_composes_the_agent() -> None:
     backend = pathlib.Path(__file__).resolve().parents[1]
     routes = (backend / "app" / "api" / "routes" / "query.py").read_text()
     assert "services.agent" in routes
+
+
+# =========================================================================== #
+# Post-Phase-15 hardening - HIGH-1: evidence ids must be unique across
+# modalities.
+#
+# ``QueryExecutionService`` runs every requested modality against every
+# temporal window, so a two-modality query produces two windows sharing one
+# label ("single", "baseline", ...). An id keyed only on the label collided,
+# and ``AgentEvidence`` rightly refused it - crashing the whole request.
+# =========================================================================== #
+
+
+def make_sar_window(*, label: str = "single", scene_id: str = "s1-a") -> ExecutedWindow:
+    scene = make_scene(scene_id)
+    return ExecutedWindow(
+        modality="sentinel-1-sar",
+        label=label,
+        time_range=TimeRange.model_validate(
+            {"start_date": "2024-01-01", "end_date": "2024-01-31"}
+        ),
+        scene_count=2,
+        scenes=[scene],
+        selected_scene_id=scene.id,
+        imagery=None,
+        imagery_error=None,
+    )
+
+
+def two_modality_execution() -> QueryExecutionResult:
+    """Exactly what a Sentinel-2 + Sentinel-1 single-window query produces."""
+
+    intent = SatQueryIntent.model_validate(
+        intent_dict(modalities=[S2, "sentinel-1-sar"])
+    )
+    return QueryExecutionResult(
+        plan=ResolvedQueryPlan(intent=intent, bbox=DEFAULT_BBOX),
+        executed_modalities=[S2, "sentinel-1-sar"],
+        skipped_modalities=[],
+        windows=[
+            make_window(scene=make_scene("s2-a")),
+            make_sar_window(),
+        ],
+        catalog=CATALOG,
+    )
+
+
+def test_a_two_modality_execution_produces_unique_evidence_ids() -> None:
+    """Both windows are labelled "single"; their ids must still differ."""
+
+    outcome, _, _ = run(
+        make_plan(),
+        query=FakeQueryExecutionService(result=two_modality_execution()),
+    )
+
+    ids = [item.id for item in outcome.evidence.items]
+    assert len(ids) == len(set(ids)), f"duplicate evidence ids: {ids}"
+    assert outcome.evidence.ids() == set(ids)
+
+
+def test_evidence_ids_are_namespaced_by_modality() -> None:
+    outcome, _, _ = run(
+        make_plan(),
+        query=FakeQueryExecutionService(result=two_modality_execution()),
+    )
+
+    ids = {item.id for item in outcome.evidence.items}
+    assert "execution.sentinel-2-optical.single.scene_count" in ids
+    assert "execution.sentinel-1-sar.single.scene_count" in ids
+
+
+def test_a_two_modality_compare_query_also_stays_unique() -> None:
+    """Two modalities x two windows - four ids, all distinct."""
+
+    intent = SatQueryIntent.model_validate(
+        intent_dict(
+            modalities=[S2, "sentinel-1-sar"],
+            temporal_mode="compare",
+            time_windows={
+                "baseline": {"start_date": "2024-01-01", "end_date": "2024-01-31"},
+                "target": {"start_date": "2024-06-01", "end_date": "2024-06-30"},
+            },
+        )
+    )
+    execution = QueryExecutionResult(
+        plan=ResolvedQueryPlan(intent=intent, bbox=DEFAULT_BBOX),
+        executed_modalities=[S2, "sentinel-1-sar"],
+        skipped_modalities=[],
+        windows=[
+            make_window(label="baseline", scene=make_scene("s2-b")),
+            make_window(label="target", scene=make_scene("s2-t")),
+            make_sar_window(label="baseline", scene_id="s1-b"),
+            make_sar_window(label="target", scene_id="s1-t"),
+        ],
+        catalog=CATALOG,
+    )
+    outcome, _, _ = run(
+        make_plan(), query=FakeQueryExecutionService(result=execution)
+    )
+
+    ids = [item.id for item in outcome.evidence.items]
+    assert len(ids) == len(set(ids)) == 4
+
+
+def test_evidence_ids_remain_deterministic() -> None:
+    execution = two_modality_execution()
+    first = run(make_plan(), query=FakeQueryExecutionService(result=execution))[0]
+    second = run(make_plan(), query=FakeQueryExecutionService(result=execution))[0]
+
+    assert [i.id for i in first.evidence.items] == [
+        i.id for i in second.evidence.items
+    ]
