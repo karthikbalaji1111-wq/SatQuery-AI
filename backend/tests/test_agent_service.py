@@ -787,3 +787,70 @@ def test_the_status_vocabulary_was_not_widened() -> None:
         "synthesis_unavailable",
         "answer_withheld",
     }
+
+
+# =========================================================================== #
+# A-1 at the service level: an unsupported unit-attached number must reach
+# ``answer_withheld``, not ``ok``. Grounding is exercised through the real
+# AgentService path, not in isolation.
+# =========================================================================== #
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "The lake covers 12km2 of the scene.",
+        "Mean NDWI was 0.99x the baseline.",
+        "The shoreline changed by 500m.",
+    ],
+)
+def test_an_unsupported_unit_attached_number_withholds_the_answer(
+    summary: str,
+) -> None:
+    result = ask(
+        build(
+            synthesizer=RecordingSynthesizer(
+                answer=DraftAnswer(summary=summary, evidence_refs=[])
+            )
+        )[0]
+    )
+
+    assert result.status == "answer_withheld"
+    assert result.answer is None
+    assert result.trace.answer_validation.numeric_grounding == "fail"
+    # The deterministic evidence still survives the rejection.
+    assert result.evidence.items
+
+
+def test_a_supported_number_with_a_unit_is_still_answered() -> None:
+    """The fix must not withhold a legitimate answer."""
+
+    evidence = AgentEvidence.model_validate(
+        {
+            "items": [
+                {
+                    "id": "ndwi.count",
+                    "source": "ndwi",
+                    "measurement": {
+                        "name": "ndwi_valid_pixel_count",
+                        "value": 500.0,
+                        "unit": "pixels",
+                    },
+                    "produced_by": "analysis.engines.compute_ndwi_measurements",
+                }
+            ]
+        }
+    )
+    result = ask(
+        build(
+            executor=RecordingExecutor(outcome=make_outcome(evidence)),
+            synthesizer=RecordingSynthesizer(
+                answer=DraftAnswer(
+                    summary="The shoreline spans 500m.", evidence_refs=["ndwi.count"]
+                )
+            ),
+        )[0]
+    )
+
+    assert result.status == "ok"
+    assert result.answer == "The shoreline spans 500m."

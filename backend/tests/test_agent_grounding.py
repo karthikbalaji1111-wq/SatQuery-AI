@@ -672,3 +672,153 @@ def test_ordinary_prose_containing_e_is_unaffected() -> None:
 
     assert check("5 elephants were not counted.").numeric_grounding == "fail"
     assert check("No numeric claim here at all.").numeric_grounding == "pass"
+
+
+# =========================================================================== #
+# A-1: a number glued to a unit must never be silently skipped.
+#
+# The trailing ``(?![A-Za-z_])`` guard meant "12km2", "500m" and "0.99x"
+# produced NO regex match at all, so the number was never checked and an
+# unsupported quantitative claim passed as grounded. A skipped number is an
+# unchecked claim - the single failure mode this validator exists to prevent.
+#
+# The invariant: every number in generated prose is either checked against the
+# evidence or fails closed. It is never ignored because a letter follows it.
+#
+# Note what this does NOT do: the unit itself is never interpreted. "500m" is
+# grounded iff 500 is in the evidence; grounding has no idea what a metre is,
+# and deliberately no measurement ontology is introduced.
+# =========================================================================== #
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "The lake covers 12km2.",
+        "The lake covers 12km2 of the scene.",
+        "The shoreline changed by 500m.",
+        "Mean NDWI was 0.99x the baseline.",
+        "The value increased by 3.5x.",
+        "The area is 12km².",
+    ],
+)
+def test_an_unsupported_number_with_a_unit_fails_closed(summary: str) -> None:
+    """Evidence holds only 0.2777 and 1234567.0 - none of these is supported."""
+
+    assert check(summary).numeric_grounding == "fail"
+
+
+@pytest.mark.parametrize(
+    "summary,literal",
+    [
+        ("The lake covers 12km2.", "12"),
+        ("The shoreline changed by 500m.", "500"),
+        ("Mean NDWI was 0.99x the baseline.", "0.99"),
+        ("The area is 12km².", "12"),
+    ],
+)
+def test_the_numeric_component_is_actually_extracted(
+    summary: str, literal: str
+) -> None:
+    """Not merely failing - failing because the number was SEEN and checked."""
+
+    from app.services.agent.grounding import _ungrounded_claims
+
+    assert literal in _ungrounded_claims(summary, make_evidence())
+
+
+@pytest.mark.parametrize(
+    "summary,value",
+    [
+        ("The shoreline changed by 500m.", 500.0),
+        ("The lake covers 12km2.", 12.0),
+        ("Mean NDWI was 0.99x the baseline.", 0.99),
+    ],
+)
+def test_a_supported_number_with_a_unit_is_accepted(
+    summary: str, value: float
+) -> None:
+    """The unit is irrelevant; only the number must be traceable."""
+
+    evidence = make_evidence(
+        items=[measurement_item("ndwi.v", "measured_value", value, "index")]
+    )
+    result = validate_answer(draft(summary, ["ndwi.v"]), evidence)
+    assert result.numeric_grounding == "pass"
+
+
+def test_a_number_glued_to_a_word_is_still_checked() -> None:
+    """The A-2 skip class disappears with the same fix."""
+
+    from app.services.agent.grounding import _ungrounded_claims
+
+    assert "2" in _ungrounded_claims("There were 2eggs.", make_evidence())
+
+
+# --- A-1 must not regress the protections it sits behind ------------------- #
+
+
+def test_a_real_scene_id_still_yields_no_numeric_claims() -> None:
+    """Scene ids are masked BEFORE numbers are read - not by the letter guard."""
+
+    from app.services.agent.grounding import _ungrounded_claims
+
+    assert _ungrounded_claims(f"Scene {SCENE_ID} was selected.", make_evidence()) == []
+
+
+def test_a_scene_id_is_safe_even_without_masking() -> None:
+    """Defence in depth: the leading boundary alone blocks its digits.
+
+    Every digit run in ``S2B_44PLV_20241026_0_L2A`` is preceded by a letter or
+    an underscore, so the leading guard rejects it regardless of masking. This
+    is why removing the TRAILING guard cannot weaken scene-id handling.
+    """
+
+    from app.services.agent.grounding import _NUMBER
+
+    assert [m.group(0) for m in _NUMBER.finditer(SCENE_ID)] == []
+
+
+@pytest.mark.parametrize("token", ["L2A", "S2B", "B04", "EPSG"])
+def test_identifier_fragments_are_not_read_as_numbers(token: str) -> None:
+    from app.services.agent.grounding import _NUMBER
+
+    assert [m.group(0) for m in _NUMBER.finditer(f"the {token} value")] == []
+
+
+def test_an_invented_scene_id_is_still_reported() -> None:
+    assert (
+        check("Scene S2A_99XYZ_20190517_9_L2A was selected.").numeric_grounding
+        == "fail"
+    )
+
+
+@pytest.mark.parametrize(
+    "literal", ["1.5e10", "2E5", "-3.2e-4", "1.25E+06", "1e3"]
+)
+def test_scientific_notation_still_extracts_whole(literal: str) -> None:
+    """The exponent must not be split off now that letters may follow."""
+
+    from app.services.agent.grounding import _NUMBER
+
+    assert [m.group(0) for m in _NUMBER.finditer(f"value {literal} here")] == [
+        literal
+    ]
+
+
+def test_scientific_notation_grounding_is_unchanged() -> None:
+    assert check("1.234567e6 valid pixels.").numeric_grounding == "pass"
+    assert check("The value was 9.9e6.").numeric_grounding == "fail"
+
+
+def test_the_acquisition_date_fix_still_holds() -> None:
+    """dcac153's MEDIUM-3 fix must survive the A-1 change."""
+
+    assert check("The scene was acquired on 2024-01-15.").numeric_grounding == "pass"
+    assert check("The scene was acquired on 2024-07-04.").numeric_grounding == "fail"
+
+
+def test_ordinary_prose_is_unchanged() -> None:
+    assert check("5 elephants were not counted.").numeric_grounding == "fail"
+    assert check("3 exabytes of nothing.").numeric_grounding == "fail"
+    assert check("the e value is irrelevant.").numeric_grounding == "pass"
