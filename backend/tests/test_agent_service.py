@@ -22,7 +22,11 @@ import pathlib
 from typing import Any
 
 import pytest
-from app.core.errors import IntentParsingError, UpstreamServiceError
+from app.core.errors import (
+    IntentParsingError,
+    InvalidInputError,
+    UpstreamServiceError,
+)
 from app.services.agent import service as service_mod
 from app.services.agent.executor import ExecutionOutcome
 from app.services.agent.grounding import DraftAnswer
@@ -732,3 +736,54 @@ def test_no_api_route_was_added() -> None:
     source = pathlib.Path(service_mod.__file__).read_text()
     assert "APIRouter" not in source
     assert "@router" not in source
+
+
+# =========================================================================== #
+# Post-Phase-15 hardening - HIGH-2: executor failure has no status.
+#
+# None of the four statuses describes "execution raised": planning succeeded,
+# synthesis never ran, and no answer was generated to withhold. Rather than
+# mislabel it, the service lets it propagate to the existing error handlers.
+#
+# This is defensible because, since the evidence-id fix, the executor's only
+# remaining raise is unreachable through a validated AgentPlan - the
+# discriminated union guarantees a registered tool - so a raise here means a
+# genuine fault, which should surface as one.
+#
+# These tests pin that deliberate choice. If a fifth status is ever added, they
+# are the ones to revisit.
+# =========================================================================== #
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        InvalidInputError("Tool 'x' is not available."),
+        UpstreamServiceError("catalog down"),
+    ],
+)
+def test_an_executor_failure_is_not_mislabelled_as_another_status(
+    error: Exception,
+) -> None:
+    service, _, _, synthesizer = build(executor=RecordingExecutor(error=error))
+
+    with pytest.raises(type(error)):
+        ask(service)
+
+    # Nothing downstream ran, and no status was invented to cover it.
+    assert synthesizer.calls == []
+
+
+def test_the_status_vocabulary_was_not_widened() -> None:
+    """No fifth status was introduced to paper over executor failure."""
+
+    from typing import get_args
+
+    from app.services.agent.schemas import AgentStatus
+
+    assert set(get_args(AgentStatus)) == {
+        "ok",
+        "planner_unavailable",
+        "synthesis_unavailable",
+        "answer_withheld",
+    }

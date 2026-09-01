@@ -119,11 +119,20 @@ def _measurement_items(
 
 
 def _execution_items(execution: QueryExecutionResult) -> list[EvidenceItem]:
-    """Citable facts about the retrieval itself, one per executed window."""
+    """Citable facts about the retrieval itself, one per executed window.
+
+    The id carries the modality as well as the label. ``QueryExecutionService``
+    runs every requested modality against every temporal window, so a
+    two-modality query yields two windows sharing one label ("single",
+    "baseline", ...). Keying on the label alone collided, and ``AgentEvidence``
+    correctly refused the duplicate - which failed the whole request. The
+    modality is what actually distinguishes them, and the pair stays
+    deterministic.
+    """
 
     return [
         EvidenceItem(
-            id=f"execution.{window.label}.scene_count",
+            id=f"execution.{window.modality}.{window.label}.scene_count",
             source="execution",
             measurement=Measurement(
                 name=f"{window.modality}_{window.label}_scene_count",

@@ -77,8 +77,14 @@ _FLOAT_EPSILON = 5e-9
 #: decomposing into a handful of invented measurements. The trailing guard
 #: rejects a following digit, letter or ``.digit`` - but NOT a sentence-final
 #: period, so "the mean was 0.85." still yields the claim 0.85.
+#:
+#: Scientific notation is matched too. Without it, "1.5e10" produced NO match
+#: at all, so the number was never checked - and a skipped number is an
+#: unchecked claim, which is the one failure mode this validator exists to
+#: prevent.
 _NUMBER = re.compile(
-    r"(?<![A-Za-z0-9_.])[-+]?\d[\d,]*(?:\.\d+)?(?!\d)(?![A-Za-z_])(?!\.\d)"
+    r"(?<![A-Za-z0-9_.])[-+]?\d[\d,]*(?:\.\d+)?(?:[eE][-+]?\d+)?"
+    r"(?!\d)(?![A-Za-z_])(?!\.\d)"
 )
 
 #: An identifier-shaped token: underscore-joined segments carrying at least one
@@ -106,6 +112,10 @@ _MONTH_NAMES = (
 _MONTH_YEAR = re.compile(
     r"\b(" + "|".join(_MONTH_NAMES) + r")\s+(\d{4})\b", re.IGNORECASE
 )
+
+#: The ``YYYY-MM-DD`` prefix of an ISO timestamp such as
+#: ``2024-01-15T05:00:00Z``.
+_ISO_DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 
 
 class DraftAnswer(BaseModel):
@@ -157,13 +167,38 @@ def _windows(intent: SatQueryIntent) -> list[TimeRange]:
     return list(windows)
 
 
-def _allowed_dates(evidence: AgentEvidence) -> tuple[set[str], set[str], set[str]]:
-    """ISO dates, ``month year`` phrases and years drawn from the intent.
+def _acquisition_dates(evidence: AgentEvidence) -> set[str]:
+    """``YYYY-MM-DD`` for every acquisition the evidence actually carries.
 
-    Narrowly tied to the *validated* intent that was actually executed - taken
-    from ``evidence.execution.plan.intent`` rather than accepted as a separate
-    argument, so the allowlist cannot describe a query that never ran. With no
-    execution there is no intent, so nothing is allowlisted.
+    A requested window and an acquired scene are different dates - Phase 12's
+    whole point. Allowlisting only the request meant a *correct* answer citing
+    the date a scene was really acquired was withheld as ungrounded.
+
+    These come from the evidence, never from the answer: only a date the
+    system itself established is accepted, so an invented one still fails.
+    """
+
+    if evidence.execution is None:
+        return set()
+
+    dates: set[str] = set()
+    for window in evidence.execution.windows:
+        for scene in window.scenes:
+            match = _ISO_DATE_PREFIX.match(scene.datetime or "")
+            if match is not None:
+                dates.add(match.group(0))
+    return dates
+
+
+def _allowed_dates(evidence: AgentEvidence) -> tuple[set[str], set[str], set[str]]:
+    """ISO dates, ``month year`` phrases and years the evidence supports.
+
+    Two sources, both established by the system: the *validated intent* that was
+    executed (what was asked for) and the *acquisitions* the execution returned
+    (what was actually obtained). Both are taken from
+    ``evidence.execution`` rather than accepted as arguments, so the allowlist
+    cannot describe a query that never ran. With no execution there is no
+    intent and no acquisition, so nothing is allowlisted.
     """
 
     if evidence.execution is None:
@@ -173,11 +208,18 @@ def _allowed_dates(evidence: AgentEvidence) -> tuple[set[str], set[str], set[str
     month_years: set[str] = set()
     years: set[str] = set()
 
+    def allow(year: int, month: int, iso_date: str) -> None:
+        iso.add(iso_date)
+        years.add(f"{year:04d}")
+        month_years.add(f"{_MONTH_NAMES[month - 1]} {year:04d}")
+
     for window in _windows(evidence.execution.plan.intent):
         for moment in (window.start_date, window.end_date):
-            iso.add(moment.isoformat())
-            years.add(f"{moment.year:04d}")
-            month_years.add(f"{_MONTH_NAMES[moment.month - 1]} {moment.year:04d}")
+            allow(moment.year, moment.month, moment.isoformat())
+
+    for acquired in _acquisition_dates(evidence):
+        year, month, _ = acquired.split("-")
+        allow(int(year), int(month), acquired)
 
     return iso, month_years, years
 
@@ -207,10 +249,18 @@ def _scene_ids(evidence: AgentEvidence) -> set[str]:
 
 
 def _decimals(literal: str) -> int:
-    """How many decimal places the answer chose to show."""
+    """Decimal places implied by the literal, exponent included.
 
-    _, _, fraction = literal.partition(".")
-    return len(fraction)
+    ``0.28`` shows 2; ``1.5e10`` shows one mantissa decimal shifted ten places
+    left, so it claims precision to the nearest 10^9 and yields -9. Python's
+    ``round`` accepts a negative ndigits, so the same comparison works for
+    both without a separate code path.
+    """
+
+    mantissa, _, exponent = literal.lower().partition("e")
+    _, _, fraction = mantissa.partition(".")
+    shift = int(exponent) if exponent else 0
+    return len(fraction) - shift
 
 
 def _is_grounded(literal: str, allowed: Iterable[float]) -> bool:
