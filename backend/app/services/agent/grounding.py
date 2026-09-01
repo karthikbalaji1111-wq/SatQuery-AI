@@ -72,19 +72,27 @@ FORBIDDEN_PHRASES: tuple[str, ...] = (
 #: ``0.1 + 0.2`` style artefacts do not fail an otherwise exact match.
 _FLOAT_EPSILON = 5e-9
 
-#: A number standing on its own: not glued to a letter, underscore or digit on
-#: either side. The boundaries are what stop ``S2B_44PLV_20241026_0_L2A`` from
-#: decomposing into a handful of invented measurements. The trailing guard
-#: rejects a following digit, letter or ``.digit`` - but NOT a sentence-final
-#: period, so "the mean was 0.85." still yields the claim 0.85.
+#: A number that STARTS a token: not preceded by a letter, digit, underscore or
+#: dot. That leading boundary is what stops ``S2B_44PLV_20241026_0_L2A`` from
+#: decomposing into invented measurements - every digit run inside it follows a
+#: letter or an underscore - and it holds independently of any masking.
 #:
-#: Scientific notation is matched too. Without it, "1.5e10" produced NO match
-#: at all, so the number was never checked - and a skipped number is an
-#: unchecked claim, which is the one failure mode this validator exists to
-#: prevent.
+#: A trailing letter is deliberately NOT excluded. Requiring one cost more than
+#: it bought: "12km2", "500m" and "0.99x" produced no match at all, so the
+#: number was never checked and an unsupported claim passed as grounded. A
+#: skipped number is an unchecked claim, which is the one failure mode this
+#: validator exists to prevent. The unit is not interpreted - "500m" is
+#: grounded iff 500 is in the evidence.
+#:
+#: The remaining guards stop a partial match inside a longer number: a
+#: following digit, or a following ``.digit``. A sentence-final period is
+#: allowed, so "the mean was 0.85." still yields the claim 0.85.
+#:
+#: Scientific notation is matched too, for the same reason: without it,
+#: "1.5e10" produced no match and went unchecked.
 _NUMBER = re.compile(
     r"(?<![A-Za-z0-9_.])[-+]?\d[\d,]*(?:\.\d+)?(?:[eE][-+]?\d+)?"
-    r"(?!\d)(?![A-Za-z_])(?!\.\d)"
+    r"(?!\d)(?!\.\d)"
 )
 
 #: An identifier-shaped token: underscore-joined segments carrying at least one
