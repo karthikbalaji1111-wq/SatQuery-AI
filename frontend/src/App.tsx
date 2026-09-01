@@ -1,6 +1,7 @@
 import "./App.css";
 
 import { BackendStatus } from "./components/BackendStatus";
+import { AgentPanel } from "./features/agent/AgentPanel";
 import { MapPanel } from "./features/map/MapPanel";
 import { QueryPanel } from "./features/query/QueryPanel";
 
@@ -14,6 +15,7 @@ export function App() {
       </header>
 
       <main className="app-main">
+        <AgentPanel />
         <QueryPanel />
         <MapPanel />
       </main>

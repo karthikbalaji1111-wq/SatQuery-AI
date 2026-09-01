@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from app.services.agent.executor import AgentExecutor
+from app.services.agent.providers.gemini import (
+    GeminiAgentPlanner,
+    GeminiAnswerSynthesizer,
+)
+from app.services.agent.schemas import AgentQuestionRequest, AgentResult
+from app.services.agent.service import AgentService
 from app.services.ai import AiService, GeminiIntentParser, ParsePromptRequest
 from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService
 from app.services.query import (
@@ -54,6 +61,26 @@ def get_analysis_service() -> AnalysisService:
     """
 
     return AnalysisService()
+
+
+def get_agent_service() -> AgentService:
+    """Provider for :class:`AgentService`; overridden in tests.
+
+    Composition lives here rather than inside the service: this is the only
+    place that names a concrete provider, which is what keeps ``AgentService``
+    itself free of any SDK. The Gemini planner and synthesizer create their
+    clients lazily, so this stays cheap and needs no ``GEMINI_API_KEY`` at
+    import/startup time.
+    """
+
+    return AgentService(
+        planner=GeminiAgentPlanner(),
+        executor=AgentExecutor(
+            query_execution_service=QueryExecutionService(),
+            analysis_service=AnalysisService(),
+        ),
+        synthesizer=GeminiAnswerSynthesizer(),
+    )
 
 
 @router.post("/parse", response_model=SatQueryIntent)
@@ -116,3 +143,29 @@ async def analyze_query(
     execution result it is given."""
 
     return await service.analyze(request)
+
+
+@router.post("/agent", response_model=AgentResult)
+async def answer_question(
+    request: AgentQuestionRequest,
+    service: AgentService = Depends(get_agent_service),
+) -> AgentResult:
+    """Answer a free-form question by planning, executing and describing.
+
+    A language model chooses which of the existing deterministic analyses to
+    run; the server validates that choice against a closed tool set, executes
+    it through the same services the manual endpoints use, and validates the
+    generated answer against the evidence before returning it.
+
+    Every agent outcome is a 200, including the failures. ``planner_unavailable``,
+    ``synthesis_unavailable`` and ``answer_withheld`` all carry whatever
+    deterministic evidence was established, because that evidence is the
+    product and the prose is only a presentation of it - converting those into
+    a 5xx would discard the useful half of the response. Genuine faults still
+    surface through the existing error handlers.
+
+    This endpoint is an HTTP adapter only. It performs no orchestration, no tool
+    execution, no grounding and no model call of its own - ``AgentService`` owns
+    all of that."""
+
+    return await service.answer(request)

@@ -73,7 +73,15 @@ Core intended capabilities:
    value is suppressed when that framing would mislead. Opt-in via
    `AnalysisRequest.include_temporal_ndwi`.
 
-Current HEAD represents the completed Temporal NDWI Statistics phase.
+14. Agentic orchestration: `POST /api/v1/query/agent` accepts a free-form
+   question. A language model proposes a plan over a CLOSED three-tool
+   allowlist; the server validates that plan, executes it through the same
+   deterministic services the manual endpoints use, and mechanically validates
+   the generated answer against the collected evidence before returning it.
+   The model selects; it never computes. No image ever reaches a model, and no
+   reasoning is requested, stored or displayed.
+
+Current HEAD represents the completed Agentic Orchestration phase.
 
 ## Architecture Rules
 
@@ -225,6 +233,12 @@ Inspect the repository first and adapt to the actual codebase.
   `mean_ndwi_difference`. Opt-in (`include_temporal_ndwi`), additive on the
   existing `/query/analyze` contract. No co-registration, no resampling, no
   pixel comparison. See section 14.
+- **Phase 15: IMPLEMENTED.** Agentic orchestration - `services/agent/`
+  (contracts, registry, executor, grounding, planner, synthesizer, service,
+  `providers/gemini.py`), one additive endpoint `POST /api/v1/query/agent`, and
+  a React `AgentPanel`. Additive throughout: the manual `/query/execute` and
+  `/query/analyze` paths are unchanged. **Verified against fake provider
+  clients only - see the Known Limitations in section 15.**
 
 ## 3. Architectural state — VERIFIED
 
@@ -773,3 +787,141 @@ default — a server-controlled value, so it is accepted, not rejected.
 Two existing frontend assertions were updated — not weakened — to the
 deliberately changed presentation: the task-option label, and a pixel count now
 rendered with thousands separators. No backend test was weakened or removed.
+
+## 15. Phase 15 — Agentic Orchestration — IMPLEMENTED
+
+A language model chooses **which** of the existing deterministic analyses to
+run. It does not compute anything, and it is never authoritative: every choice
+it makes and every sentence it writes is validated by the server before it has
+any effect.
+
+**Architecture — strictly acyclic:**
+
+```
+api -> agent -> {analysis, query} -> satellite
+                agent/providers/gemini -> google-genai
+```
+
+Nothing in `analysis`, `query`, `satellite`, `geospatial` or `core` may import
+`services.agent`; the API layer imports it and is the composition point. Agent
+core never imports `providers/`. Both directions are enforced by tests.
+
+**Separation of responsibilities** — each boundary owns exactly one thing:
+
+| Component | Responsibility |
+| --- | --- |
+| `AgentPlanner` (ABC) | proposes a validated `AgentPlan`. Never executes |
+| `AgentExecutor` | deterministic execution through the existing services |
+| `AnswerSynthesizer` (ABC) | turns evidence into a `DraftAnswer`. Computes nothing |
+| `grounding.validate_answer` | pure mechanical checks over draft + evidence |
+| `AgentService` | orchestrates the four; owns none of their logic |
+| `api/routes/query.py` | HTTP adapter only - one handler, one call |
+
+**SDK isolation.** The GenAI SDK is confined to `agent/providers/gemini.py`.
+`schemas.py`, `registry.py`, `executor.py`, `grounding.py`, `planner.py`,
+`synthesizer.py` and `service.py` import no SDK - asserted by AST tests that
+enumerate the package and require the importer list to be exactly
+`['providers/gemini.py']`.
+
+**The tool allowlist is closed.** `execute_query`, `ndwi_statistics`,
+`temporal_ndwi_statistics` - and nothing else. `ToolCall` is a Pydantic
+discriminated union, so an unrecognised name fails validation before dispatch;
+the registry holds inert descriptors with no callables. `retrieve_imagery`,
+`compatibility_report` and `rs_model_analysis` are deliberately absent
+(imagery is a parameter, compatibility is an automatic byproduct, and the RS
+model does not exist). `limit` is NOT model-controlled: it is a server resource
+budget the executor injects.
+
+### Gemini structured-output compatibility — the Commit 4 fix
+
+Pydantic emits `discriminator` and `oneOf` for a discriminated union, and
+google-genai 2.20.0's own `Schema` model **forbids both**, so sending
+`AgentPlan` directly fails at request time. Constructing
+`GenerateContentConfig(response_schema=AgentPlan)` succeeds and proves nothing -
+the SDK stores the model and translates it later, which is exactly how the
+problem hid.
+
+**Implemented fix:** the provider builds an SDK-compatible `types.Schema` that
+expresses the same union with **`any_of`** over two concrete branches, using the
+SDK's public `Schema.from_json_schema` (never the private `_transformers`). It
+is derived from the contracts - tool names from `TOOL_REGISTRY`, the intent
+shape from `SatQueryIntent`, step bounds from `AgentPlan` - so it cannot drift.
+This is a **generation hint only**: the response is still parsed through
+`AgentPlan`, which remains the sole validation authority.
+
+The lesson is pinned in tests: the fake client now performs the *same*
+`t_schema` translation the real request path performs, so an untranslatable
+schema can never again pass a green suite.
+
+### The four operational statuses
+
+| Status | Meaning | What survives |
+| --- | --- | --- |
+| `ok` | grounded answer produced | everything |
+| `planner_unavailable` | no plan; nothing ran | nothing is claimed |
+| `synthesis_unavailable` | tools ran, prose failed | the evidence |
+| `answer_withheld` | answer generated, failed validation | the evidence, trace, checks |
+
+All four are **HTTP 200**. Deterministic-fallback semantics:
+
+- evidence is preserved when synthesis or grounding fails;
+- planner failure fabricates **no** evidence and no plan - `answer_validation`
+  stays `None`, so an unchecked answer can never read as a validated one;
+- an answer that fails validation is **withheld**, never presented as
+  successful, and never replaced with substitute prose.
+
+The measurements are the product; the sentence is a presentation of them.
+
+**Grounding is containment, not proof.** It establishes that every number in an
+answer is traceable to evidence at the precision stated, that citations
+resolve, and that no forbidden phrase appears. It does NOT establish
+qualitative correctness or causal attribution - an unquantified claim passes.
+That limit is documented in `grounding.py` rather than papered over.
+
+**Frontend boundary.** `AgentPanel` posts to `/api/v1/query/agent` and nothing
+else. It performs no planning, execution, grounding or provider call, renders
+`Plan -> Tools selected -> Execution -> Evidence -> Answer`, and shows **no
+reasoning, thoughts, thinking or chain-of-thought** - there is no such field in
+any contract to render. Tool labels come from the response; a withheld answer
+shows the evidence and an honest statement of absence.
+
+**Phase 15 does NOT contain:** image input to any model · vision-language
+reasoning · multimodal fusion · an RS-adapted model · ReAct or any loop ·
+multi-agent behaviour · model-generated code or tool names · caching,
+persistence or job queues · new dependencies · changes to `/query/execute` or
+`/query/analyze` · changes to `api/router.py`, the raster path, or any
+analysis/query/satellite module.
+
+### Known limitations
+
+- **Live Gemini execution has NOT been exercised in this phase.** The entire
+  agent path - planner, synthesizer, schema translation, error mapping - is
+  verified against faithful fake provider clients and deterministic tests. The
+  generation schema is checked offline against the SDK's real translation
+  machinery, but **no request has ever been sent to the API**. Whether the model
+  reliably emits a conforming plan or a grounded answer is unproven. The
+  failure mode is safe (validation rejects, nothing executes, evidence is still
+  returned), but it is an open integration risk, not a resolved one.
+- The executor produces **no evidence item explaining a discovery failure**, so
+  when discovery fails the synthesizer receives empty evidence with no
+  indication why. Reported rather than patched - creating that item is the
+  executor's responsibility, not the service's.
+- `IntentParsingError` is reused for unusable planner/synthesizer output. Its
+  code string reads `intent_parse_error`, which is imprecise for a plan or an
+  answer; a better-named error would mean editing `core/errors.py`.
+- `AgentService` is deliberately **not** zero-argument constructible - its
+  collaborators must be injected - so it is absent from the `test_services`
+  contract list.
+
+### Baseline after Phase 15 — VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **939 passed** (458 before Phase 15) |
+| `ruff check .` | clean |
+| `git diff --check` | clean |
+| `npm run test` | **80 passed** (58 before Phase 15) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+Every commit was written test-first: the tests were added, observed failing for
+the expected reason, and only then satisfied.

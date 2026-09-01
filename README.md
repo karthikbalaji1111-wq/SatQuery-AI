@@ -5,19 +5,37 @@ Problem Statement **26167**.
 
 ## Status
 
-Implemented and tested end to end: natural-language intent parsing (Gemini),
-geocoding and AOI grounding (Nominatim), Sentinel-2 optical **and** Sentinel-1
-SAR scene discovery (Earth Search STAC), deterministic per-modality scene
-selection, bounded windowed imagery retrieval (COG range reads → PNG),
-quantitative raw-value band access, single-scene Sentinel-2 NDWI statistics,
-metadata-only observation compatibility reporting, and Temporal NDWI Statistics
-across two Sentinel-2 dates.
+Implemented and tested: natural-language intent parsing (Gemini), geocoding and
+AOI grounding (Nominatim), Sentinel-2 optical **and** Sentinel-1 SAR scene
+discovery (Earth Search STAC), deterministic per-modality scene selection,
+bounded windowed imagery retrieval (COG range reads → PNG), quantitative
+raw-value band access, single-scene Sentinel-2 NDWI statistics, metadata-only
+observation compatibility reporting, Temporal NDWI Statistics across two
+Sentinel-2 dates, and **agentic orchestration** over those deterministic tools.
+
+**Agentic orchestration** (`POST /api/v1/query/agent`): a language model
+proposes a plan over a closed three-tool allowlist; the server validates it,
+executes it through the same services the manual endpoints use, and
+mechanically checks the generated answer against the collected evidence before
+returning it. The model chooses what to run — it never computes a result, and
+it never receives an image.
+
+Design philosophy: every phase is written **test-first**, and failure is
+deterministic. When planning, synthesis or answer validation fails, the API
+still returns HTTP 200 with whatever deterministic evidence was established and
+**no fabricated answer** — the measurements are the product, the prose is a
+presentation of them.
 
 Not implemented: raster co-registration or resampling, per-pixel change
 detection, optical/SAR fusion, vision-language reasoning, object detection, and
 map rendering (`MapPanel` is still a placeholder; there is no MapLibre
-dependency). See `CLAUDE.md` for the authoritative phase-by-phase state and the
-boundaries each phase deliberately did not cross.
+dependency).
+
+**Not yet verified:** the agent path is covered by deterministic tests against
+fake provider clients; a live end-to-end Gemini run has not been exercised.
+
+See `CLAUDE.md` for the authoritative phase-by-phase state and the boundaries
+each phase deliberately did not cross.
 
 ## Stack
 
@@ -127,5 +145,7 @@ Or individually:
 1. **Geospatial grounding** — geocoding + AOI parsing in `services/geospatial`.
 2. **Satellite retrieval** — Sentinel-1/2 access in `services/satellite`.
 3. **Query + AI** — NL parsing and model inference (`services/query`, `services/ai`).
-4. **Multimodal + temporal** — fusion and change detection.
-5. **Map** — MapLibre integration in `frontend/src/features/map` fed by `services/map`.
+4. **Agentic orchestration** — ✅ implemented in `services/agent`, exposed at
+   `POST /api/v1/query/agent` and in the `AgentPanel` UI.
+5. **Multimodal + temporal** — fusion and change detection.
+6. **Map** — MapLibre integration in `frontend/src/features/map` fed by `services/map`.
