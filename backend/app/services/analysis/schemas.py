@@ -94,6 +94,14 @@ class ObservationIndexResult(BaseModel):
     #: ``ndwi_valid_pixel_count`` this is what makes AOI coverage inspectable:
     #: a scene footprint says nothing about how much of the AOI carried data.
     window_pixel_count: int | None = None
+    #: Affine coefficients ``[a, b, c, d, e, f]`` of the band window this
+    #: observation was indexed over, in ``crs``, carried verbatim from the
+    #: raster read. Per observation and per grid: two observations are NOT
+    #: co-registered and may sit on different transforms, so this is never
+    #: shared between them, and it is never derived from the requested bbox.
+    transform: list[float] | None = Field(
+        default=None, min_length=6, max_length=6
+    )
 
 
 class TemporalIndexComparison(BaseModel):

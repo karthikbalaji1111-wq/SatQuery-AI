@@ -380,9 +380,14 @@ processing baseline) — so the finding **generalises across both probed scenes*
    S2 `visual` TCI and the S1 VV PNG are display renderings, not physical values.
 3. **Never treat `ImageryResponse.bbox` as the actual pixel coverage.** It echoes
    the *request*; `_clamp_window_to_source` floor/ceils after reprojection, so
-   real coverage is larger. Measured: ~2 px / **~21 m** systematic offset, and
-   worse/asymmetric when a window clamps at a scene edge. Georeferencing a
-   detection through it is silently wrong.
+   real coverage is larger. The offset is **not a fixed constant**: it depends
+   on where the AOI falls on the source grid, and it is compounded by a scale
+   error, because assuming the array spans the bbox mis-sizes every pixel.
+   Measured on the live Marina Beach AOI against `S2B_44PMV_20250104_0_L2A`:
+   origin off by 3.944 m / 0.394 px in x and -3.753 m / -0.375 px in y, plus a
+   pixel size of 9.9578 x 9.9757 m instead of 10 x 10. It is worse and
+   asymmetric when a window clamps at a scene edge. Georeferencing a detection
+   through it is silently wrong - use the window affine (Phase 16) instead.
 4. **Never perform change detection before co-registration.** `compare` windows
    are independently reprojected, independently clamped and independently
    decimated; differencing them would paint a false-change border around every
@@ -894,14 +899,19 @@ analysis/query/satellite module.
 
 ### Known limitations
 
-- **Live Gemini execution has NOT been exercised in this phase.** The entire
-  agent path - planner, synthesizer, schema translation, error mapping - is
-  verified against faithful fake provider clients and deterministic tests. The
-  generation schema is checked offline against the SDK's real translation
-  machinery, but **no request has ever been sent to the API**. Whether the model
-  reliably emits a conforming plan or a grounded answer is unproven. The
-  failure mode is safe (validation rejects, nothing executes, evidence is still
-  returned), but it is an open integration risk, not a resolved one.
+- **Live Gemini execution has now been verified** (at HEAD `09cea4f`, model
+  `gemini-3.6-flash`, the shipped default). The `any_of` generation schema is
+  accepted by the real endpoint; NDWI returned `status="ok"` 3/3, S1+S2
+  multimodal 2/2 with unique modality-namespaced evidence ids and no HTTP 500,
+  and temporal execution ran end to end. All three failure statuses were
+  observed against the real provider - `planner_unavailable` and
+  `synthesis_unavailable` on upstream 503/504, `answer_withheld` on a real
+  grounding rejection - with evidence preserved exactly as documented. Two
+  fail-closed grounding limits remain: a negated sentence containing
+  "co-registered" is still withheld (the phrase scan is polarity-blind, by
+  design), and a threshold published only in a measurement *name*
+  (`ndwi_percent_above_index_threshold_0.3`) is not in the allowed values, so
+  citing it fails. Both over-reject; neither is a bypass.
 - The executor produces **no evidence item explaining a discovery failure**, so
   when discovery fails the synthesizer receives empty evidence with no
   indication why. Reported rather than patched - creating that item is the

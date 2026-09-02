@@ -147,4 +147,11 @@ class ImageryResponse(BaseModel):
     normalization: str
     window: WindowInfo
     source_shape: list[int]
+    #: Affine coefficients ``[a, b, c, d, e, f]`` of the window actually read,
+    #: in ``crs``. Optional for backward compatibility. This - never ``bbox`` -
+    #: is the georeferencing source: ``bbox`` echoes the REQUEST, while the read
+    #: window is floor/ceil clamped onto the source grid and so covers more.
+    transform: list[float] | None = Field(
+        default=None, min_length=6, max_length=6
+    )
     image_base64: str

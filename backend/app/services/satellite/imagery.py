@@ -240,6 +240,9 @@ class ImageryService(DomainService):
             normalization=window.normalization,
             window=WindowInfo(**window.window),
             source_shape=window.source_shape,
+            # Passed through, never recomputed: this is the affine of the
+            # window actually read, not of the requested bbox.
+            transform=list(window.transform)[:6],
             image_base64=image_b64,
         )
 

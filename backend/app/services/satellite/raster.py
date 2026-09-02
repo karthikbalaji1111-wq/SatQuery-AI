@@ -45,7 +45,13 @@ class RgbWindow:
     width: int
     height: int
     crs: str | None
-    resolution: float | None
+    resolution: float | None  # native source GSD, NOT the output pixel size
+    #: Affine of the ARRAY returned above, in the source CRS. Derived from the
+    #: authoritative ``window_transform(window, src.transform)`` and then scaled
+    #: for decimation, because this path may return fewer pixels than it read:
+    #: without that scaling the origin would be right and the far corner wrong.
+    #: ``window`` below stays the native source window either way.
+    transform: Affine
     bands: list[str]
     window: dict[str, int]
     source_shape: list[int]  # [height, width] of the full source raster
@@ -202,12 +208,21 @@ def _extract_window(
 
     resolution = abs(float(src.transform.a)) if src.transform.a else None
 
+    out_width, out_height = int(rgb.shape[1]), int(rgb.shape[0])
+    # The same authoritative mechanism the quantitative path uses, then scaled
+    # by the decimation factor so the affine describes the returned array.
+    # Scale is exactly 1 when the read was not decimated.
+    window_affine = window_transform(window, src.transform) * Affine.scale(
+        int(window.width) / out_width, int(window.height) / out_height
+    )
+
     return RgbWindow(
         array=rgb,
-        width=int(rgb.shape[1]),
-        height=int(rgb.shape[0]),
+        width=out_width,
+        height=out_height,
         crs=src.crs.to_string() if src.crs else None,
         resolution=resolution,
+        transform=window_affine,
         bands=bands,
         window={
             "col_off": int(window.col_off),
