@@ -102,6 +102,19 @@ _NUMBER = re.compile(
 #: challenged.
 _IDENTIFIER = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b")
 
+#: A Sentinel platform or product identifier: ``Sentinel-2``, ``Sentinel-1``,
+#: ``Sentinel-2A``, ``sentinel-2-optical``, ``sentinel-1-sar``. The digit names
+#: a satellite; it measures nothing, so it must not be read as a claim.
+#:
+#: Deliberately narrow, and narrow in the fail-closed direction. The digit is a
+#: single ``[12]`` and everything that may follow is letters, so this pattern
+#: can never blank out a multi-digit number: "Sentinel-12345" and "Sentinel-25"
+#: match nothing and keep their digits under scrutiny. Substitution is
+#: span-local, so a bare number elsewhere in the same sentence is still read.
+_PLATFORM_IDENTIFIER = re.compile(
+    r"\bsentinel-[12][A-Za-z]?(?:-[A-Za-z]+)*\b", re.IGNORECASE
+)
+
 _YEAR = re.compile(r"(?<![A-Za-z0-9_.])(\d{4})(?![A-Za-z0-9_.])")
 _MONTH_NAMES = (
     "january",
@@ -334,6 +347,10 @@ def _ungrounded_claims(summary: str, evidence: AgentEvidence) -> list[str]:
         lambda m: " " if m.group(0).lower() in month_years else m.group(0), text
     )
     text = _YEAR.sub(lambda m: " " if m.group(1) in years else m.group(0), text)
+
+    # A platform name is not a measurement. This masks the identifier only, so
+    # units, ordinary numbers and scientific notation beside it stay claims.
+    text = _PLATFORM_IDENTIFIER.sub(" ", text)
 
     allowed = _allowed_values(evidence)
     return invented + [

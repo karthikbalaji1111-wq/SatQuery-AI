@@ -822,3 +822,164 @@ def test_ordinary_prose_is_unchanged() -> None:
     assert check("5 elephants were not counted.").numeric_grounding == "fail"
     assert check("3 exabytes of nothing.").numeric_grounding == "fail"
     assert check("the e value is irrelevant.").numeric_grounding == "pass"
+
+
+# =========================================================================== #
+# G. Platform identifiers are not quantitative claims
+# =========================================================================== #
+#
+# Found by live Gemini validation, not by a unit test. A factually correct
+# answer was withheld because "Sentinel-2" contributed the literal "2", which
+# no measurement could account for. The digit belongs to a platform name; it
+# claims nothing.
+#
+# The trap was self-inflicted: ``AnalysisService`` mandates an NDWI disclaimer
+# naming Sentinel-2, so any answer faithfully repeating the system's own
+# evidence text failed grounding. Every correct answer was rejected.
+#
+# The fix masks platform identifiers before numbers are read - the same
+# treatment scene ids and allowed dates already receive - and leaves ``_NUMBER``
+# untouched, so A-1 detection is unaffected.
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "The imagery is from Sentinel-2.",
+        "The imagery is from Sentinel-1.",
+        "The imagery is from Sentinel-2A.",
+        "The modality was sentinel-2-optical.",
+        "The imagery is from Sentinel-1 SAR.",
+        "Sentinel-2 and Sentinel-1 were both considered.",
+        "sentinel-1-sar and sentinel-2-optical are distinct modalities.",
+    ],
+)
+def test_platform_identifiers_are_not_numeric_claims(summary: str) -> None:
+    assert check(summary).numeric_grounding == "pass"
+
+
+def test_the_exact_live_failure_is_grounded() -> None:
+    """The real rejected answer from live Gemini validation.
+
+    Reproduces the mechanism verbatim: the measurements are the ones the engine
+    actually produced, and the closing sentence is the disclaimer
+    ``AnalysisService`` itself appends. Before the fix this returned "fail" on
+    the single literal "2".
+    """
+
+    evidence = make_evidence(
+        items=[
+            measurement_item(
+                "ndwi.ndwi_mean", "ndwi_mean", 0.1463908465206975, "index"
+            ),
+            measurement_item(
+                "ndwi.ndwi_min", "ndwi_min", -0.7808971620384498, "index"
+            ),
+            measurement_item(
+                "ndwi.ndwi_max", "ndwi_max", 0.9729119638826185, "index"
+            ),
+        ]
+    )
+    summary = (
+        "In January 2024, the mean NDWI of Marina Beach, Chennai is "
+        "0.1463908465206975, with a minimum of -0.7808971620384498 and a "
+        "maximum of 0.9729119638826185. Note that NDWI values are a spectral "
+        "index computed from raw Sentinel-2 digital numbers and are not a "
+        "validated water or flood classification."
+    )
+    assert validate_answer(draft(summary), evidence).numeric_grounding == "pass"
+
+
+def test_the_production_ndwi_disclaimer_grounds_clean() -> None:
+    """The exact warning string ``AnalysisService`` emits must not self-reject."""
+
+    disclaimer = (
+        "NDWI values are a spectral index computed from raw Sentinel-2 "
+        "digital numbers; they are not a validated water or flood "
+        "classification."
+    )
+    assert check(disclaimer).numeric_grounding == "pass"
+
+
+def test_a_realistic_mixed_answer_passes() -> None:
+    assert (
+        check(
+            "In January 2024, the mean NDWI is 0.2777. "
+            "The imagery is from Sentinel-2."
+        ).numeric_grounding
+        == "pass"
+    )
+
+
+# --- the mask must not become a smuggling route ---------------------------- #
+
+
+def test_masking_a_platform_name_does_not_hide_other_claims() -> None:
+    """Only the identifier is blanked; the rest of the sentence is still read."""
+
+    assert (
+        check(
+            "The imagery is from Sentinel-2 and the area increased by 37%."
+        ).numeric_grounding
+        == "fail"
+    )
+
+
+def test_a_standalone_two_is_still_checked() -> None:
+    """Masking is span-local: an unrelated bare 2 is not excused by it."""
+
+    assert (
+        check("Sentinel-2 imagery showed 2 lakes.").numeric_grounding == "fail"
+    )
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "Sentinel-12345 covered the area.",
+        "Sentinel-3 was used.",
+        "Sentinel-25 was used.",
+    ],
+)
+def test_only_real_sentinel_platform_numbers_are_excused(summary: str) -> None:
+    """Fail closed: anything outside the known platform shape stays a claim."""
+
+    assert check(summary).numeric_grounding == "fail"
+
+
+# --- A-1 must survive the platform mask ------------------------------------ #
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "Sentinel-2 imagery shows the lake covers 12km2.",
+        "Sentinel-2 imagery shows the shoreline changed by 500m.",
+        "Sentinel-1 data gives 0.99x the baseline.",
+        "Sentinel-2 shows a 3.5x increase.",
+        "Sentinel-2 imagery shows the area is 12km².",
+        "Sentinel-2 imagery shows a 37% increase.",
+    ],
+)
+def test_unit_attached_claims_are_still_caught_beside_a_platform_name(
+    summary: str,
+) -> None:
+    """The A-1 fix from 5d15b56 is untouched by the platform mask."""
+
+    assert check(summary).numeric_grounding == "fail"
+
+
+def test_scientific_notation_still_checked_beside_a_platform_name() -> None:
+    assert (
+        check("Sentinel-2 imagery shows 1.2e-3 change.").numeric_grounding
+        == "fail"
+    )
+
+
+def test_grounded_values_still_pass_beside_a_platform_name() -> None:
+    assert (
+        check(
+            "Sentinel-2 imagery gives a mean NDWI of 0.2777 index."
+        ).numeric_grounding
+        == "pass"
+    )
