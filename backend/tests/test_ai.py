@@ -204,6 +204,23 @@ def test_gemini_parser_request_shape() -> None:
         assert token in system
 
 
+def test_the_default_gemini_model_is_gemini_3_6_flash() -> None:
+    """The shipped default, asserted on the field rather than the environment.
+
+    gemini-2.5-flash was retired upstream and returns 404 NOT_FOUND, so the
+    default had to move. Reading ``model_fields`` keeps this independent of any
+    GEMINI_MODEL the developer happens to have exported.
+    """
+
+    assert Settings.model_fields["gemini_model"].default == "gemini-3.6-flash"
+
+
+def test_an_explicit_gemini_model_still_overrides_the_default() -> None:
+    """The override path is unchanged by the new default."""
+
+    assert Settings(gemini_model="some-other-model").gemini_model == "some-other-model"
+
+
 def test_gemini_parser_malformed_output_raises_intent_parse_error() -> None:
     parser = gemini_parser(text="not json at all {")
     with pytest.raises(IntentParsingError):
