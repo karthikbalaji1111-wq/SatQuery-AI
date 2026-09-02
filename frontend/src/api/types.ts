@@ -114,6 +114,13 @@ export interface ImageryResponse {
   normalization: string;
   window: ImageryWindowInfo;
   source_shape: number[];
+  /**
+   * Affine coefficients `[a, b, c, d, e, f]` of the window actually read, in
+   * `crs`. Optional for backward compatibility. This - never `bbox` - is the
+   * georeferencing source: `bbox` echoes the request, while the read window is
+   * floor/ceil clamped onto the source grid and covers more.
+   */
+  transform: number[] | null;
   image_base64: string;
 }
 
@@ -249,6 +256,13 @@ export interface ObservationIndexResult {
   acquired_at: string | null;
   cloud_cover: number | null;
   measurements: Measurement[];
+  /**
+   * Affine coefficients `[a, b, c, d, e, f]` of the band window this
+   * observation was indexed over, carried verbatim from the raster read. Per
+   * observation: two observations are NOT co-registered and may sit on
+   * different grids, so this is never shared between them.
+   */
+  transform: number[] | null;
 }
 
 /**

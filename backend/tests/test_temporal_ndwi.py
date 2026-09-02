@@ -15,6 +15,7 @@ No test contacts Gemini, Nominatim, STAC, or real imagery.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import pathlib
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -1065,3 +1066,96 @@ def test_service_carries_band_window_evidence_into_the_result() -> None:
         assert side.crs == "EPSG:32644"
         assert side.resolution == 10.0
         assert side.window_pixel_count == 1  # the 1x1 synthetic band fixture
+
+
+# =========================================================================== #
+# Phase 16 - the observation index carries the affine of the read it performed
+# =========================================================================== #
+#
+# The transform must be the one the raster layer computed, not a reconstruction
+# from the requested bbox, and each observation keeps its own: two observations
+# are not co-registered and may sit on different grids.
+
+
+def band_on_grid(
+    values: list[float], *, origin: tuple[float, float], res: float
+) -> BandWindow:
+    """``band`` relocated onto a different grid, so two reads can differ."""
+
+    return dataclasses.replace(
+        band(values),
+        transform=from_origin(origin[0], origin[1], res, res),
+        resolution=res,
+    )
+
+
+def test_observation_index_result_exposes_a_transform() -> None:
+    assert "transform" in ObservationIndexResult.model_fields
+
+
+def test_observation_index_transform_defaults_to_none() -> None:
+    assert ObservationIndexResult.model_fields["transform"].default is None
+
+
+def test_the_index_receives_exactly_the_band_window_transform() -> None:
+    """Identity with BandWindow.transform - never a recomputed affine."""
+
+    green = band([3])
+    imagery = FakeImageryService(
+        bands={
+            "scene-a": {"green": green, "nir": band([1])},
+            "scene-b": {"green": band([5]), "nir": band([5])},
+        }
+    )
+    result, _ = analyze_temporal(two_window_execution(), imagery)
+
+    comparison = result.temporal_comparison
+    assert comparison is not None
+    assert comparison.first.transform == list(green.transform)[:6]
+    assert comparison.first.crs == green.crs
+    assert comparison.first.resolution == green.resolution
+
+
+def test_the_transform_is_not_derived_from_the_requested_bbox() -> None:
+    """The plan bbox is request metadata; it must not reach the affine."""
+
+    green = band_on_grid([3], origin=(500000.0, 1600000.0), res=20.0)
+    imagery = FakeImageryService(
+        bands={
+            "scene-a": {
+                "green": green,
+                "nir": band_on_grid([1], origin=(500000.0, 1600000.0), res=20.0),
+            },
+            "scene-b": {"green": band([5]), "nir": band([5])},
+        }
+    )
+    result, _ = analyze_temporal(two_window_execution(), imagery)
+
+    comparison = result.temporal_comparison
+    assert comparison is not None
+    # Exactly the read's affine, unrelated to DEFAULT_BBOX.
+    assert comparison.first.transform == [20.0, 0.0, 500000.0, 0.0, -20.0, 1600000.0]
+
+
+def test_each_observation_keeps_its_own_transform() -> None:
+    """Two observations are never collapsed onto one shared affine."""
+
+    first_green = band([3])
+    second_green = band_on_grid([5], origin=(500000.0, 1600000.0), res=20.0)
+    imagery = FakeImageryService(
+        bands={
+            "scene-a": {"green": first_green, "nir": band([1])},
+            "scene-b": {
+                "green": second_green,
+                "nir": band_on_grid([5], origin=(500000.0, 1600000.0), res=20.0),
+            },
+        }
+    )
+    result, _ = analyze_temporal(two_window_execution(), imagery)
+
+    comparison = result.temporal_comparison
+    assert comparison is not None
+    assert comparison.first.transform == list(first_green.transform)[:6]
+    assert comparison.second.transform == list(second_green.transform)[:6]
+    assert comparison.first.transform != comparison.second.transform
+    assert comparison.first.resolution != comparison.second.resolution

@@ -292,6 +292,9 @@ class AnalysisService(DomainService):
             crs=green.crs,
             resolution=green.resolution,
             window_pixel_count=green.width * green.height,
+            # The affine the raster layer computed for this read, passed
+            # through unchanged - not reconstructed from the plan bbox.
+            transform=list(green.transform)[:6],
         )
 
     async def _temporal_ndwi(

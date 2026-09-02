@@ -8,6 +8,7 @@ raster reads run against a small synthetic in-memory GeoTIFF.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import io
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -39,6 +40,7 @@ from rasterio.transform import from_origin
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window
 from rasterio.windows import bounds as window_bounds
+from rasterio.windows import transform as window_transform
 
 IMAGERY_URL = "/api/v1/satellite/imagery"
 
@@ -138,6 +140,9 @@ def fake_rgb_window(width: int = 6, height: int = 4) -> RgbWindow:
         height=height,
         crs="EPSG:32644",
         resolution=10.0,
+        transform=from_origin(
+            _ORIGIN_X + 100 * _RES, _ORIGIN_Y - 200 * _RES, _RES, _RES
+        ),
         bands=["red", "green", "blue"],
         window={"col_off": 100, "row_off": 200, "width": width, "height": height},
         source_shape=[_SRC_H, _SRC_W],
@@ -452,6 +457,7 @@ def test_conversion_failure_returns_imagery_error() -> None:
         height=4,
         crs="EPSG:32644",
         resolution=10.0,
+        transform=from_origin(_ORIGIN_X, _ORIGIN_Y, _RES, _RES),
         bands=["red", "green", "blue"],
         window={"col_off": 0, "row_off": 0, "width": 4, "height": 4},
         source_shape=[_SRC_H, _SRC_W],
@@ -1803,3 +1809,281 @@ def test_empty_collection_resolves_to_the_configured_default() -> None:
         collection="",
     )
     assert recorded == [("S2B_44PLV_20241026_0_L2A", "sentinel-2-l2a")]
+
+
+# =========================================================================== #
+# Phase 16 - georeferenced raster metadata
+# =========================================================================== #
+#
+# The raster layer already computes the authoritative affine for the
+# quantitative path. These tests extend the same guarantee to the display path
+# and to the API contract, so a pixel index can be turned into a source
+# coordinate exactly - never by reconstructing it from the requested bbox.
+#
+# The display path DECIMATES (out_shape < window) while BandWindow never does,
+# so the emitted affine must describe the array actually returned.
+
+
+def _src_transform() -> Any:
+    return from_origin(_ORIGIN_X, _ORIGIN_Y, _RES, _RES)
+
+
+def read_rgb_from(
+    mem: MemoryFile,
+    monkeypatch: Any,
+    window: Window,
+    *,
+    max_dimension: int = 4096,
+) -> Any:
+    monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+    return read_rgb_window(
+        VISUAL_HREF,
+        bbox_for_window(window),
+        max_dimension=max_dimension,
+        max_window_pixels=50_000_000,
+    )
+
+
+# --- A. the RGB transform is the authoritative source-window transform ------ #
+
+
+def test_rgb_window_exposes_a_transform() -> None:
+    assert "transform" in {f.name for f in dataclasses.fields(raster_mod.RgbWindow)}
+
+
+def test_rgb_transform_equals_the_authoritative_window_transform(
+    monkeypatch: Any,
+) -> None:
+    """Undecimated: the affine must equal window_transform(window, src)."""
+
+    target = Window(col_off=400, row_off=500, width=300, height=400)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target, max_dimension=4096)
+
+    w = result.window
+    expected = window_transform(
+        Window(w["col_off"], w["row_off"], w["width"], w["height"]), _src_transform()
+    )
+    assert result.width == w["width"]  # not decimated
+    assert tuple(result.transform)[:6] == pytest.approx(tuple(expected)[:6])
+
+
+# --- B. origin ------------------------------------------------------------- #
+
+
+def test_rgb_transform_origin_is_the_read_window_origin(monkeypatch: Any) -> None:
+    target = Window(col_off=400, row_off=500, width=300, height=400)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target)
+
+    w = result.window
+    x, y = result.transform * (0, 0)
+    assert x == pytest.approx(_ORIGIN_X + w["col_off"] * _RES)
+    assert y == pytest.approx(_ORIGIN_Y - w["row_off"] * _RES)
+
+
+# --- C. far corner --------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("max_dimension", [4096, 64])
+def test_rgb_transform_far_corner_is_correct(
+    monkeypatch: Any, max_dimension: int
+) -> None:
+    """Holds decimated and undecimated: (width, height) is the window's corner.
+
+    This is what forces the affine to describe the RETURNED array rather than
+    the source window - a bare window_transform gets the origin right and the
+    far corner wrong the moment the read is decimated.
+    """
+
+    target = Window(col_off=100, row_off=100, width=600, height=800)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target, max_dimension=max_dimension)
+
+    w = result.window
+    x, y = result.transform * (result.width, result.height)
+    assert x == pytest.approx(_ORIGIN_X + (w["col_off"] + w["width"]) * _RES)
+    assert y == pytest.approx(_ORIGIN_Y - (w["row_off"] + w["height"]) * _RES)
+
+
+def test_a_decimated_rgb_transform_is_not_the_native_window_transform(
+    monkeypatch: Any,
+) -> None:
+    """Decimation changes the pixel size; the affine must say so."""
+
+    target = Window(col_off=100, row_off=100, width=600, height=800)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target, max_dimension=64)
+
+    assert max(result.width, result.height) <= 64
+    assert result.window["height"] > 64  # source window still native
+    assert result.transform.a > _RES  # each output pixel covers more ground
+    assert result.transform.a == pytest.approx(
+        _RES * result.window["width"] / result.width
+    )
+
+
+# --- D. bbox reconstruction regression ------------------------------------- #
+
+
+def test_the_transform_origin_is_not_the_requested_bbox_corner(
+    monkeypatch: Any,
+) -> None:
+    """The read window is floor/ceil clamped, so it is not the requested bbox.
+
+    No fixed error magnitude is asserted: the offset depends on where the AOI
+    falls on the source grid. What is pinned is that the authoritative window
+    origin is used and the request corner is not silently substituted.
+    """
+
+    target = Window(col_off=400, row_off=500, width=300, height=400)
+    req_bbox = bbox_for_window(target)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target)
+
+    proj_west, _, _, proj_north = transform_bounds(
+        "EPSG:4326",
+        "EPSG:32644",
+        req_bbox.west,
+        req_bbox.south,
+        req_bbox.east,
+        req_bbox.north,
+    )
+    ox, oy = result.transform * (0, 0)
+    w = result.window
+    # The affine comes from the clamped window, not the request.
+    assert ox == pytest.approx(_ORIGIN_X + w["col_off"] * _RES)
+    assert oy == pytest.approx(_ORIGIN_Y - w["row_off"] * _RES)
+    # And the clamped origin sits at or before the requested corner.
+    assert ox <= proj_west + 1e-6
+    assert oy >= proj_north - 1e-6
+
+
+# --- E. edge-clamped window ------------------------------------------------ #
+
+
+def test_a_window_clamped_at_the_raster_edge_still_gets_a_correct_transform(
+    monkeypatch: Any,
+) -> None:
+    target = Window(col_off=_SRC_W - 20, row_off=_SRC_H - 30, width=60, height=80)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target)
+
+    w = result.window
+    assert w["col_off"] + w["width"] <= _SRC_W  # genuinely clamped
+    assert w["row_off"] + w["height"] <= _SRC_H
+    x, y = result.transform * (0, 0)
+    assert x == pytest.approx(_ORIGIN_X + w["col_off"] * _RES)
+    assert y == pytest.approx(_ORIGIN_Y - w["row_off"] * _RES)
+
+
+# --- F. 10 m and 20 m grids keep their own transforms ---------------------- #
+
+
+def test_a_20m_grid_gets_its_own_transform_not_the_10m_one(
+    monkeypatch: Any,
+) -> None:
+    """A coarser asset is a different grid; the affines must differ accordingly.
+
+    Sentinel-2 mixes 10 m (green/nir/red) and 20 m (swir16/scl) assets on the
+    same tile origin. One transform must never be reused across both.
+    """
+
+    with band_raster(ramp_uint16(80, 80)) as mem:
+        fine = read_band_from(mem, monkeypatch, Window(20, 16, 40, 40))
+
+    coarse_res = _RES * 2
+    coarse_transform = from_origin(_ORIGIN_X, _ORIGIN_Y, coarse_res, coarse_res)
+    data = ramp_uint16(40, 40)
+    with MemoryFile() as mem:
+        with mem.open(
+            driver="GTiff",
+            width=40,
+            height=40,
+            count=1,
+            dtype="uint16",
+            crs="EPSG:32644",
+            transform=coarse_transform,
+            nodata=0.0,
+        ) as dst:
+            dst.write(data, 1)
+        target = Window(10, 8, 20, 20)
+        left, bottom, right, top = window_bounds(target, coarse_transform)
+        west, south, east, north = transform_bounds(
+            "EPSG:32644", "EPSG:4326", left, bottom, right, top
+        )
+        monkeypatch.setattr(raster_mod, "_open_raster", lambda _href: mem.open())
+        coarse = read_band_window(
+            BAND_HREF,
+            BoundingBox(west=west, south=south, east=east, north=north),
+            max_dimension=4096,
+            max_window_pixels=50_000_000,
+        )
+
+    assert fine.transform.a == pytest.approx(_RES)
+    assert coarse.transform.a == pytest.approx(coarse_res)
+    assert fine.resolution != coarse.resolution
+    assert tuple(fine.transform)[:6] != tuple(coarse.transform)[:6]
+
+
+# --- G. JSON serialization ------------------------------------------------- #
+
+
+def _imagery_response(transform: Any) -> Any:
+    from app.services.satellite.schemas import ImageryResponse, WindowInfo
+
+    return ImageryResponse(
+        scene_id="S2B_44PMV_20250104_0_L2A",
+        bbox=BoundingBox(west=80.1, south=12.9, east=80.3, north=13.2),
+        asset="visual",
+        asset_href=VISUAL_HREF,
+        width=112,
+        height=300,
+        format="png",
+        media_type="image/png",
+        bands=["red", "green", "blue"],
+        crs="EPSG:32644",
+        resolution=10.0,
+        normalization="none (source is 8-bit RGB)",
+        window=WindowInfo(col_off=2194, row_off=5544, width=112, height=300),
+        source_shape=[10980, 10980],
+        image_base64="",
+        transform=transform,
+    )
+
+
+def test_the_affine_survives_json_round_trip_without_precision_loss() -> None:
+    """UTM eastings need ~6 digits before the point; the fraction must survive."""
+
+    from app.services.satellite.schemas import ImageryResponse
+
+    coefficients = [10.0, 0.0, 421900.0, 0.0, -10.0, 1444560.0]
+    payload = _imagery_response(coefficients).model_dump_json()
+    restored = ImageryResponse.model_validate_json(payload)
+
+    assert restored.transform == coefficients
+    assert restored.transform[2] == pytest.approx(421900.0, abs=1e-9)
+    assert restored.transform[5] == pytest.approx(1444560.0, abs=1e-9)
+
+
+def test_the_affine_is_exactly_six_coefficients() -> None:
+    from app.services.satellite.schemas import ImageryResponse
+
+    with pytest.raises(ValueError):
+        _imagery_response([10.0, 0.0, 1.0, 0.0, -10.0])  # five
+    with pytest.raises(ValueError):
+        _imagery_response([10.0, 0.0, 1.0, 0.0, -10.0, 2.0, 3.0])  # seven
+    assert len(ImageryResponse.model_fields["transform"].annotation.__args__) >= 1
+
+
+# --- H. backward compatibility --------------------------------------------- #
+
+
+def test_imagery_response_is_still_valid_without_a_transform() -> None:
+    assert _imagery_response(None).transform is None
+
+
+def test_the_transform_field_defaults_to_none() -> None:
+    from app.services.satellite.schemas import ImageryResponse
+
+    assert ImageryResponse.model_fields["transform"].default is None
