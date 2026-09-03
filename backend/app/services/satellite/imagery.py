@@ -28,6 +28,7 @@ from app.services.geospatial.schemas import BoundingBox
 from app.services.satellite.raster import (
     BandWindow,
     RgbWindow,
+    image_corners_wgs84,
     read_band_window,
     read_rgb_window,
 )
@@ -96,6 +97,28 @@ def _bbox_intersects(a: BoundingBox, b: list[float]) -> bool:
         return True  # unknown footprint - defer to the raster-level check
     bw, bs, be, bn = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
     return not (a.east < bw or a.west > be or a.north < bs or a.south > bn)
+
+
+def _image_corners(window: RgbWindow) -> list[list[float]] | None:
+    """The image's WGS84 footprint, or ``None`` when it cannot be established.
+
+    A raster whose corners cannot be derived honestly - a rotated grid or an
+    unusable CRS - still has a perfectly good PNG, so the image is returned
+    without a footprint rather than failing the whole request. Omitting the
+    quad costs a map overlay; emitting a wrong one would put the imagery in the
+    wrong place, which is the failure this phase exists to prevent.
+    """
+
+    try:
+        return image_corners_wgs84(
+            window.transform,
+            width=window.width,
+            height=window.height,
+            crs=window.crs,
+        )
+    except ImageryError as exc:
+        logger.warning("No WGS84 footprint for this window: %s", exc)
+        return None
 
 
 class ImageryService(DomainService):
@@ -243,6 +266,7 @@ class ImageryService(DomainService):
             # Passed through, never recomputed: this is the affine of the
             # window actually read, not of the requested bbox.
             transform=list(window.transform)[:6],
+            corners_wgs84=_image_corners(window),
             image_base64=image_b64,
         )
 

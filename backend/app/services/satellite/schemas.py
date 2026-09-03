@@ -154,4 +154,19 @@ class ImageryResponse(BaseModel):
     transform: list[float] | None = Field(
         default=None, min_length=6, max_length=6
     )
+    #: The image's footprint as exactly four ``[lon, lat]`` pairs in EPSG:4326,
+    #: ordered ``[NW, NE, SE, SW]`` - the order a MapLibre image source expects.
+    #:
+    #: Derived from ``transform`` at the RETURNED image's size, never from
+    #: ``bbox``: ``bbox`` echoes the request, while the read window is clamped
+    #: onto the source grid. Four corners rather than a rectangle because a
+    #: reprojected UTM window is a quadrilateral in WGS84, not an axis-aligned
+    #: box.
+    #:
+    #: Optional for backward compatibility, and ``None`` when the corners could
+    #: not be established honestly - a rotated/sheared transform or an unusable
+    #: CRS - so a consumer never receives a misleading footprint.
+    corners_wgs84: list[list[float]] | None = Field(
+        default=None, min_length=4, max_length=4
+    )
     image_base64: str

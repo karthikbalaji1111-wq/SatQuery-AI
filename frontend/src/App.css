@@ -235,8 +235,12 @@ body {
 .map-container {
   display: grid;
   place-items: center;
-  min-height: 240px;
+  /* A real, responsive map viewport: tall enough to be usable, capped so it
+     never crowds the panels above it on a laptop screen. */
+  height: clamp(320px, 55vh, 640px);
+  width: 100%;
   border-radius: 6px;
+  overflow: hidden;
   background: repeating-linear-gradient(
     45deg,
     rgba(128, 128, 128, 0.08),

@@ -12,8 +12,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import rasterio
+from rasterio.crs import CRSError
 from rasterio.errors import RasterioIOError
 from rasterio.transform import Affine
+from rasterio.warp import transform as warp_coordinates
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window, from_bounds
 from rasterio.windows import transform as window_transform
@@ -56,6 +58,71 @@ class RgbWindow:
     window: dict[str, int]
     source_shape: list[int]  # [height, width] of the full source raster
     normalization: str
+
+
+def image_corners_wgs84(
+    transform: Affine,
+    *,
+    width: int,
+    height: int,
+    crs: str | None,
+) -> list[list[float]]:
+    """The four WGS84 corners of a returned image, as ``[NW, NE, SE, SW]``.
+
+    Each corner is ``transform`` applied to a pixel corner of the image that was
+    actually returned - ``(0,0)``, ``(width,0)``, ``(width,height)``, ``(0,height)``
+    - then reprojected from ``crs`` to EPSG:4326. ``transform`` is already
+    decimation-scaled by :func:`_extract_window`, so ``width``/``height`` must be
+    the RETURNED array's size, not the native source window's.
+
+    The requested bbox is deliberately not an input. It echoes the request,
+    while the read window is floor/ceil clamped onto the source grid, so
+    positioning an image by it is wrong by a variable amount.
+
+    Four corners rather than a bbox because the result is a **quadrilateral**:
+    reprojecting a north-up UTM window to WGS84 does not give an axis-aligned
+    rectangle, and the deviation reaches tens of metres over a city-sized AOI.
+
+    Fails closed. A rotated or sheared transform (``b`` or ``d`` non-zero) would
+    make these four corners describe a shape the image does not have, and a
+    missing or unparseable CRS cannot be reprojected at all; both raise rather
+    than return a plausible-looking quad. This phase supports north-up grids
+    only, which is what Sentinel-2 COGs are.
+
+    Orientation is checked too, not just rotation. A flipped grid (``a`` not
+    positive, or ``e`` not negative) is still axis-aligned, so it passes the
+    shear check while making the corner LABELS wrong: with ``e > 0`` pixel row 0
+    is the southern edge, so what this function would call NW is really SW and
+    the image would be drawn upside down.
+    """
+
+    if width <= 0 or height <= 0:
+        raise ImageryError("Cannot derive image corners for an empty image.")
+    if transform.b != 0 or transform.d != 0:
+        raise ImageryError(
+            "Cannot derive image corners for a rotated or sheared transform."
+        )
+    if transform.a <= 0 or transform.e >= 0:
+        raise ImageryError(
+            "Cannot derive image corners for a transform that is not north-up."
+        )
+    if not crs:
+        raise ImageryError("Cannot derive image corners without a source CRS.")
+
+    xs, ys = zip(
+        *(
+            transform * corner
+            for corner in ((0, 0), (width, 0), (width, height), (0, height))
+        ),
+        strict=True,
+    )
+    try:
+        lons, lats = warp_coordinates(crs, _WGS84, list(xs), list(ys))
+    except (CRSError, ValueError, RasterioIOError) as exc:
+        raise ImageryError(
+            "Could not reproject the image corners to WGS84."
+        ) from exc
+    return [[float(lon), float(lat)] for lon, lat in zip(lons, lats, strict=True)]
 
 
 def _open_raster(href: str):

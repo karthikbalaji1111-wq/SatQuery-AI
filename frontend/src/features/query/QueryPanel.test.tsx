@@ -1676,3 +1676,85 @@ describe("QueryPanel - unsupported task labelling", () => {
     ).toBe(true);
   });
 });
+
+describe("QueryPanel - map imagery handoff", () => {
+  // The map draws whatever imagery it was last handed. Resetting the panel's
+  // own imagery state is not enough: without telling the parent, the map keeps
+  // showing a scene from a location the user has already moved on from.
+
+  it("clears map imagery when a new place is resolved", async () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    const onImagery = vi.fn();
+    render(<QueryPanel onImagery={onImagery} />);
+
+    resolvePlace();
+
+    await waitFor(() => expect(onImagery).toHaveBeenCalledWith(null));
+  });
+
+  it("clears map imagery when a new scene search starts", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+    });
+    const onImagery = vi.fn();
+    render(<QueryPanel onImagery={onImagery} />);
+
+    await resolveAndAwaitBbox();
+    onImagery.mockClear();
+    fillDates();
+    fireEvent.click(
+      screen.getByRole("button", { name: /search sentinel-2 scenes/i }),
+    );
+
+    await waitFor(() => expect(onImagery).toHaveBeenCalledWith(null));
+  });
+
+  it("still hands over the imagery on a successful preview", async () => {
+    const imagery = imageryResponse(SCENE.id);
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": { body: imagery },
+    });
+    const onImagery = vi.fn();
+    render(<QueryPanel onImagery={onImagery} />);
+
+    await resolveSearchAndAwaitScene();
+    onImagery.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+
+    await waitFor(() => expect(onImagery).toHaveBeenCalledWith(imagery));
+  });
+
+  it("works without the callback", async () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    expect(() => render(<QueryPanel />)).not.toThrow();
+    resolvePlace();
+    await waitFor(() =>
+      expect(screen.getByText("Chennai, Tamil Nadu, India")).toBeInTheDocument(),
+    );
+  });
+});
+
+describe("QueryPanel - a new preview invalidates the old one", () => {
+  it("clears map imagery when a different preview starts", async () => {
+    const imagery = imageryResponse(SCENE.id);
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([SCENE]) },
+      "/satellite/imagery": { body: imagery },
+    });
+    const onImagery = vi.fn();
+    render(<QueryPanel onImagery={onImagery} />);
+
+    await resolveSearchAndAwaitScene();
+    onImagery.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+
+    // Cleared first, so the map never shows a stale scene while the new one
+    // is still in flight.
+    expect(onImagery).toHaveBeenCalledWith(null);
+    await waitFor(() => expect(onImagery).toHaveBeenLastCalledWith(imagery));
+  });
+});

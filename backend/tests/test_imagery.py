@@ -36,7 +36,8 @@ from app.services.satellite.schemas import ANALYSIS_BAND_ASSETS, ImageryRequest
 from fastapi.testclient import TestClient
 from PIL import Image
 from rasterio.io import MemoryFile
-from rasterio.transform import from_origin
+from rasterio.transform import Affine, from_origin
+from rasterio.warp import transform as warp_transform
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window
 from rasterio.windows import bounds as window_bounds
@@ -2087,3 +2088,286 @@ def test_the_transform_field_defaults_to_none() -> None:
     from app.services.satellite.schemas import ImageryResponse
 
     assert ImageryResponse.model_fields["transform"].default is None
+
+
+# =========================================================================== #
+# Phase 16.2 - WGS84 corners of the returned image
+# =========================================================================== #
+#
+# MapLibre's image source takes four explicit corner coordinates, which is the
+# right shape here: a north-up UTM window is NOT an axis-aligned rectangle once
+# reprojected to WGS84, so an axis-aligned overlay would misplace the image.
+#
+# The corners come from the RETURNED image's affine - the decimated one - never
+# from the requested bbox, which is request metadata and not coverage.
+
+
+CHENNAI_AFFINE = (41.47929, 0.0, 406700.0, 0.0, -41.455078, 1463310.0)
+CHENNAI_SIZE = (507, 1024)
+MARINA_AFFINE = (10.0, 0.0, 421900.0, 0.0, -10.0, 1444560.0)
+MARINA_SIZE = (112, 300)
+UTM44N = "EPSG:32644"
+
+
+def corners_of(affine: tuple[float, ...], size: tuple[int, int], crs: str = UTM44N) -> Any:
+    return raster_mod.image_corners_wgs84(
+        Affine(*affine), width=size[0], height=size[1], crs=crs
+    )
+
+
+# --- A. corner order ------------------------------------------------------- #
+
+
+def test_corners_are_four_lon_lat_pairs() -> None:
+    corners = corners_of(MARINA_AFFINE, MARINA_SIZE)
+
+    assert len(corners) == 4
+    assert all(len(c) == 2 for c in corners)
+    assert all(isinstance(v, float) for c in corners for v in c)
+
+
+def test_corner_order_is_nw_ne_se_sw() -> None:
+    nw, ne, se, sw = corners_of(MARINA_AFFINE, MARINA_SIZE)
+
+    # North-up: the first two are the northern edge, the last two the southern.
+    assert nw[1] > sw[1] and ne[1] > se[1]
+    # West first on each edge.
+    assert nw[0] < ne[0] and sw[0] < se[0]
+
+
+# --- B. geometry comes from the affine ------------------------------------- #
+
+
+def test_corners_are_derived_from_the_affine() -> None:
+    """Each corner is the affine applied to a pixel corner, then reprojected."""
+
+    transform = Affine(*MARINA_AFFINE)
+    width, height = MARINA_SIZE
+    expected_projected = [
+        transform * (0, 0),
+        transform * (width, 0),
+        transform * (width, height),
+        transform * (0, height),
+    ]
+    lons, lats = warp_transform(
+        UTM44N,
+        "EPSG:4326",
+        [p[0] for p in expected_projected],
+        [p[1] for p in expected_projected],
+    )
+
+    corners = corners_of(MARINA_AFFINE, MARINA_SIZE)
+    for corner, lon, lat in zip(corners, lons, lats, strict=True):
+        assert corner[0] == pytest.approx(lon)
+        assert corner[1] == pytest.approx(lat)
+
+
+def test_a_different_affine_gives_different_corners() -> None:
+    shifted = (10.0, 0.0, 431900.0, 0.0, -10.0, 1444560.0)
+    assert corners_of(MARINA_AFFINE, MARINA_SIZE) != corners_of(shifted, MARINA_SIZE)
+
+
+# --- C. the WGS84 footprint is NOT an axis-aligned rectangle --------------- #
+
+
+def test_the_reprojected_footprint_is_not_axis_aligned() -> None:
+    """A UTM window becomes a quadrilateral in WGS84 - that is why we send four.
+
+    Uses the real decimated Chennai window, where the deviation is large enough
+    that an axis-aligned bbox overlay would be visibly wrong on a basemap.
+    """
+
+    nw, ne, se, sw = corners_of(CHENNAI_AFFINE, CHENNAI_SIZE)
+
+    assert ne[1] != nw[1]  # northern edge is not a line of constant latitude
+    assert se[1] != sw[1]
+    assert nw[0] != sw[0]  # western edge is not a line of constant longitude
+    assert ne[0] != se[0]
+    # And the deviation is real, not floating-point noise: tens of metres.
+    assert abs(ne[1] - nw[1]) * 110_574 > 10.0
+
+
+def test_the_small_window_is_also_not_axis_aligned() -> None:
+    nw, ne, _, _ = corners_of(MARINA_AFFINE, MARINA_SIZE)
+    assert ne[1] != nw[1]
+
+
+# --- D. decimated image ---------------------------------------------------- #
+
+
+def test_corners_follow_the_returned_size_not_the_native_window() -> None:
+    """The Chennai read returns 507x1024 from a 2103x4245 native window.
+
+    The affine is already decimation-scaled, so the corners must be taken at
+    the RETURNED size. Using the native window size would overshoot hugely.
+    """
+
+    returned = corners_of(CHENNAI_AFFINE, CHENNAI_SIZE)
+    native = corners_of(CHENNAI_AFFINE, (2103, 4245))
+
+    assert returned != native
+    # The returned quad is the smaller, correct one.
+    assert returned[2][0] < native[2][0]
+    assert returned[2][1] > native[2][1]
+
+
+def test_the_decimated_far_corner_matches_the_scaled_affine() -> None:
+    transform = Affine(*CHENNAI_AFFINE)
+    width, height = CHENNAI_SIZE
+    x, y = transform * (width, height)
+    lons, lats = warp_transform(UTM44N, "EPSG:4326", [x], [y])
+
+    se = corners_of(CHENNAI_AFFINE, CHENNAI_SIZE)[2]
+    assert se[0] == pytest.approx(lons[0])
+    assert se[1] == pytest.approx(lats[0])
+
+
+# --- E. edge-clamped window ------------------------------------------------ #
+
+
+def test_corners_describe_an_edge_clamped_read(monkeypatch: Any) -> None:
+    """End to end through the real reader: the quad is the clamped raster."""
+
+    target = Window(col_off=_SRC_W - 20, row_off=_SRC_H - 30, width=60, height=80)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target)
+
+    corners = raster_mod.image_corners_wgs84(
+        result.transform, width=result.width, height=result.height, crs=result.crs
+    )
+    expected_x, expected_y = result.transform * (result.width, result.height)
+    lons, lats = warp_transform(result.crs, "EPSG:4326", [expected_x], [expected_y])
+
+    assert corners[2][0] == pytest.approx(lons[0])
+    assert corners[2][1] == pytest.approx(lats[0])
+
+
+# --- F. rotated / sheared transform is refused ----------------------------- #
+
+
+@pytest.mark.parametrize(
+    "affine",
+    [
+        (10.0, 0.5, 421900.0, 0.0, -10.0, 1444560.0),  # b != 0
+        (10.0, 0.0, 421900.0, 0.5, -10.0, 1444560.0),  # d != 0
+        (10.0, 0.5, 421900.0, 0.5, -10.0, 1444560.0),  # both
+    ],
+)
+def test_a_rotated_transform_is_refused(affine: tuple[float, ...]) -> None:
+    """Fail closed: a sheared grid's quad would be silently wrong."""
+
+    with pytest.raises(ImageryError):
+        corners_of(affine, MARINA_SIZE)
+
+
+def test_a_north_up_transform_is_accepted() -> None:
+    assert corners_of(MARINA_AFFINE, MARINA_SIZE) is not None
+
+
+# --- G. missing / unusable CRS --------------------------------------------- #
+
+
+def test_a_missing_crs_is_refused() -> None:
+    with pytest.raises(ImageryError):
+        corners_of(MARINA_AFFINE, MARINA_SIZE, crs=None)
+
+
+def test_an_unparseable_crs_is_refused() -> None:
+    with pytest.raises(ImageryError):
+        corners_of(MARINA_AFFINE, MARINA_SIZE, crs="not-a-crs")
+
+
+@pytest.mark.parametrize("size", [(0, 300), (112, 0), (-1, 300)])
+def test_a_degenerate_size_is_refused(size: tuple[int, int]) -> None:
+    with pytest.raises(ImageryError):
+        corners_of(MARINA_AFFINE, size)
+
+
+# --- H. serialization ------------------------------------------------------ #
+
+
+def test_corners_survive_json_round_trip() -> None:
+    from app.services.satellite.schemas import ImageryResponse
+
+    corners = corners_of(MARINA_AFFINE, MARINA_SIZE)
+    response = _imagery_response([*MARINA_AFFINE])
+    response = response.model_copy(update={"corners_wgs84": corners})
+    restored = ImageryResponse.model_validate_json(response.model_dump_json())
+
+    assert restored.corners_wgs84 == corners
+    for restored_corner, original in zip(
+        restored.corners_wgs84 or [], corners, strict=True
+    ):
+        # ~1e-7 deg is ~1 cm; JSON must not degrade below that.
+        assert restored_corner[0] == pytest.approx(original[0], abs=1e-9)
+        assert restored_corner[1] == pytest.approx(original[1], abs=1e-9)
+
+
+def test_imagery_response_is_valid_without_corners() -> None:
+    assert _imagery_response(None).corners_wgs84 is None
+
+
+def test_corners_must_be_four_pairs_when_present() -> None:
+    from app.services.satellite.schemas import ImageryResponse
+
+    base = _imagery_response(None).model_dump()
+    for bad in ([[80.0, 13.0]] * 3, [[80.0, 13.0]] * 5):
+        with pytest.raises(ValueError):
+            ImageryResponse.model_validate({**base, "corners_wgs84": bad})
+
+
+# --- I. regression: never the request bbox --------------------------------- #
+
+
+def test_corners_are_not_the_requested_bbox(monkeypatch: Any) -> None:
+    """The bbox echoes the request; the quad must come from the read window."""
+
+    target = Window(col_off=400, row_off=500, width=300, height=400)
+    req_bbox = bbox_for_window(target)
+    with synthetic_raster() as mem:
+        result = read_rgb_from(mem, monkeypatch, target)
+
+    corners = raster_mod.image_corners_wgs84(
+        result.transform, width=result.width, height=result.height, crs=result.crs
+    )
+    bbox_quad = [
+        [req_bbox.west, req_bbox.north],
+        [req_bbox.east, req_bbox.north],
+        [req_bbox.east, req_bbox.south],
+        [req_bbox.west, req_bbox.south],
+    ]
+    assert corners != bbox_quad
+    # The bbox quad is axis-aligned by construction; the real one is not.
+    assert corners[0][1] != corners[1][1]
+
+
+# --- F2. orientation guard: the NW/NE/SE/SW contract needs north-up --------- #
+#
+# b == 0 and d == 0 only rule out rotation and shear. A flipped grid is still
+# axis-aligned, so it passes that check while making the corner LABELS wrong:
+# with e > 0 pixel row 0 is the southern edge, so the emitted "NW" is actually
+# the SW and the image would render upside down.
+
+
+@pytest.mark.parametrize(
+    ("affine", "why"),
+    [
+        ((-10.0, 0.0, 421900.0, 0.0, -10.0, 1444560.0), "a < 0 (east-west flipped)"),
+        ((10.0, 0.0, 421900.0, 0.0, 10.0, 1444560.0), "e > 0 (south-up)"),
+        ((-10.0, 0.0, 421900.0, 0.0, 10.0, 1444560.0), "both signs flipped"),
+        ((0.0, 0.0, 421900.0, 0.0, -10.0, 1444560.0), "a == 0 (degenerate)"),
+        ((10.0, 0.0, 421900.0, 0.0, 0.0, 1444560.0), "e == 0 (degenerate)"),
+    ],
+)
+def test_a_non_north_up_transform_is_refused(
+    affine: tuple[float, ...], why: str
+) -> None:
+    with pytest.raises(ImageryError):
+        corners_of(affine, MARINA_SIZE)
+
+
+def test_the_real_sentinel_2_orientation_is_accepted() -> None:
+    """Sentinel-2 COGs are north-up; the guard must not reject the real case."""
+
+    assert corners_of(MARINA_AFFINE, MARINA_SIZE) is not None
+    assert corners_of(CHENNAI_AFFINE, CHENNAI_SIZE) is not None
