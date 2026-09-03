@@ -10,6 +10,12 @@
 export const SATELLITE_SOURCE_ID = "satellite-image";
 export const SATELLITE_LAYER_ID = "satellite-image-layer";
 
+/** Ids of the single NDWI overlay the map manages, kept distinct from the RGB
+ * one so the two rasters never share a source: they come from different grids
+ * and carry different footprints. */
+export const NDWI_SOURCE_ID = "ndwi-image";
+export const NDWI_LAYER_ID = "ndwi-image-layer";
+
 /**
  * The imagery the map can draw. A structural subset of `ImageryResponse`: the
  * picture and its footprint, and nothing else.
@@ -32,6 +38,17 @@ export interface MapLike {
   getLayer(id: string): unknown;
   fitBounds(bounds: number[][], options?: unknown): void;
   remove(): void;
+}
+
+/**
+ * The NDWI raster the map can draw. Like `MapImagery`, a structural subset of
+ * the backend contract: the picture and its own footprint, nothing else.
+ */
+export interface MapNdwi {
+  scene_id: string;
+  media_type: string;
+  image_base64: string;
+  corners_wgs84: number[][] | null;
 }
 
 export type MapFactory = (options: { container: HTMLElement }) => MapLike;

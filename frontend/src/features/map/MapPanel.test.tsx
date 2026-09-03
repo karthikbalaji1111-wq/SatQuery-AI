@@ -1,8 +1,13 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SATELLITE_LAYER_ID, SATELLITE_SOURCE_ID } from "./footprint";
-import type { MapImagery, MapLike } from "./footprint";
+import {
+  NDWI_LAYER_ID,
+  NDWI_SOURCE_ID,
+  SATELLITE_LAYER_ID,
+  SATELLITE_SOURCE_ID,
+} from "./footprint";
+import type { MapImagery, MapLike, MapNdwi } from "./footprint";
 import { MapPanel } from "./MapPanel";
 
 afterEach(() => {
@@ -446,5 +451,179 @@ describe("MapPanel status reporting", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent(/WebGL2/i);
     expect(screen.getByRole("status")).not.toHaveTextContent(/scene/i);
+  });
+});
+
+// =========================================================================== //
+// Phase 17.1 - the NDWI overlay
+// =========================================================================== //
+//
+// A second image source on the same map, positioned by its own corners. It is
+// a different raster from a different grid, so it never borrows the RGB
+// footprint - and either overlay can be present without the other.
+
+const NDWI_CORNERS: number[][] = [
+  [80.2, 13.06],
+  [80.29, 13.061],
+  [80.291, 13.03],
+  [80.201, 13.029],
+];
+
+function ndwi(overrides: Partial<MapNdwi> = {}): MapNdwi {
+  return {
+    scene_id: "S2B_44PMV_20250104_0_L2A",
+    media_type: "image/png",
+    image_base64: "TkRXSQ==",
+    corners_wgs84: NDWI_CORNERS,
+    ...overrides,
+  };
+}
+
+function renderWith(props: {
+  imagery?: MapImagery | null;
+  ndwi?: MapNdwi | null;
+}) {
+  const created: FakeMap[] = [];
+  const createMap = vi.fn(() => {
+    const map = new FakeMap();
+    created.push(map);
+    return map;
+  });
+  const view = render(
+    <MapPanel
+      imagery={props.imagery ?? null}
+      ndwi={props.ndwi ?? null}
+      createMap={createMap}
+    />,
+  );
+  act(() => created.forEach((m) => m.emit("load")));
+  return { created, createMap, view };
+}
+
+describe("MapPanel NDWI overlay", () => {
+  it("adds exactly one NDWI image source and layer", () => {
+    const { created } = renderWith({ ndwi: ndwi() });
+    const map = created[0];
+
+    expect(map.getSource(NDWI_SOURCE_ID)).toBeDefined();
+    expect(map.getLayer(NDWI_LAYER_ID)).toBeDefined();
+    expect(map.sources.size).toBe(1);
+    expect(map.layers.size).toBe(1);
+  });
+
+  it("passes the NDWI corners through unchanged", () => {
+    const { created } = renderWith({ ndwi: ndwi() });
+    const source = created[0].getSource(NDWI_SOURCE_ID) as {
+      coordinates: number[][];
+      url: string;
+      type: string;
+    };
+
+    expect(source.type).toBe("image");
+    expect(source.coordinates).toEqual(NDWI_CORNERS);
+    expect(source.url).toBe("data:image/png;base64,TkRXSQ==");
+  });
+
+  it("keeps RGB and NDWI as separate sources", () => {
+    const { created } = renderWith({ imagery: imagery(), ndwi: ndwi() });
+    const map = created[0];
+
+    expect(map.sources.size).toBe(2);
+    expect(map.layers.size).toBe(2);
+    const rgb = map.getSource(SATELLITE_SOURCE_ID) as { coordinates: number[][] };
+    const index = map.getSource(NDWI_SOURCE_ID) as { coordinates: number[][] };
+    // Each is positioned by its OWN footprint.
+    expect(rgb.coordinates).toEqual(CORNERS);
+    expect(index.coordinates).toEqual(NDWI_CORNERS);
+  });
+
+  it("removes the NDWI overlay when it becomes null", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    const { rerender } = render(
+      <MapPanel imagery={null} ndwi={ndwi()} createMap={createMap} />,
+    );
+    act(() => created.forEach((m) => m.emit("load")));
+    rerender(<MapPanel imagery={null} ndwi={null} createMap={createMap} />);
+
+    expect(created[0].getSource(NDWI_SOURCE_ID)).toBeUndefined();
+    expect(created[0].sources.size).toBe(0);
+  });
+
+  it("replaces a stale NDWI overlay rather than stacking one", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    const { rerender } = render(
+      <MapPanel imagery={null} ndwi={ndwi()} createMap={createMap} />,
+    );
+    act(() => created.forEach((m) => m.emit("load")));
+    rerender(
+      <MapPanel
+        imagery={null}
+        ndwi={ndwi({ image_base64: "TkVX", scene_id: "second" })}
+        createMap={createMap}
+      />,
+    );
+
+    const map = created[0];
+    expect(map.sources.size).toBe(1);
+    expect(map.calls).toContain(`removeLayer:${NDWI_LAYER_ID}`);
+    expect((map.getSource(NDWI_SOURCE_ID) as { url: string }).url).toBe(
+      "data:image/png;base64,TkVX",
+    );
+  });
+
+  it.each([
+    ["null corners", null],
+    ["three corners", [NDWI_CORNERS[0], NDWI_CORNERS[1], NDWI_CORNERS[2]]],
+    ["a NaN", [[NaN, 13], NDWI_CORNERS[1], NDWI_CORNERS[2], NDWI_CORNERS[3]]],
+    ["latitude out of range", [[80, 91], NDWI_CORNERS[1], NDWI_CORNERS[2], NDWI_CORNERS[3]]],
+  ])("renders no NDWI overlay for %s", (_label, corners) => {
+    const { created } = renderWith({
+      ndwi: ndwi({ corners_wgs84: corners as number[][] }),
+    });
+    expect(created[0].getSource(NDWI_SOURCE_ID)).toBeUndefined();
+  });
+
+  it("keeps the RGB overlay when the NDWI footprint is malformed", () => {
+    const { created } = renderWith({
+      imagery: imagery(),
+      ndwi: ndwi({ corners_wgs84: null }),
+    });
+
+    expect(created[0].getSource(SATELLITE_SOURCE_ID)).toBeDefined();
+    expect(created[0].getSource(NDWI_SOURCE_ID)).toBeUndefined();
+  });
+
+  it("frames to the NDWI footprint when it is present", () => {
+    const { created } = renderWith({ imagery: imagery(), ndwi: ndwi() });
+    const last = created[0].fitBoundsCalls.at(-1);
+
+    // NDWI is what the user asked to see; its extent wins.
+    expect(last?.bounds).toEqual([
+      [80.2, 13.029],
+      [80.291, 13.061],
+    ]);
+  });
+
+  it("still frames to the RGB footprint when there is no NDWI", () => {
+    const { created } = renderWith({ imagery: imagery() });
+    expect(created[0].fitBoundsCalls.at(-1)?.bounds).toEqual([
+      [80.279621036, 13.039005833],
+      [80.29002857, 13.066160297],
+    ]);
+  });
+
+  it("names the NDWI scene in the status line", () => {
+    renderWith({ ndwi: ndwi() });
+    expect(screen.getByText(/NDWI/i)).toBeInTheDocument();
   });
 });

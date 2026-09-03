@@ -1323,7 +1323,13 @@ describe("QueryPanel - NDWI opt-in", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
     );
-    expect(analyzeBody(fetchMock)).toEqual({ execution, include_ndwi: true });
+    // Phase 17.1: the overlay rides the same opt-in - the picture is a view of
+    // the pixels the statistics were computed on, so they are asked for together.
+    expect(analyzeBody(fetchMock)).toEqual({
+      execution,
+      include_ndwi: true,
+      include_ndwi_overlay: true,
+    });
   });
 
   it("renders the NDWI measurements returned by the backend", async () => {
@@ -1756,5 +1762,114 @@ describe("QueryPanel - a new preview invalidates the old one", () => {
     // is still in flight.
     expect(onImagery).toHaveBeenCalledWith(null);
     await waitFor(() => expect(onImagery).toHaveBeenLastCalledWith(imagery));
+  });
+});
+
+describe("QueryPanel - NDWI overlay handoff", () => {
+  function ndwiOverlay() {
+    return {
+      scene_id: SCENE.id,
+      window_label: "single",
+      media_type: "image/png",
+      image_base64: "TkRXSQ==",
+      width: 2,
+      height: 2,
+      crs: "EPSG:32644",
+      transform: [10, 0, 399960, 0, -10, 1500000],
+      corners_wgs84: [
+        [80.2, 13.06],
+        [80.29, 13.061],
+        [80.291, 13.03],
+        [80.201, 13.029],
+      ],
+      value_min: -0.5,
+      value_max: 0.8,
+      valid_pixel_count: 3,
+    };
+  }
+
+  it("asks for the overlay only when NDWI is requested", async () => {
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+
+    enableNdwi();
+    runFullQuery();
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes("/query/analyze"),
+      );
+      expect(call).toBeDefined();
+      const body = JSON.parse(String((call?.[1] as RequestInit)?.body));
+      expect(body.include_ndwi).toBe(true);
+      expect(body.include_ndwi_overlay).toBe(true);
+    });
+  });
+
+  it("hands a produced overlay to the parent", async () => {
+    const overlay = ndwiOverlay();
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: { ...analysisResult(), ndwi_overlay: overlay } },
+    });
+    const onNdwi = vi.fn();
+    render(<QueryPanel onNdwi={onNdwi} />);
+
+    enableNdwi();
+    runFullQuery();
+
+    await waitFor(() => expect(onNdwi).toHaveBeenLastCalledWith(overlay));
+  });
+
+  it("clears the overlay when a query produces none", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    const onNdwi = vi.fn();
+    render(<QueryPanel onNdwi={onNdwi} />);
+
+    runFullQuery();
+
+    await waitFor(() => expect(onNdwi).toHaveBeenLastCalledWith(null));
+  });
+
+  it("clears a stale overlay when a new query starts", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    const onNdwi = vi.fn();
+    render(<QueryPanel onNdwi={onNdwi} />);
+
+    runFullQuery();
+
+    // Cleared at the start, before any new result can exist.
+    expect(onNdwi).toHaveBeenCalledWith(null);
+  });
+
+  it("clears the overlay when analysis fails", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: { error: { code: "upstream_error", message: "nope" } },
+        ok: false,
+        status: 502,
+      },
+    });
+    const onNdwi = vi.fn();
+    render(<QueryPanel onNdwi={onNdwi} />);
+
+    runFullQuery();
+
+    await waitFor(() => expect(onNdwi).toHaveBeenLastCalledWith(null));
   });
 });

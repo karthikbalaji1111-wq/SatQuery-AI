@@ -16,6 +16,7 @@ import type {
   GeoResolveResponse,
   ImageryResponse,
   Modality,
+  NdwiOverlay,
   QueryExecutionResult,
   QueryTask,
   ResolvedQueryPlan,
@@ -145,9 +146,15 @@ interface QueryPanelProps {
    * triggers a request of its own - this is the imagery already fetched here.
    */
   onImagery?: (imagery: ImageryResponse | null) => void;
+  /**
+   * Called with the NDWI overlay a query produced, or `null` when it produced
+   * none. Same contract as `onImagery`: the result of a request this panel
+   * already made, travelling upward - never a second fetch.
+   */
+  onNdwi?: (overlay: NdwiOverlay | null) => void;
 }
 
-export function QueryPanel({ onImagery }: QueryPanelProps = {}) {
+export function QueryPanel({ onImagery, onNdwi }: QueryPanelProps = {}) {
   const [place, setPlace] = useState("");
   const [resolveState, setResolveState] = useState<ResolveState>({
     status: "idle",
@@ -313,6 +320,9 @@ export function QueryPanel({ onImagery }: QueryPanelProps = {}) {
     if (!canExecute) return;
 
     setExecuteState({ status: "loading" });
+    // A new query invalidates whatever the map is showing, before any
+    // new result exists to replace it.
+    onNdwi?.(null);
     setAnalyzeState({ status: "idle" });
 
     let result: QueryExecutionResult;
@@ -335,12 +345,18 @@ export function QueryPanel({ onImagery }: QueryPanelProps = {}) {
         execution: result,
         // Omitted when off, so a non-NDWI request is byte-identical
         // to the pre-NDWI behaviour.
-        ...(includeNdwi ? { include_ndwi: true } : {}),
+        ...(includeNdwi
+          ? { include_ndwi: true, include_ndwi_overlay: true }
+          : {}),
         ...(includeTemporalNdwi ? { include_temporal_ndwi: true } : {}),
       });
       setAnalyzeState({ status: "done", result: analysis });
+      // null when the analysis produced no overlay, so the map never keeps one
+      // from an earlier query.
+      onNdwi?.(analysis.ndwi_overlay ?? null);
     } catch (error) {
       setAnalyzeState({ status: "error", message: errorMessage(error) });
+      onNdwi?.(null);
     }
   }
 

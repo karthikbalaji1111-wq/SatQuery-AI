@@ -24,8 +24,11 @@ from app.main import create_app
 from app.services.ai import AiService, MockIntentParser
 from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService, engines
 from app.services.analysis import service as service_mod
-from app.services.analysis.engines import compute_ndwi_measurements
-from app.services.analysis.schemas import Measurement
+from app.services.analysis.engines import (
+    compute_ndwi_measurements,
+    render_ndwi_overlay,
+)
+from app.services.analysis.schemas import Measurement, NdwiOverlay
 from app.services.geospatial import ResolveRequest, ResolveResponse
 from app.services.geospatial.schemas import BoundingBox
 from app.services.query import QueryService
@@ -37,10 +40,10 @@ from app.services.query.schemas import (
     SkippedModality,
     TimeRange,
 )
-from app.services.satellite.raster import BandWindow
+from app.services.satellite.raster import BandWindow, image_corners_wgs84
 from app.services.satellite.schemas import ImageryResponse, Scene, WindowInfo
 from fastapi.testclient import TestClient
-from rasterio.transform import from_origin
+from rasterio.transform import Affine, from_origin
 
 ANALYZE_URL = "/api/v1/query/analyze"
 EXECUTE_URL = "/api/v1/query/execute"
@@ -424,6 +427,9 @@ def test_analyze_endpoint_returns_the_expected_contract() -> None:
         # Phase 14, additive by design: the field is always serialized and is
         # null whenever temporal NDWI was not requested.
         "temporal_comparison",
+        # Phase 17.1, additive on the same principle: always serialized, null
+        # unless an NDWI overlay was requested AND could be positioned.
+        "ndwi_overlay",
     }
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
@@ -930,3 +936,377 @@ def test_analysis_service_performs_no_pixel_arithmetic() -> None:
     assert "import numpy" not in source
     assert "np." not in source
     assert "compute_ndwi_measurements" in source
+
+
+# =========================================================================== #
+# Phase 17.1 - the NDWI overlay raster
+# =========================================================================== #
+#
+# The index becomes a picture. The picture is positioned by the SAME affine the
+# analysis was computed on - never by the requested bbox - so an overlay can
+# never claim ground it did not measure. Invalid pixels are transparent, so the
+# basemap stays readable where the index says nothing.
+
+
+def grid_band(
+    values: list[list[float]],
+    *,
+    dtype: str = "uint16",
+    nodata: float | None = 0.0,
+    transform: Any = None,
+    crs: str | None = "EPSG:32644",
+) -> BandWindow:
+    """A 2-D BandWindow - the overlay needs a real grid, not one row."""
+
+    array = np.asarray(values, dtype=dtype)
+    valid = np.ones(array.shape, dtype=bool)
+    if nodata is not None:
+        valid = valid & (array != nodata)
+    return BandWindow(
+        values=array,
+        valid=valid,
+        width=array.shape[1],
+        height=array.shape[0],
+        crs=crs,
+        transform=transform or from_origin(399960.0, 1500000.0, 10.0, 10.0),
+        resolution=10.0,
+        nodata=nodata,
+        window={
+            "col_off": 0,
+            "row_off": 0,
+            "width": array.shape[1],
+            "height": array.shape[0],
+        },
+        source_shape=[array.shape[0], array.shape[1]],
+    )
+
+
+def decode_overlay(overlay: Any) -> np.ndarray:
+    """The overlay PNG back as an RGBA array, so pixels can be asserted."""
+
+    import base64
+    import io
+
+    from PIL import Image
+
+    raw = base64.b64decode(overlay.image_base64)
+    return np.array(Image.open(io.BytesIO(raw)).convert("RGBA"))
+
+
+GREEN_GRID = [[3, 4], [5, 0]]
+NIR_GRID = [[1, 2], [5, 7]]
+
+
+# --- contract -------------------------------------------------------------- #
+
+
+def test_overlay_carries_the_full_georeferencing_contract() -> None:
+    overlay = render_ndwi_overlay(
+        grid_band(GREEN_GRID), grid_band(NIR_GRID), scene_id="S2X", window_label="single"
+    )
+
+    assert overlay is not None
+    assert overlay.media_type == "image/png"
+    assert overlay.width == 2
+    assert overlay.height == 2
+    assert overlay.crs == "EPSG:32644"
+    assert overlay.transform == [10.0, 0.0, 399960.0, 0.0, -10.0, 1500000.0]
+    assert overlay.corners_wgs84 is not None
+    assert len(overlay.corners_wgs84) == 4
+    assert overlay.scene_id == "S2X"
+    assert overlay.window_label == "single"
+    assert overlay.image_base64
+
+
+def test_overlay_serializes_and_round_trips() -> None:
+    overlay = render_ndwi_overlay(
+        grid_band(GREEN_GRID), grid_band(NIR_GRID), scene_id="S2X", window_label="single"
+    )
+    assert overlay is not None
+    restored = NdwiOverlay.model_validate_json(overlay.model_dump_json())
+
+    assert restored.transform == overlay.transform
+    assert restored.corners_wgs84 == overlay.corners_wgs84
+    assert restored.image_base64 == overlay.image_base64
+
+
+# --- dimensions match the analysed grid ------------------------------------ #
+
+
+def test_overlay_dimensions_match_the_returned_raster() -> None:
+    green = grid_band([[3, 4, 5], [6, 7, 8]])
+    nir = grid_band([[1, 2, 3], [4, 5, 6]])
+    overlay = render_ndwi_overlay(green, nir, scene_id="S2X", window_label="single")
+
+    assert overlay is not None
+    assert (overlay.width, overlay.height) == (green.width, green.height)
+    assert decode_overlay(overlay).shape == (green.height, green.width, 4)
+
+
+# --- georeferencing comes from the affine, never the bbox ------------------ #
+
+
+def test_corners_are_derived_from_the_band_affine() -> None:
+    green = grid_band(GREEN_GRID)
+    overlay = render_ndwi_overlay(
+        green, grid_band(NIR_GRID), scene_id="S2X", window_label="single"
+    )
+
+    assert overlay is not None
+    expected = image_corners_wgs84(
+        green.transform, width=green.width, height=green.height, crs=green.crs
+    )
+    assert overlay.corners_wgs84 == expected
+
+
+def test_a_shifted_affine_moves_the_overlay() -> None:
+    here = render_ndwi_overlay(
+        grid_band(GREEN_GRID), grid_band(NIR_GRID), scene_id="S", window_label="w"
+    )
+    there = render_ndwi_overlay(
+        grid_band(GREEN_GRID, transform=from_origin(500000.0, 1600000.0, 10.0, 10.0)),
+        grid_band(NIR_GRID, transform=from_origin(500000.0, 1600000.0, 10.0, 10.0)),
+        scene_id="S",
+        window_label="w",
+    )
+
+    assert here is not None and there is not None
+    assert here.corners_wgs84 != there.corners_wgs84
+
+
+def test_a_coarser_grid_keeps_its_own_georeferencing() -> None:
+    """A 20 m grid is a different grid; the overlay must say so."""
+
+    coarse = from_origin(399960.0, 1500000.0, 20.0, 20.0)
+    overlay = render_ndwi_overlay(
+        grid_band(GREEN_GRID, transform=coarse),
+        grid_band(NIR_GRID, transform=coarse),
+        scene_id="S",
+        window_label="w",
+    )
+
+    assert overlay is not None
+    assert overlay.transform[0] == 20.0
+    assert overlay.transform[4] == -20.0
+
+
+# --- fail closed ----------------------------------------------------------- #
+
+
+def test_no_overlay_without_a_crs() -> None:
+    assert (
+        render_ndwi_overlay(
+            grid_band(GREEN_GRID, crs=None),
+            grid_band(NIR_GRID, crs=None),
+            scene_id="S",
+            window_label="w",
+        )
+        is None
+    )
+
+
+def test_no_overlay_for_a_rotated_grid() -> None:
+    rotated = Affine(10.0, 0.5, 399960.0, 0.0, -10.0, 1500000.0)
+    assert (
+        render_ndwi_overlay(
+            grid_band(GREEN_GRID, transform=rotated),
+            grid_band(NIR_GRID, transform=rotated),
+            scene_id="S",
+            window_label="w",
+        )
+        is None
+    )
+
+
+def test_no_overlay_when_no_pixel_is_valid() -> None:
+    """Nothing measured means nothing to draw - not a fully transparent lie."""
+
+    assert (
+        render_ndwi_overlay(
+            grid_band([[0, 0], [0, 0]]),
+            grid_band([[0, 0], [0, 0]]),
+            scene_id="S",
+            window_label="w",
+        )
+        is None
+    )
+
+
+def test_mismatched_band_shapes_are_refused() -> None:
+    with pytest.raises(ImageryError):
+        render_ndwi_overlay(
+            grid_band([[3, 4]]),
+            grid_band([[1, 2], [3, 4]]),
+            scene_id="S",
+            window_label="w",
+        )
+
+
+# --- pixel semantics ------------------------------------------------------- #
+
+
+def test_invalid_pixels_are_transparent() -> None:
+    """green==0 is nodata, so that pixel must not paint over the basemap."""
+
+    overlay = render_ndwi_overlay(
+        grid_band(GREEN_GRID), grid_band(NIR_GRID), scene_id="S", window_label="w"
+    )
+    assert overlay is not None
+    rgba = decode_overlay(overlay)
+
+    assert rgba[1, 1, 3] == 0  # green==0 -> nodata -> fully transparent
+    assert rgba[0, 0, 3] > 0  # a measured pixel is drawn
+
+
+def test_the_overlay_is_not_the_rgb_source_image() -> None:
+    """Distinct NDWI values must produce distinct colours."""
+
+    overlay = render_ndwi_overlay(
+        grid_band([[3, 9], [7, 2]]),
+        grid_band([[9, 1], [7, 2]]),
+        scene_id="S",
+        window_label="w",
+    )
+    assert overlay is not None
+    rgba = decode_overlay(overlay)
+
+    # NDWI: (3-9)/12=-0.5 ; (9-1)/10=+0.8 ; 0.0 ; 0.0
+    assert tuple(rgba[0, 0][:3]) != tuple(rgba[0, 1][:3])
+    assert tuple(rgba[1, 0][:3]) == tuple(rgba[1, 1][:3])  # equal index, equal colour
+
+
+def test_the_colour_ramp_is_monotonic_in_the_index() -> None:
+    """Wetter pixels move consistently along the ramp - a readable legend."""
+
+    overlay = render_ndwi_overlay(
+        grid_band([[1, 5, 9]]), grid_band([[9, 5, 1]]), scene_id="S", window_label="w"
+    )
+    assert overlay is not None
+    blue = decode_overlay(overlay)[0, :, 2].astype(int)
+
+    # NDWI -0.8, 0.0, +0.8 -> increasing blue
+    assert blue[0] < blue[1] < blue[2]
+
+
+# --- the numbers themselves are unchanged ---------------------------------- #
+
+
+def test_the_overlay_does_not_change_the_measurements() -> None:
+    green, nir = grid_band(GREEN_GRID), grid_band(NIR_GRID)
+    before = named(compute_ndwi_measurements(green, nir))
+    render_ndwi_overlay(green, nir, scene_id="S", window_label="w")
+    after = named(compute_ndwi_measurements(green, nir))
+
+    assert before == after
+
+
+def test_overlay_values_agree_with_the_measured_range() -> None:
+    green, nir = grid_band(GREEN_GRID), grid_band(NIR_GRID)
+    overlay = render_ndwi_overlay(green, nir, scene_id="S", window_label="w")
+    stats = named(compute_ndwi_measurements(green, nir))
+
+    assert overlay is not None
+    assert overlay.value_min == pytest.approx(stats["ndwi_min"])
+    assert overlay.value_max == pytest.approx(stats["ndwi_max"])
+    assert overlay.valid_pixel_count == int(stats["ndwi_valid_pixel_count"])
+
+
+# --- service wiring: the overlay is opt-in and rides the same band reads ---- #
+
+
+def analyze_with_overlay(
+    execution: QueryExecutionResult, imagery: FakeImageryService | None = None
+) -> tuple[AnalysisResult, FakeImageryService]:
+    imagery = imagery or FakeImageryService(
+        bands={"green": grid_band(GREEN_GRID), "nir": grid_band(NIR_GRID)}
+    )
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(
+            AnalysisRequest(
+                execution=execution, include_ndwi=True, include_ndwi_overlay=True
+            )
+        )
+    )
+    return result, imagery
+
+
+def test_no_overlay_unless_requested() -> None:
+    result, _ = analyze_ndwi(ndwi_execution())
+    assert result.ndwi_overlay is None
+
+
+def test_the_overlay_is_produced_when_requested() -> None:
+    result, _ = analyze_with_overlay(ndwi_execution())
+
+    assert result.ndwi_overlay is not None
+    assert result.ndwi_overlay.scene_id == "scene-a"
+    assert result.ndwi_overlay.corners_wgs84 is not None
+
+
+def test_the_overlay_reuses_the_analysis_band_reads() -> None:
+    """No second retrieval pipeline: still exactly the two reads NDWI needs."""
+
+    _, imagery = analyze_with_overlay(ndwi_execution())
+
+    assert [c["asset"] for c in imagery.calls] == ["green", "nir"]
+
+
+def test_the_overlay_does_not_disturb_the_measurements() -> None:
+    plain, _ = analyze_ndwi(
+        ndwi_execution(),
+        FakeImageryService(
+            bands={"green": grid_band(GREEN_GRID), "nir": grid_band(NIR_GRID)}
+        ),
+    )
+    with_overlay, _ = analyze_with_overlay(ndwi_execution())
+
+    assert named(with_overlay.measurements) == named(plain.measurements)
+
+
+def test_the_overlay_needs_the_statistics_too() -> None:
+    """Asking for a picture without the numbers is not a supported shape."""
+
+    imagery = FakeImageryService(
+        bands={"green": grid_band(GREEN_GRID), "nir": grid_band(NIR_GRID)}
+    )
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(
+            AnalysisRequest(
+                execution=ndwi_execution(),
+                include_ndwi=False,
+                include_ndwi_overlay=True,
+            )
+        )
+    )
+
+    assert result.ndwi_overlay is None
+    assert imagery.calls == []
+
+
+def test_an_unusable_grid_yields_no_overlay_but_keeps_the_numbers() -> None:
+    imagery = FakeImageryService(
+        bands={
+            "green": grid_band(GREEN_GRID, crs=None),
+            "nir": grid_band(NIR_GRID, crs=None),
+        }
+    )
+    result, _ = analyze_with_overlay(ndwi_execution(), imagery)
+
+    assert result.ndwi_overlay is None
+    assert named(result.measurements)["ndwi_valid_pixel_count"] == 3
+
+
+def test_the_analysis_result_serializes_with_the_overlay() -> None:
+    result, _ = analyze_with_overlay(ndwi_execution())
+    restored = AnalysisResult.model_validate_json(result.model_dump_json())
+
+    assert restored.ndwi_overlay is not None
+    assert restored.ndwi_overlay.transform == result.ndwi_overlay.transform
+
+
+def test_the_result_is_backward_compatible_without_an_overlay() -> None:
+    result, _ = analyze_ndwi(ndwi_execution())
+    assert "ndwi_overlay" in result.model_dump()
+    assert result.model_dump()["ndwi_overlay"] is None

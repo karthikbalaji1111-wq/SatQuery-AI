@@ -201,3 +201,118 @@ describe("App - query to map seam", () => {
     );
   });
 });
+
+describe("App - NDWI overlay reaches the map", () => {
+  const NDWI = {
+    scene_id: SCENE.id,
+    window_label: "single",
+    media_type: "image/png",
+    image_base64: "TkRXSQ==",
+    width: 2,
+    height: 2,
+    crs: "EPSG:32644",
+    transform: [10, 0, 399960, 0, -10, 1500000],
+    corners_wgs84: [
+      [80.2, 13.06],
+      [80.29, 13.061],
+      [80.291, 13.03],
+      [80.201, 13.029],
+    ],
+    value_min: -0.5,
+    value_max: 0.8,
+    valid_pixel_count: 3,
+  };
+
+  const EXECUTION = {
+    plan: {
+      intent: {
+        location_query: "Chennai",
+        temporal_mode: "single",
+        time_windows: [{ start_date: "2024-07-01", end_date: "2024-07-01" }],
+        modalities: ["sentinel-2-optical"],
+        task: "visualize",
+      },
+      bbox: CHENNAI.bbox,
+    },
+    executed_modalities: ["sentinel-2-optical"],
+    skipped_modalities: [],
+    windows: [
+      {
+        modality: "sentinel-2-optical",
+        label: "single",
+        time_range: { start_date: "2024-07-01", end_date: "2024-07-01" },
+        scene_count: 1,
+        scenes: [SCENE],
+        selected_scene_id: SCENE.id,
+        imagery: null,
+        imagery_error: null,
+      },
+    ],
+    catalog: "https://example.test/v1",
+  };
+
+  function analysis(overlay: unknown) {
+    return {
+      status: "ok",
+      task: "visualize",
+      answer: "Analysed.",
+      windows_considered: [],
+      warnings: [],
+      measurements: [],
+      temporal_comparison: null,
+      ndwi_overlay: overlay,
+    };
+  }
+
+  async function runNdwiQuery() {
+    fireEvent.change(screen.getByLabelText("Place name"), {
+      target: { value: "Chennai" },
+    });
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(
+      screen.getByLabelText("Compute NDWI index statistics (Sentinel-2)"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+  }
+
+  it("passes a produced NDWI overlay through App to the map panel", async () => {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/query/execute": EXECUTION,
+      "/query/analyze": analysis(NDWI),
+    });
+    render(<App />);
+
+    await runNdwiQuery();
+
+    const mapPanel = screen
+      .getByRole("heading", { name: "Map" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(within(mapPanel).getByText(/NDWI/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("shows no NDWI on the map when the analysis produced none", async () => {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/query/execute": EXECUTION,
+      "/query/analyze": analysis(null),
+    });
+    render(<App />);
+
+    await runNdwiQuery();
+
+    const mapPanel = screen
+      .getByRole("heading", { name: "Map" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+    expect(within(mapPanel).queryByText(/NDWI/i)).not.toBeInTheDocument();
+  });
+});
