@@ -104,6 +104,41 @@ class ObservationIndexResult(BaseModel):
     )
 
 
+class NdwiOverlay(BaseModel):
+    """The NDWI index rendered as a georeferenced picture.
+
+    A *visualisation of the index*, not a classification: the colour ramp maps
+    the NDWI value and nothing else, and a bright pixel means a high index, not
+    detected water. The statistics in ``measurements`` remain the product; this
+    is a way of looking at the same pixels they were computed from.
+
+    Positioned exactly like Phase 16.2 RGB imagery - by ``transform`` and
+    ``corners_wgs84``, both taken from the band window the index was computed
+    on. The requested bbox is never involved, so the overlay cannot claim
+    ground the analysis did not measure. When an honest footprint cannot be
+    derived, the whole overlay is omitted rather than drawn in the wrong place.
+
+    Pixels with no valid measurement are fully transparent, so the basemap
+    stays readable where the index says nothing.
+    """
+
+    scene_id: str
+    window_label: str
+    media_type: Literal["image/png"] = "image/png"
+    image_base64: str
+    width: int
+    height: int
+    crs: str
+    #: Affine of THIS raster, in ``crs`` - ``[a, b, c, d, e, f]``.
+    transform: list[float] = Field(min_length=6, max_length=6)
+    #: Four ``[lon, lat]`` pairs in EPSG:4326, ordered ``[NW, NE, SE, SW]``.
+    corners_wgs84: list[list[float]] = Field(min_length=4, max_length=4)
+    #: The index range actually rendered, so a legend can be honest about it.
+    value_min: float
+    value_max: float
+    valid_pixel_count: int
+
+
 class TemporalIndexComparison(BaseModel):
     """Two independently indexed observations, reported side by side.
 
@@ -150,6 +185,10 @@ class AnalysisRequest(BaseModel):
 
     execution: QueryExecutionResult
     include_ndwi: bool = False
+    #: Additionally render the NDWI grid as a georeferenced PNG overlay.
+    #: Requires ``include_ndwi``: the picture is a view of those same
+    #: pixels, so it is never produced without the statistics.
+    include_ndwi_overlay: bool = False
     include_temporal_ndwi: bool = False
 
 
@@ -165,4 +204,8 @@ class AnalysisResult(BaseModel):
     #: Temporal NDWI Statistics for one observation pair. ``None`` whenever the
     #: feature was not requested, or was requested but could not produce a valid
     #: comparison - the reason is then on :attr:`warnings`.
+    #: The NDWI grid as a georeferenced picture, when it was requested and
+    #: could be positioned honestly. ``None`` otherwise - a missing overlay
+    #: never suppresses the measurements, which remain the product.
+    ndwi_overlay: NdwiOverlay | None = None
     temporal_comparison: TemporalIndexComparison | None = None

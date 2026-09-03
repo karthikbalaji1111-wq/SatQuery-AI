@@ -297,11 +297,43 @@ export interface AnalysisRequest {
    */
   include_ndwi?: boolean;
   /**
+   * Additionally render the NDWI grid as a georeferenced PNG overlay. Requires
+   * `include_ndwi`: the picture is a view of those same pixels.
+   */
+  include_ndwi_overlay?: boolean;
+  /**
    * Opt in to Temporal NDWI Statistics for one deterministic Sentinel-2
    * observation pair. Independent of `include_ndwi`; the backend defaults it to
    * `false`.
    */
   include_temporal_ndwi?: boolean;
+}
+
+/**
+ * The NDWI index rendered as a georeferenced picture.
+ *
+ * A visualisation of the index, not a classification: the colour ramp maps the
+ * NDWI value and nothing else, so a bright pixel means a high index, not
+ * detected water. Positioned exactly like RGB imagery - by `transform` and
+ * `corners_wgs84` taken from the band window the index was computed on, never
+ * from the requested bbox. Pixels with no valid measurement are transparent.
+ */
+export interface NdwiOverlay {
+  scene_id: string;
+  window_label: string;
+  media_type: "image/png";
+  image_base64: string;
+  width: number;
+  height: number;
+  crs: string;
+  /** Affine of this raster, in `crs` - `[a, b, c, d, e, f]`. */
+  transform: number[];
+  /** Four `[lon, lat]` pairs in EPSG:4326, ordered `[NW, NE, SE, SW]`. */
+  corners_wgs84: number[][];
+  /** The index range actually rendered, so a legend can be honest about it. */
+  value_min: number;
+  value_max: number;
+  valid_pixel_count: number;
 }
 
 export interface AnalysisResult {
@@ -317,6 +349,12 @@ export interface AnalysisResult {
    * comparison - the reason is then in `warnings`.
    */
   temporal_comparison?: TemporalIndexComparison | null;
+  /**
+   * The NDWI grid as a georeferenced picture, when it was requested and could
+   * be positioned honestly. `null` otherwise - a missing overlay never
+   * suppresses the measurements, which remain the product.
+   */
+  ndwi_overlay?: NdwiOverlay | null;
 }
 
 // --------------------------------------------------------------------------- //

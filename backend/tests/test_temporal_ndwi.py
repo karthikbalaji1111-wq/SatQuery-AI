@@ -903,9 +903,12 @@ def test_flag_off_keeps_every_existing_field_and_adds_a_null_comparison() -> Non
         "warnings",
         "measurements",
         "temporal_comparison",
+        # Phase 17.1, additive on the same principle as temporal_comparison.
+        "ndwi_overlay",
     }
-    # The only intentional serialized difference.
+    # The only intentional serialized differences, both null when unrequested.
     assert body["temporal_comparison"] is None
+    assert body["ndwi_overlay"] is None
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
     assert body["measurements"] == []

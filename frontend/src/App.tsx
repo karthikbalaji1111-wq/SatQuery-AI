@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import "./App.css";
 
-import type { ImageryResponse } from "./api/types";
+import type { ImageryResponse, NdwiOverlay } from "./api/types";
 import { BackendStatus } from "./components/BackendStatus";
 import { AgentPanel } from "./features/agent/AgentPanel";
 import { MapPanel } from "./features/map/MapPanel";
@@ -13,6 +13,10 @@ export function App() {
   // QueryPanel still owns the request; this is the result travelling upward,
   // not a second execution path.
   const [imagery, setImagery] = useState<ImageryResponse | null>(null);
+  // The NDWI overlay a query produced. Held beside the RGB preview rather than
+  // replacing it: they come from different requests and different grids, and
+  // the map positions each by its own corners.
+  const [ndwi, setNdwi] = useState<NdwiOverlay | null>(null);
 
   return (
     <div className="app">
@@ -24,8 +28,8 @@ export function App() {
 
       <main className="app-main">
         <AgentPanel />
-        <QueryPanel onImagery={setImagery} />
-        <MapPanel imagery={imagery} />
+        <QueryPanel onImagery={setImagery} onNdwi={setNdwi} />
+        <MapPanel imagery={imagery} ndwi={ndwi} />
       </main>
 
       <footer className="app-footer">

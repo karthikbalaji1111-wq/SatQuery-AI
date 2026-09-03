@@ -33,12 +33,14 @@ from app.core.logging import get_logger
 from app.services.analysis.engines import (
     compare_ndwi_observations,
     compute_ndwi_measurements,
+    render_ndwi_overlay,
 )
 from app.services.analysis.schemas import (
     AnalysisRequest,
     AnalysisResult,
     AnalysisWindowRef,
     Measurement,
+    NdwiOverlay,
     ObservationIndexResult,
     TemporalIndexComparison,
 )
@@ -193,8 +195,8 @@ class AnalysisService(DomainService):
         )
 
     async def _ndwi_measurements(
-        self, execution: QueryExecutionResult
-    ) -> tuple[list[Measurement], list[str]]:
+        self, execution: QueryExecutionResult, *, with_overlay: bool = False
+    ) -> tuple[list[Measurement], list[str], NdwiOverlay | None]:
         """Single-scene NDWI for one optical window. Returns (measurements, warnings).
 
         Pixels are read server-side through ``ImageryService`` and the arithmetic
@@ -203,10 +205,14 @@ class AnalysisService(DomainService):
 
         candidates = _ndwi_candidates(execution)
         if not candidates:
-            return [], [
-                "NDWI was requested but no Sentinel-2 optical window with a "
-                "selected scene was available; no index was computed."
-            ]
+            return (
+                [],
+                [
+                    "NDWI was requested but no Sentinel-2 optical window with a "
+                    "selected scene was available; no index was computed."
+                ],
+                None,
+            )
 
         window = candidates[0]
         warnings: list[str] = []
@@ -235,6 +241,19 @@ class AnalysisService(DomainService):
                 collection=collection,
             )
             measurements = compute_ndwi_measurements(green, nir)
+            # Same two band windows, so the picture and the numbers describe
+            # exactly the same pixels; the engine positions it from their own
+            # affine and returns None rather than a misplaced overlay.
+            overlay = (
+                render_ndwi_overlay(
+                    green,
+                    nir,
+                    scene_id=window.selected_scene_id,
+                    window_label=window.label,
+                )
+                if with_overlay
+                else None
+            )
         except AppError as exc:
             logger.info(
                 "NDWI unavailable for window %s [%s]: %s",
@@ -246,14 +265,20 @@ class AnalysisService(DomainService):
                 f"NDWI could not be computed for the {window.modality} window "
                 f"{window.label!r}: {exc.message}"
             )
-            return [], warnings
+            return [], warnings, None
 
         warnings.append(
             "NDWI values are a spectral index computed from raw Sentinel-2 "
             "digital numbers; they are not a validated water or flood "
             "classification."
         )
-        return measurements, warnings
+        if with_overlay and overlay is None:
+            warnings.append(
+                "The NDWI overlay was requested but could not be positioned "
+                "from the read window's own georeferencing, so no overlay was "
+                "produced; the statistics above are unaffected."
+            )
+        return measurements, warnings, overlay
 
     async def _observation_index(
         self, observation: Observation, bbox: BoundingBox
@@ -390,8 +415,11 @@ class AnalysisService(DomainService):
             answer = _not_implemented_answer(task, len(refs))
 
         measurements: list[Measurement] = []
+        ndwi_overlay: NdwiOverlay | None = None
         if request.include_ndwi:
-            measurements, ndwi_warnings = await self._ndwi_measurements(execution)
+            measurements, ndwi_warnings, ndwi_overlay = await self._ndwi_measurements(
+                execution, with_overlay=request.include_ndwi_overlay
+            )
             warnings.extend(ndwi_warnings)
             if measurements:
                 answer = (
@@ -430,5 +458,6 @@ class AnalysisService(DomainService):
             windows_considered=refs,
             warnings=warnings,
             measurements=measurements,
+            ndwi_overlay=ndwi_overlay,
             temporal_comparison=temporal_comparison,
         )

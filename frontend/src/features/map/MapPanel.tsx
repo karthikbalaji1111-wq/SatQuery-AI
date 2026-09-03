@@ -6,10 +6,54 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
   footprintExtent,
   isValidFootprint,
+  NDWI_LAYER_ID,
+  NDWI_SOURCE_ID,
   SATELLITE_LAYER_ID,
   SATELLITE_SOURCE_ID,
 } from "./footprint";
-import type { MapFactory, MapImagery, MapLike } from "./footprint";
+import type { MapFactory, MapImagery, MapLike, MapNdwi } from "./footprint";
+
+/**
+ * Put one image overlay on the map, or take it off.
+ *
+ * The same three steps for every raster: tear down whatever is there, then add
+ * the source and its layer if - and only if - the new raster has a footprint we
+ * validated. Shared so RGB and NDWI cannot drift apart in how they are placed
+ * or cleaned up; the caller supplies the ids, the picture and the corners, and
+ * nothing here computes geometry.
+ */
+function syncImageOverlay(
+  map: MapLike,
+  {
+    sourceId,
+    layerId,
+    raster,
+  }: {
+    sourceId: string;
+    layerId: string;
+    raster: { media_type: string; image_base64: string; corners_wgs84: number[][] | null } | null;
+  },
+): number[][] | null {
+  if (map.getLayer(layerId)) map.removeLayer(layerId);
+  if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+  const corners = raster?.corners_wgs84;
+  if (!raster || !isValidFootprint(corners)) return null;
+
+  map.addSource(sourceId, {
+    type: "image",
+    url: `data:${raster.media_type};base64,${raster.image_base64}`,
+    // Verbatim, in the order received: [NW, NE, SE, SW].
+    coordinates: corners,
+  });
+  map.addLayer({
+    id: layerId,
+    type: "raster",
+    source: sourceId,
+    paint: { "raster-opacity": 1 },
+  } as { id: string });
+  return corners;
+}
 
 /**
  * The basemap is an EXTERNAL raster tile service (OpenStreetMap), fetched
@@ -50,6 +94,8 @@ const createMapLibreMap: MapFactory = ({ container }) =>
 interface MapPanelProps {
   /** The imagery to draw, or `null` for a basemap-only map. */
   imagery?: MapImagery | null;
+  /** The NDWI raster to draw over it, or `null` for none. */
+  ndwi?: MapNdwi | null;
   /** Injected in tests; jsdom has no WebGL, so the real map cannot be built. */
   createMap?: MapFactory;
 }
@@ -68,7 +114,11 @@ interface MapPanelProps {
  * quadrilateral in WGS84, so an axis-aligned overlay would misplace it - by
  * ~144 m over a city-sized AOI in the measured case.
  */
-export function MapPanel({ imagery = null, createMap }: MapPanelProps) {
+export function MapPanel({
+  imagery = null,
+  ndwi = null,
+  createMap,
+}: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLike | null>(null);
   const [ready, setReady] = useState(false);
@@ -103,38 +153,34 @@ export function MapPanel({ imagery = null, createMap }: MapPanelProps) {
     };
   }, []);
 
-  const corners = imagery?.corners_wgs84;
-  const hasFootprint = isValidFootprint(corners);
+  const hasFootprint = isValidFootprint(imagery?.corners_wgs84);
+  const hasNdwiFootprint = isValidFootprint(ndwi?.corners_wgs84);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    // Always tear the old overlay down first, so repeated updates cannot
-    // accumulate sources or layers inside MapLibre.
-    if (map.getLayer(SATELLITE_LAYER_ID)) map.removeLayer(SATELLITE_LAYER_ID);
-    if (map.getSource(SATELLITE_SOURCE_ID)) map.removeSource(SATELLITE_SOURCE_ID);
-
-    if (!imagery || !hasFootprint) return;
-
-    map.addSource(SATELLITE_SOURCE_ID, {
-      type: "image",
-      url: `data:${imagery.media_type};base64,${imagery.image_base64}`,
-      // Verbatim, in the order received: [NW, NE, SE, SW].
-      coordinates: corners,
+    const rgbCorners = syncImageOverlay(map, {
+      sourceId: SATELLITE_SOURCE_ID,
+      layerId: SATELLITE_LAYER_ID,
+      raster: imagery,
     });
-    map.addLayer({
-      id: SATELLITE_LAYER_ID,
-      type: "raster",
-      source: SATELLITE_SOURCE_ID,
-      paint: { "raster-opacity": 1 },
-    } as { id: string });
+    // NDWI goes on last, so it draws above the true-colour image.
+    const ndwiCorners = syncImageOverlay(map, {
+      sourceId: NDWI_SOURCE_ID,
+      layerId: NDWI_LAYER_ID,
+      raster: ndwi,
+    });
 
     // Framing only - without this a small AOI is a few pixels at the initial
-    // zoom and reads as "nothing rendered". The overlay's position is still
-    // entirely the four corners; this only moves the camera.
-    map.fitBounds(footprintExtent(corners), { padding: 24, duration: 0 });
-  }, [imagery, corners, hasFootprint, ready]);
+    // zoom and reads as "nothing rendered". Positions still come entirely from
+    // the corners; this only moves the camera. The index wins when both are
+    // present, because that is what the user asked to look at.
+    const frameTo = ndwiCorners ?? rgbCorners;
+    if (frameTo) {
+      map.fitBounds(footprintExtent(frameTo), { padding: 24, duration: 0 });
+    }
+  }, [imagery, ndwi, ready]);
 
   return (
     <section className="panel" aria-labelledby="map-heading">
@@ -146,7 +192,9 @@ export function MapPanel({ imagery = null, createMap }: MapPanelProps) {
       />
       <MapStatus
         imagery={imagery}
+        ndwi={ndwi}
         hasFootprint={hasFootprint}
+        hasNdwiFootprint={hasNdwiFootprint}
         unavailable={unavailable}
       />
     </section>
@@ -156,11 +204,15 @@ export function MapPanel({ imagery = null, createMap }: MapPanelProps) {
 /** An honest one-line statement of what is - or is not - on the map. */
 function MapStatus({
   imagery,
+  ndwi,
   hasFootprint,
+  hasNdwiFootprint,
   unavailable,
 }: {
   imagery: MapImagery | null;
+  ndwi: MapNdwi | null;
   hasFootprint: boolean;
+  hasNdwiFootprint: boolean;
   unavailable: boolean;
 }) {
   if (unavailable) {
@@ -168,9 +220,28 @@ function MapStatus({
       <p className="hint" role="status">
         The map could not be started in this browser, which needs WebGL2.
         Everything else on this page still works.
-        {imagery
-          ? ` Scene ${imagery.scene_id} was retrieved but cannot be drawn here.`
-          : ""}
+        {ndwi
+          ? ` An NDWI result for scene ${ndwi.scene_id} was produced but cannot be drawn here.`
+          : imagery
+            ? ` Scene ${imagery.scene_id} was retrieved but cannot be drawn here.`
+            : ""}
+      </p>
+    );
+  }
+  if (hasNdwiFootprint && ndwi) {
+    return (
+      <p className="hint">
+        Showing the NDWI index for scene {ndwi.scene_id}. Colour maps the index
+        value only - a high index is not a water classification. Unmeasured
+        pixels are transparent.
+      </p>
+    );
+  }
+  if (ndwi && !hasNdwiFootprint) {
+    return (
+      <p className="hint" role="status">
+        An NDWI result was produced but has no usable geographic footprint, so
+        it is not shown on the map.
       </p>
     );
   }

@@ -11,15 +11,20 @@ service itself never performs pixel arithmetic.
 
 from __future__ import annotations
 
+import base64
+import io
+
 import numpy as np
+from PIL import Image
 
 from app.core.errors import ImageryError
 from app.services.analysis.schemas import (
     Measurement,
+    NdwiOverlay,
     ObservationIndexResult,
 )
 from app.services.query.compatibility import CompatibilityReport
-from app.services.satellite.raster import BandWindow
+from app.services.satellite.raster import BandWindow, image_corners_wgs84
 
 # --------------------------------------------------------------------------- #
 # THE RAW-DN DECISION - the single documented place this choice is made.
@@ -82,6 +87,120 @@ def _ndwi_values(green: BandWindow, nir: BandWindow) -> np.ndarray:
 
     ndwi = (g[valid] - n[valid]) / denominator[valid]
     return ndwi[np.isfinite(ndwi)]
+
+
+#: The index range the colour ramp spans. NDWI is bounded to [-1, 1] by
+#: construction, so the ramp is fixed rather than stretched per scene: two
+#: overlays are then directly comparable, and a legend means the same thing
+#: every time.
+NDWI_DISPLAY_RANGE = (-1.0, 1.0)
+
+
+def _ndwi_grid(green: BandWindow, nir: BandWindow) -> tuple[np.ndarray, np.ndarray]:
+    """NDWI as a 2-D grid plus its validity mask, on the bands' own pixels.
+
+    The grid sibling of :func:`_ndwi_values`, which flattens and drops invalid
+    pixels because statistics have no geometry. A picture does: every pixel
+    needs a position, so the shape is preserved and validity travels beside it.
+    """
+
+    if green.values.shape != nir.values.shape:
+        raise ImageryError(
+            "Cannot compute NDWI: the green and nir windows have different "
+            f"shapes ({green.values.shape} vs {nir.values.shape}). Both bands "
+            "must come from the same scene at the same native resolution."
+        )
+
+    g = green.values.astype(np.float64)
+    n = nir.values.astype(np.float64)
+    valid = green.valid & nir.valid & np.isfinite(g) & np.isfinite(n)
+
+    denominator = g + n
+    valid &= denominator != 0.0
+
+    ndwi = np.zeros(g.shape, dtype=np.float64)
+    np.divide(g - n, denominator, out=ndwi, where=valid)
+    valid &= np.isfinite(ndwi)
+    return ndwi, valid
+
+
+def _ndwi_rgba(ndwi: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Colour the index. Dry (low) -> warm sand, wet (high) -> deep blue.
+
+    A single continuous ramp over the fixed [-1, 1] range, so the colour IS the
+    value and no threshold is implied - this renders NDWI, it does not classify
+    water. Invalid pixels get alpha 0 rather than a colour, because "not
+    measured" must not look like a measurement.
+    """
+
+    low, high = NDWI_DISPLAY_RANGE
+    t = np.clip((ndwi - low) / (high - low), 0.0, 1.0)
+
+    rgba = np.zeros((*ndwi.shape, 4), dtype=np.uint8)
+    rgba[..., 0] = ((1.0 - t) * 214).astype(np.uint8)  # red falls away
+    rgba[..., 1] = (60 + (1.0 - t) * 120).astype(np.uint8)  # green dips mid-ramp
+    rgba[..., 2] = (40 + t * 215).astype(np.uint8)  # blue rises with the index
+    rgba[..., 3] = np.where(valid, 200, 0).astype(np.uint8)
+    return rgba
+
+
+def render_ndwi_overlay(
+    green: BandWindow,
+    nir: BandWindow,
+    *,
+    scene_id: str,
+    window_label: str,
+) -> NdwiOverlay | None:
+    """The NDWI grid as a georeferenced PNG, or ``None`` when it cannot be one.
+
+    Computed from the SAME band windows the statistics come from, so the
+    picture and the numbers describe identical pixels, and positioned by those
+    windows' own affine - never by the requested bbox.
+
+    Returns ``None`` rather than raising when there is nothing honest to draw:
+    no valid pixel, or a grid whose footprint cannot be established (no CRS, or
+    a rotated transform). A missing overlay costs a picture; a misplaced one
+    would assert measurements about ground that was never read.
+    """
+
+    ndwi, valid = _ndwi_grid(green, nir)
+    count = int(np.count_nonzero(valid))
+    if count == 0:
+        return None
+
+    try:
+        corners = image_corners_wgs84(
+            green.transform,
+            width=green.width,
+            height=green.height,
+            crs=green.crs,
+        )
+    except ImageryError:
+        return None
+    if green.crs is None:  # pragma: no cover - image_corners_wgs84 already refuses
+        return None
+
+    rgba = _ndwi_rgba(ndwi, valid)
+    try:
+        buffer = io.BytesIO()
+        Image.fromarray(rgba, mode="RGBA").save(buffer, format="PNG")
+    except (ValueError, TypeError, OSError) as exc:
+        raise ImageryError("Failed to encode the NDWI overlay as PNG.") from exc
+
+    measured = ndwi[valid]
+    return NdwiOverlay(
+        scene_id=scene_id,
+        window_label=window_label,
+        image_base64=base64.b64encode(buffer.getvalue()).decode("ascii"),
+        width=int(green.width),
+        height=int(green.height),
+        crs=green.crs,
+        transform=list(green.transform)[:6],
+        corners_wgs84=corners,
+        value_min=float(measured.min()),
+        value_max=float(measured.max()),
+        valid_pixel_count=count,
+    )
 
 
 def compute_ndwi_measurements(
