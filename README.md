@@ -149,3 +149,4 @@ Or individually:
    `POST /api/v1/query/agent` and in the `AgentPanel` UI.
 5. **Multimodal + temporal** — fusion and change detection.
 6. **Map** — MapLibre integration in `frontend/src/features/map` fed by `services/map`.
+
