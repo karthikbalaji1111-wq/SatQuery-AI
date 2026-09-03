@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -49,6 +49,155 @@ describe("App", () => {
 
     await waitFor(() =>
       expect(screen.getByText(/Backend online/i)).toBeInTheDocument(),
+    );
+  });
+});
+
+
+// --------------------------------------------------------------------------- #
+// The App -> QueryPanel -> MapPanel seam
+// --------------------------------------------------------------------------- #
+//
+// QueryPanel owns the request and App holds the result; the map only renders
+// what it is handed. These tests exercise that whole path through the real
+// components, so a break in the wiring cannot pass by being mocked out.
+//
+// jsdom has no WebGL2, so the real MapLibre map never starts. The panel still
+// reports which scene reached it, which is what makes the seam observable here.
+
+const CHENNAI = {
+  query_type: "place",
+  display_name: "Chennai, Tamil Nadu, India",
+  center: { lat: 13.0837, lon: 80.2702 },
+  bbox: { west: 80.1, south: 12.9, east: 80.3, north: 13.2 },
+  source: "nominatim",
+};
+
+const SCENE = {
+  id: "S2B_44PLA_20240715_0_L2A",
+  datetime: "2024-07-15T05:12:34Z",
+  bbox: { west: 80.1, south: 12.85, east: 80.42, north: 13.22 },
+  geometry: null,
+  cloud_cover: 12.3,
+  collection: "sentinel-2-l2a",
+  platform: "sentinel-2b",
+  processing_level: "L2A",
+  thumbnail_url: null,
+  assets: [],
+};
+
+const IMAGERY = {
+  scene_id: SCENE.id,
+  bbox: CHENNAI.bbox,
+  asset: "visual",
+  asset_href: "https://example.test/TCI.tif",
+  width: 128,
+  height: 96,
+  format: "png",
+  media_type: "image/png",
+  bands: ["red", "green", "blue"],
+  crs: "EPSG:32644",
+  resolution: 10,
+  normalization: "none (source is 8-bit RGB)",
+  window: { col_off: 1328, row_off: 5830, width: 128, height: 96 },
+  source_shape: [10980, 10980],
+  transform: [10, 0, 421900, 0, -10, 1444560],
+  corners_wgs84: [
+    [80.279621036, 13.066131716],
+    [80.289951131, 13.066160297],
+    [80.29002857, 13.039034352],
+    [80.279699601, 13.039005833],
+  ],
+  image_base64: "iVBORw0KGgo=",
+};
+
+/** Canned responses by URL substring, mirroring the QueryPanel tests. */
+function stubRouter(routes: Record<string, unknown>) {
+  const fn = vi.fn((url: string) => {
+    const match = Object.keys(routes).find((key) => String(url).includes(key));
+    const body = match ? routes[match] : {};
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(body)),
+    } as Response);
+  });
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
+async function runQueryToPreview() {
+  fireEvent.change(screen.getByLabelText("Place name"), {
+    target: { value: "Chennai" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /resolve location/i }));
+  await waitFor(() =>
+    expect(screen.getByText("Chennai, Tamil Nadu, India")).toBeInTheDocument(),
+  );
+
+  fireEvent.change(screen.getByLabelText("Start date"), {
+    target: { value: "2024-06-01" },
+  });
+  fireEvent.change(screen.getByLabelText("End date"), {
+    target: { value: "2024-08-31" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: /search sentinel-2 scenes/i }),
+  );
+  await waitFor(() =>
+    expect(screen.getByText(SCENE.id)).toBeInTheDocument(),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /load image/i }));
+}
+
+describe("App - query to map seam", () => {
+  it("passes a successful preview through to the map panel", async () => {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/satellite/search": { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      "/satellite/imagery": IMAGERY,
+    });
+    render(<App />);
+
+    await runQueryToPreview();
+
+    // The map panel names the scene it received - proof it crossed the seam.
+    const mapPanel = screen
+      .getByRole("heading", { name: "Map" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(within(mapPanel).getByRole("status")).toHaveTextContent(SCENE.id),
+    );
+  });
+
+  it("clears stale imagery from the map when a new search starts", async () => {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/satellite/search": { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      "/satellite/imagery": IMAGERY,
+    });
+    render(<App />);
+
+    await runQueryToPreview();
+    const mapPanel = screen
+      .getByRole("heading", { name: "Map" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(within(mapPanel).getByRole("status")).toHaveTextContent(SCENE.id),
+    );
+
+    // A new search invalidates it: the map must not keep the old scene.
+    fireEvent.click(
+      screen.getByRole("button", { name: /search sentinel-2 scenes/i }),
+    );
+
+    await waitFor(() =>
+      expect(within(mapPanel).getByRole("status")).not.toHaveTextContent(
+        SCENE.id,
+      ),
     );
   });
 });

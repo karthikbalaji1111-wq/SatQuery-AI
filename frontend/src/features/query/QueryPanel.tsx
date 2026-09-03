@@ -138,7 +138,16 @@ const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
  * forms remain available.
  * No map, no AI/VLM image reasoning, no spectral controls.
  */
-export function QueryPanel() {
+interface QueryPanelProps {
+  /**
+   * Called when a scene preview is retrieved, so a parent can place it on the
+   * map. Optional: the panel works exactly as before without it, and it never
+   * triggers a request of its own - this is the imagery already fetched here.
+   */
+  onImagery?: (imagery: ImageryResponse | null) => void;
+}
+
+export function QueryPanel({ onImagery }: QueryPanelProps = {}) {
   const [place, setPlace] = useState("");
   const [resolveState, setResolveState] = useState<ResolveState>({
     status: "idle",
@@ -256,6 +265,10 @@ export function QueryPanel() {
     setResolveState({ status: "loading" });
     setSearchState({ status: "idle" });
     setImageryState({ status: "idle" });
+    // The map holds the last scene handed to it, so clearing local state is not
+    // enough: without this the map keeps showing a scene from the previous
+    // location while the panel has already moved on.
+    onImagery?.(null);
     try {
       const result = await resolveLocation({ place: trimmed });
       setResolveState({ status: "done", result });
@@ -338,6 +351,7 @@ export function QueryPanel() {
     const cloud = maxCloud.trim() === "" ? undefined : Number(maxCloud);
     setSearchState({ status: "loading" });
     setImageryState({ status: "idle" });
+    onImagery?.(null);
     try {
       const result = await searchScenes({
         bbox: resolved.bbox,
@@ -356,18 +370,23 @@ export function QueryPanel() {
   async function handlePreview(scene: SatelliteScene) {
     if (!resolved) return;
     setImageryState({ status: "loading", sceneId: scene.id });
+    // Drop the old overlay before the new one is in flight, so the map never
+    // shows a scene the user has already replaced.
+    onImagery?.(null);
     try {
       const result = await fetchSceneImagery({
         scene_id: scene.id,
         bbox: resolved.bbox,
       });
       setImageryState({ status: "done", sceneId: scene.id, result });
+      onImagery?.(result);
     } catch (error) {
       setImageryState({
         status: "error",
         sceneId: scene.id,
         message: errorMessage(error),
       });
+      onImagery?.(null);
     }
   }
 

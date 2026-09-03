@@ -121,6 +121,14 @@ export interface ImageryResponse {
    * floor/ceil clamped onto the source grid and covers more.
    */
   transform: number[] | null;
+  /**
+   * The image's footprint as exactly four `[lon, lat]` pairs in EPSG:4326,
+   * ordered `[NW, NE, SE, SW]` - the order a MapLibre image source expects.
+   * Derived from `transform` at the returned image's size, never from `bbox`.
+   * Four corners rather than a rectangle because a reprojected UTM window is a
+   * quadrilateral in WGS84. `null` when no honest footprint could be derived.
+   */
+  corners_wgs84: number[][] | null;
   image_base64: string;
 }
 
