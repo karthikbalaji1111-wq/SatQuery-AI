@@ -256,3 +256,26 @@ body {
   font-size: 0.85rem;
   opacity: 0.6;
 }
+
+/* Phase 17.2 - the threshold count, set apart from the prose so a reader sees
+   the deterministic number before the sentence describing it. */
+.analysis-measurement {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid rgba(56, 132, 255, 0.6);
+  background: rgba(56, 132, 255, 0.06);
+  border-radius: 4px;
+}
+
+.analysis-measurement p {
+  margin: 0.15rem 0;
+}
+
+.measurement-headline {
+  font-weight: 600;
+}
+
+.measurement-value {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}

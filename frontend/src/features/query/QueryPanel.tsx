@@ -16,7 +16,9 @@ import type {
   GeoResolveResponse,
   ImageryResponse,
   Modality,
+  NdwiComparison,
   NdwiOverlay,
+  SpatialMeasurement,
   QueryExecutionResult,
   QueryTask,
   ResolvedQueryPlan,
@@ -880,6 +882,51 @@ function ExecutionWindowView({ win }: { win: ExecutedWindow }) {
  * Renders the analysis boundary result: status, answer, per-window traceability
  * and warnings. Text only - no maps, overlays, detections or charts.
  */
+/** How each operator reads, so the comparison is unambiguous on screen. */
+const COMPARISON_SYMBOLS: Record<NdwiComparison, string> = {
+  gt: ">",
+  gte: "≥",
+  lt: "<",
+  lte: "≤",
+};
+
+/**
+ * The threshold count, rendered from the structured measurement only.
+ *
+ * Every figure here is the backend's deterministic count over real pixels; the
+ * answer prose is never parsed for numbers. The denominator is stated
+ * explicitly - "of valid pixels" - because it is not the raster's pixel count,
+ * and a reader who assumed otherwise would misread the percentage.
+ */
+function SpatialMeasurementView({
+  measurement,
+}: {
+  measurement: SpatialMeasurement;
+}) {
+  const acquired = measurement.acquired_at?.slice(0, 10);
+  return (
+    <div className="analysis-measurement">
+      <p className="measurement-headline">
+        NDWI {COMPARISON_SYMBOLS[measurement.operator]}{" "}
+        {measurement.threshold.toFixed(2)}
+      </p>
+      <p className="measurement-value">
+        {measurement.percentage.toFixed(2)}% of valid pixels
+      </p>
+      <p className="hint">
+        {measurement.matching_pixel_count.toLocaleString("en-US")} /{" "}
+        {measurement.valid_pixel_count.toLocaleString("en-US")} pixels
+      </p>
+      <p className="hint">
+        {measurement.scene_id}
+        {acquired ? ` · ${acquired}` : ""}
+        {measurement.crs ? ` · ${measurement.crs}` : ""}
+      </p>
+    </div>
+  );
+}
+
+
 function AnalysisView({ result }: { result: AnalysisResult }) {
   return (
     <div className="result analysis-result">
@@ -898,6 +945,10 @@ function AnalysisView({ result }: { result: AnalysisResult }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {result.spatial_measurement && (
+        <SpatialMeasurementView measurement={result.spatial_measurement} />
       )}
 
       {result.measurements.length > 0 && (

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -26,14 +27,19 @@ from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisServi
 from app.services.analysis import service as service_mod
 from app.services.analysis.engines import (
     compute_ndwi_measurements,
+    compute_ndwi_threshold_measurement,
     render_ndwi_overlay,
 )
-from app.services.analysis.schemas import Measurement, NdwiOverlay
+from app.services.analysis.schemas import (
+    Measurement,
+    NdwiOverlay,
+)
 from app.services.geospatial import ResolveRequest, ResolveResponse
 from app.services.geospatial.schemas import BoundingBox
 from app.services.query import QueryService
 from app.services.query.schemas import (
     ExecutedWindow,
+    NdwiThreshold,
     QueryExecutionResult,
     ResolvedQueryPlan,
     SatQueryIntent,
@@ -43,6 +49,7 @@ from app.services.query.schemas import (
 from app.services.satellite.raster import BandWindow, image_corners_wgs84
 from app.services.satellite.schemas import ImageryResponse, Scene, WindowInfo
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from rasterio.transform import Affine, from_origin
 
 ANALYZE_URL = "/api/v1/query/analyze"
@@ -430,6 +437,9 @@ def test_analyze_endpoint_returns_the_expected_contract() -> None:
         # Phase 17.1, additive on the same principle: always serialized, null
         # unless an NDWI overlay was requested AND could be positioned.
         "ndwi_overlay",
+        # Phase 17.2, additive: null unless the intent stated a threshold and
+        # there were valid pixels to count.
+        "spatial_measurement",
     }
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
@@ -510,6 +520,8 @@ def test_parse_endpoint_is_unaffected() -> None:
         "time_windows",
         "modalities",
         "task",
+        # Phase 17.2, additive: null unless the request stated a threshold.
+        "ndwi_threshold",
     }
     for leaked in ("status", "answer", "windows_considered", "measurements"):
         assert leaked not in body
@@ -1310,3 +1322,420 @@ def test_the_result_is_backward_compatible_without_an_overlay() -> None:
     result, _ = analyze_ndwi(ndwi_execution())
     assert "ndwi_overlay" in result.model_dump()
     assert result.model_dump()["ndwi_overlay"] is None
+
+
+# =========================================================================== #
+# Phase 17.2 - spatially grounded NDWI threshold measurements
+# =========================================================================== #
+#
+# The number is computed from the analysed pixels, never by a language model.
+# Percentage is matching / VALID pixels: nodata, non-finite samples and
+# zero-denominator pixels are excluded from BOTH sides of the ratio, because a
+# pixel that was never measured cannot count as "not matching".
+#
+# Comparisons are exact: `gt` means `>`, never `>=`.
+
+
+def measure(
+    green_grid: list[list[float]],
+    nir_grid: list[list[float]],
+    operator: str,
+    value: float,
+    **kwargs: Any,
+) -> Any:
+    return compute_ndwi_threshold_measurement(
+        grid_band(green_grid),
+        grid_band(nir_grid),
+        threshold=NdwiThreshold(operator=operator, value=value),  # type: ignore[arg-type]
+        scene_id=kwargs.pop("scene_id", "scene-a"),
+        window_label=kwargs.pop("window_label", "single"),
+        acquired_at=kwargs.pop("acquired_at", None),
+    )
+
+
+# A 2x2 grid whose NDWI values are exactly -0.5, 0.3, 0.0 and nodata.
+#   (1-3)/4 = -0.5 ; (13-7)/20 = 0.3 ; (5-5)/10 = 0.0 ; green 0 -> nodata
+BOUNDARY_GREEN = [[1, 13], [5, 0]]
+BOUNDARY_NIR = [[3, 7], [5, 7]]
+
+
+def test_ndwi_values_of_the_boundary_grid_are_what_the_tests_assume() -> None:
+    """Anchor the fixture: every later assertion depends on these three values."""
+
+    stats = named(
+        compute_ndwi_measurements(grid_band(BOUNDARY_GREEN), grid_band(BOUNDARY_NIR))
+    )
+    assert stats["ndwi_valid_pixel_count"] == 3
+    assert stats["ndwi_min"] == pytest.approx(-0.5)
+    assert stats["ndwi_max"] == pytest.approx(0.3)
+
+
+# --- 1-4. the four operators ----------------------------------------------- #
+
+
+def test_gt_is_strictly_greater() -> None:
+    """0.3 must NOT match `> 0.3`."""
+
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gt", 0.3)
+
+    assert m is not None
+    assert m.matching_pixel_count == 0
+    assert m.valid_pixel_count == 3
+    assert m.percentage == pytest.approx(0.0)
+
+
+def test_gte_includes_the_boundary() -> None:
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gte", 0.3)
+
+    assert m is not None
+    assert m.matching_pixel_count == 1
+    assert m.percentage == pytest.approx(100.0 / 3)
+
+
+def test_lt_is_strictly_less() -> None:
+    """-0.5 and 0.0 are below 0.3; 0.3 itself is not."""
+
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "lt", 0.3)
+
+    assert m is not None
+    assert m.matching_pixel_count == 2
+    assert m.percentage == pytest.approx(200.0 / 3)
+
+
+def test_lte_includes_the_boundary() -> None:
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "lte", 0.3)
+
+    assert m is not None
+    assert m.matching_pixel_count == 3
+    assert m.percentage == pytest.approx(100.0)
+
+
+# --- 5-6. negative thresholds and exact boundaries ------------------------- #
+
+
+def test_a_negative_threshold_is_supported() -> None:
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gt", -0.5)
+
+    assert m is not None
+    assert m.threshold == -0.5
+    assert m.matching_pixel_count == 2  # 0.0 and 0.3, not -0.5 itself
+
+
+def test_the_boundary_pixel_is_decided_by_the_operator_alone() -> None:
+    gt = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gt", -0.5)
+    gte = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gte", -0.5)
+
+    assert gt is not None and gte is not None
+    assert gte.matching_pixel_count - gt.matching_pixel_count == 1
+
+
+# --- 7-8. all / none matching ---------------------------------------------- #
+
+
+def test_all_valid_pixels_can_match() -> None:
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gte", -1.0)
+
+    assert m is not None
+    assert m.matching_pixel_count == m.valid_pixel_count == 3
+    assert m.percentage == pytest.approx(100.0)
+
+
+def test_no_pixel_matching_is_zero_percent_not_an_absence() -> None:
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gt", 0.99)
+
+    assert m is not None
+    assert m.matching_pixel_count == 0
+    assert m.percentage == 0.0
+
+
+# --- 9-11. what is excluded from the denominator --------------------------- #
+
+
+def test_nodata_is_excluded_from_both_sides_of_the_ratio() -> None:
+    """The 2x2 grid has 4 pixels but only 3 valid ones."""
+
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "lte", 1.0)
+
+    assert m is not None
+    assert m.valid_pixel_count == 3  # not 4
+    assert m.matching_pixel_count == 3
+    assert m.percentage == pytest.approx(100.0)
+
+
+def test_non_finite_samples_are_excluded() -> None:
+    green = grid_band(
+        [[float("nan"), 13.0], [float("inf"), 5.0]], dtype="float32", nodata=None
+    )
+    nir = grid_band([[3.0, 7.0], [1.0, 5.0]], dtype="float32", nodata=None)
+    m = compute_ndwi_threshold_measurement(
+        green,
+        nir,
+        threshold=NdwiThreshold(operator="gte", value=-1.0),
+        scene_id="s",
+        window_label="w",
+        acquired_at=None,
+    )
+
+    assert m is not None
+    assert m.valid_pixel_count == 2  # NaN and inf both dropped
+
+
+def test_a_zero_denominator_pixel_is_excluded() -> None:
+    """green + nir == 0 has no defined index, so it is not measured."""
+
+    green = grid_band([[-5.0, 13.0]], dtype="float32", nodata=None)
+    nir = grid_band([[5.0, 7.0]], dtype="float32", nodata=None)
+    m = compute_ndwi_threshold_measurement(
+        green,
+        nir,
+        threshold=NdwiThreshold(operator="gte", value=-1.0),
+        scene_id="s",
+        window_label="w",
+        acquired_at=None,
+    )
+
+    assert m is not None
+    assert m.valid_pixel_count == 1
+
+
+# --- 11. zero valid pixels fails closed ------------------------------------ #
+
+
+def test_zero_valid_pixels_yields_no_measurement() -> None:
+    """No denominator means no percentage - not 0%, and not 100%."""
+
+    assert measure([[0, 0], [0, 0]], [[1, 2], [3, 4]], "gt", 0.3) is None
+
+
+# --- 12-13. the percentage itself ------------------------------------------ #
+
+
+def test_percentage_is_matching_over_valid() -> None:
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "lt", 0.3)
+
+    assert m is not None
+    assert m.percentage == pytest.approx(
+        m.matching_pixel_count / m.valid_pixel_count * 100.0
+    )
+
+
+def test_percentage_never_divides_by_the_raster_size() -> None:
+    """4 pixels, 3 valid, 2 matching -> 66.67%, never 50%."""
+
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "lt", 0.3)
+
+    assert m is not None
+    assert m.percentage == pytest.approx(66.6666666, abs=1e-6)
+    assert m.percentage != pytest.approx(50.0)
+
+
+def test_the_measurement_is_deterministic() -> None:
+    first = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gte", 0.3)
+    second = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gte", 0.3)
+
+    assert first is not None and second is not None
+    assert first.model_dump() == second.model_dump()
+
+
+# --- provenance ------------------------------------------------------------ #
+
+
+def test_the_measurement_carries_its_provenance_and_footprint() -> None:
+    acquired = datetime(2025, 1, 4, 5, 0, tzinfo=UTC)
+    m = measure(
+        BOUNDARY_GREEN,
+        BOUNDARY_NIR,
+        "gt",
+        0.0,
+        scene_id="S2B_44PMV_20250104_0_L2A",
+        window_label="single",
+        acquired_at=acquired,
+    )
+
+    assert m is not None
+    assert m.metric == "ndwi"
+    assert m.scene_id == "S2B_44PMV_20250104_0_L2A"
+    assert m.window_label == "single"
+    assert m.acquired_at == acquired
+    assert m.crs == "EPSG:32644"
+    assert m.corners_wgs84 is not None
+    assert len(m.corners_wgs84) == 4
+    assert m.corners_wgs84 == image_corners_wgs84(
+        grid_band(BOUNDARY_GREEN).transform, width=2, height=2, crs="EPSG:32644"
+    )
+
+
+def test_the_measurement_carries_no_raster_data() -> None:
+    """Provenance and counts only - the pixels stay in the overlay."""
+
+    m = measure(BOUNDARY_GREEN, BOUNDARY_NIR, "gt", 0.0)
+
+    assert m is not None
+    dumped = m.model_dump()
+    assert "image_base64" not in dumped
+    assert not any(isinstance(v, (bytes, bytearray)) for v in dumped.values())
+
+
+def test_an_ungeoreferenced_grid_still_reports_the_number() -> None:
+    """The count is the evidence; a missing footprint must not suppress it."""
+
+    m = compute_ndwi_threshold_measurement(
+        grid_band(BOUNDARY_GREEN, crs=None),
+        grid_band(BOUNDARY_NIR, crs=None),
+        threshold=NdwiThreshold(operator="lte", value=1.0),
+        scene_id="s",
+        window_label="w",
+        acquired_at=None,
+    )
+
+    assert m is not None
+    assert m.matching_pixel_count == 3
+    assert m.crs is None
+    assert m.corners_wgs84 is None
+
+
+# --- 15. malformed thresholds are refused at the contract ------------------ #
+
+
+@pytest.mark.parametrize("value", [1.5, -1.5, float("nan"), float("inf")])
+def test_an_out_of_range_threshold_is_refused(value: float) -> None:
+    with pytest.raises(ValidationError):
+        NdwiThreshold(operator="gt", value=value)
+
+
+def test_an_unknown_operator_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        NdwiThreshold(operator="approximately", value=0.3)  # type: ignore[arg-type]
+
+
+def test_the_threshold_contract_forbids_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        NdwiThreshold.model_validate({"operator": "gt", "value": 0.3, "unit": "m"})
+
+
+# --- service wiring: the threshold rides the intent ------------------------ #
+
+
+def threshold_execution(operator: str = "gt", value: float = 0.3) -> Any:
+    """An execution whose intent carries an explicit NDWI threshold."""
+
+    execution = ndwi_execution()
+    intent = execution.plan.intent.model_copy(
+        update={"ndwi_threshold": NdwiThreshold(operator=operator, value=value)}  # type: ignore[arg-type]
+    )
+    return execution.model_copy(
+        update={"plan": execution.plan.model_copy(update={"intent": intent})}
+    )
+
+
+def analyze_threshold(
+    execution: Any, imagery: FakeImageryService | None = None
+) -> tuple[AnalysisResult, FakeImageryService]:
+    imagery = imagery or FakeImageryService(
+        bands={"green": grid_band(BOUNDARY_GREEN), "nir": grid_band(BOUNDARY_NIR)}
+    )
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(AnalysisRequest(execution=execution, include_ndwi=True))
+    )
+    return result, imagery
+
+
+def test_no_threshold_in_the_intent_means_no_spatial_measurement() -> None:
+    result, _ = analyze_ndwi(ndwi_execution())
+    assert result.spatial_measurement is None
+
+
+def test_a_threshold_in_the_intent_produces_the_measurement() -> None:
+    result, _ = analyze_threshold(threshold_execution("gte", 0.3))
+
+    assert result.spatial_measurement is not None
+    assert result.spatial_measurement.operator == "gte"
+    assert result.spatial_measurement.threshold == 0.3
+    assert result.spatial_measurement.matching_pixel_count == 1
+    assert result.spatial_measurement.valid_pixel_count == 3
+
+
+def test_the_measurement_reuses_the_same_two_band_reads() -> None:
+    _, imagery = analyze_threshold(threshold_execution())
+    assert [c["asset"] for c in imagery.calls] == ["green", "nir"]
+
+
+def test_the_threshold_does_not_change_the_statistics() -> None:
+    plain, _ = analyze_ndwi(
+        ndwi_execution(),
+        FakeImageryService(
+            bands={"green": grid_band(BOUNDARY_GREEN), "nir": grid_band(BOUNDARY_NIR)}
+        ),
+    )
+    thresholded, _ = analyze_threshold(threshold_execution())
+
+    assert named(thresholded.measurements) == named(plain.measurements)
+
+
+def test_the_measurement_needs_the_ndwi_opt_in() -> None:
+    """Without include_ndwi nothing is read, so nothing can be counted."""
+
+    imagery = FakeImageryService(
+        bands={"green": grid_band(BOUNDARY_GREEN), "nir": grid_band(BOUNDARY_NIR)}
+    )
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(
+            AnalysisRequest(execution=threshold_execution(), include_ndwi=False)
+        )
+    )
+
+    assert result.spatial_measurement is None
+    assert imagery.calls == []
+
+
+def test_no_measurement_when_no_pixel_is_valid_but_no_fabrication() -> None:
+    imagery = FakeImageryService(
+        bands={"green": grid_band([[0, 0]]), "nir": grid_band([[1, 2]])}
+    )
+    result, _ = analyze_threshold(threshold_execution(), imagery)
+
+    assert result.spatial_measurement is None
+    assert named(result.measurements)["ndwi_valid_pixel_count"] == 0
+
+
+def test_the_measurement_carries_the_scene_and_window() -> None:
+    result, _ = analyze_threshold(threshold_execution())
+
+    assert result.spatial_measurement is not None
+    assert result.spatial_measurement.scene_id == "scene-a"
+    assert result.spatial_measurement.window_label == "single"
+
+
+def test_the_analysis_result_serializes_with_the_measurement() -> None:
+    result, _ = analyze_threshold(threshold_execution())
+    restored = AnalysisResult.model_validate_json(result.model_dump_json())
+
+    assert restored.spatial_measurement is not None
+    assert (
+        restored.spatial_measurement.percentage
+        == result.spatial_measurement.percentage
+    )
+
+
+def test_the_measurement_is_separate_from_the_overlay() -> None:
+    """Two contracts: the number and the picture never merge."""
+
+    imagery = FakeImageryService(
+        bands={"green": grid_band(BOUNDARY_GREEN), "nir": grid_band(BOUNDARY_NIR)}
+    )
+    service = AnalysisService(imagery_service=imagery)  # type: ignore[arg-type]
+    result = asyncio.run(
+        service.analyze(
+            AnalysisRequest(
+                execution=threshold_execution(),
+                include_ndwi=True,
+                include_ndwi_overlay=True,
+            )
+        )
+    )
+
+    assert result.spatial_measurement is not None
+    assert result.ndwi_overlay is not None
+    assert not hasattr(result.spatial_measurement, "image_base64")

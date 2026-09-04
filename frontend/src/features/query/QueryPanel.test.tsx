@@ -1873,3 +1873,93 @@ describe("QueryPanel - NDWI overlay handoff", () => {
     await waitFor(() => expect(onNdwi).toHaveBeenLastCalledWith(null));
   });
 });
+
+describe("QueryPanel - spatial NDWI measurement", () => {
+  function measurement(overrides: Record<string, unknown> = {}) {
+    return {
+      metric: "ndwi",
+      operator: "gt",
+      threshold: 0.3,
+      matching_pixel_count: 12481,
+      valid_pixel_count: 33600,
+      percentage: 37.14583333333333,
+      scene_id: "S2B_44PMV_20250104_0_L2A",
+      acquired_at: "2025-01-04T05:00:00Z",
+      window_label: "single",
+      crs: "EPSG:32644",
+      corners_wgs84: [
+        [80.2, 13.06],
+        [80.29, 13.061],
+        [80.291, 13.03],
+        [80.201, 13.029],
+      ],
+      ...overrides,
+    };
+  }
+
+  async function renderWithMeasurement(value: unknown) {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({ spatial_measurement: value }),
+      },
+    });
+    render(<QueryPanel />);
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+  }
+
+  it("states the comparison, the percentage and the counts", async () => {
+    await renderWithMeasurement(measurement());
+
+    expect(screen.getByText(/NDWI > 0\.30/)).toBeInTheDocument();
+    expect(screen.getByText(/37\.15% of valid pixels/)).toBeInTheDocument();
+    expect(screen.getByText(/12,481 \/ 33,600 pixels/)).toBeInTheDocument();
+  });
+
+  it("shows the scene and acquisition date", async () => {
+    await renderWithMeasurement(measurement());
+
+    expect(screen.getByText(/S2B_44PMV_20250104_0_L2A/)).toBeInTheDocument();
+    expect(screen.getByText(/2025-01-04/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["gt", ">"],
+    ["gte", "≥"],
+    ["lt", "<"],
+    ["lte", "≤"],
+  ])("renders %s as %s", async (operator, symbol) => {
+    await renderWithMeasurement(measurement({ operator }));
+    expect(screen.getByText(new RegExp(`NDWI \\${symbol} 0\\.30`))).toBeInTheDocument();
+  });
+
+  it("renders nothing when there is no measurement", async () => {
+    await renderWithMeasurement(null);
+    expect(screen.queryByText(/of valid pixels/)).not.toBeInTheDocument();
+  });
+
+  it("handles a zero-match measurement honestly", async () => {
+    await renderWithMeasurement(
+      measurement({ matching_pixel_count: 0, percentage: 0 }),
+    );
+
+    expect(screen.getByText(/0\.00% of valid pixels/)).toBeInTheDocument();
+    expect(screen.getByText(/0 \/ 33,600 pixels/)).toBeInTheDocument();
+  });
+
+  it("renders without an acquisition date", async () => {
+    await renderWithMeasurement(measurement({ acquired_at: null }));
+    expect(screen.getByText(/37\.15% of valid pixels/)).toBeInTheDocument();
+  });
+
+  it("does not display an LLM-authored number", async () => {
+    // The measurement is rendered from the structured field only; the answer
+    // prose is never parsed for figures.
+    await renderWithMeasurement(measurement());
+    expect(screen.getByText(/12,481 \/ 33,600 pixels/)).toBeInTheDocument();
+  });
+});

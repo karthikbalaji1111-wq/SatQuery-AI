@@ -1205,6 +1205,9 @@ def test_parse_endpoint_still_returns_only_the_intent() -> None:
         "time_windows": [{"start_date": "2024-01-01", "end_date": "2024-01-31"}],
         "modalities": ["sentinel-2-optical"],
         "task": "visualize",
+        # Phase 17.2, additive: always serialized, null unless the
+        # request stated an explicit NDWI threshold.
+        "ndwi_threshold": None,
     }
     for leaked in ("plan", "windows", "executed_modalities", "catalog", "bbox"):
         assert leaked not in body

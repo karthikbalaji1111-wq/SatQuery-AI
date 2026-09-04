@@ -13,6 +13,7 @@ from typing import Literal, Self
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     computed_field,
     field_validator,
@@ -52,6 +53,30 @@ class TemporalComparison(BaseModel):
     target: TimeRange
 
 
+#: How a threshold compares an index value. Exact by construction: ``gt`` is
+#: ``>``, never ``>=`` - a pixel exactly on the threshold is decided by the
+#: operator the user asked for and by nothing else.
+NdwiComparison = Literal["gt", "gte", "lt", "lte"]
+
+
+class NdwiThreshold(BaseModel):
+    """A numeric NDWI threshold the user stated explicitly.
+
+    Carries the *question*, never the answer: the operator and the value come
+    from the request, and the counting is done later from real pixels. A model
+    may fill this in; a model never computes what it selects.
+
+    ``value`` is bounded to NDWI's own range, and the bound rejects NaN and
+    infinity, so an unusable threshold fails at the contract rather than
+    silently matching nothing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operator: NdwiComparison
+    value: float = Field(ge=-1.0, le=1.0)
+
+
 class SatQueryIntent(BaseModel):
     """What the user asks for, before any location grounding."""
 
@@ -60,6 +85,11 @@ class SatQueryIntent(BaseModel):
     time_windows: TemporalComparison | list[TimeRange]
     modalities: list[Modality] = Field(min_length=1)
     task: QueryTask
+    #: An explicit NDWI threshold, when the request stated one ("NDWI above
+    #: 0.3"). Optional and additive: an intent without one behaves exactly as
+    #: before. It travels with the intent so it survives plan -> execute ->
+    #: analyse without a parallel request path.
+    ndwi_threshold: NdwiThreshold | None = None
 
     @field_validator("location_query", mode="before")
     @classmethod
