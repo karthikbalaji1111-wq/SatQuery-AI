@@ -100,6 +100,37 @@ RULES
 """
 
 
+def _intent_response_schema() -> types.Schema:
+    """SDK- and API-compatible schema for a :class:`SatQueryIntent`.
+
+    Derived from the existing contract - not hand-written - so it cannot drift
+    from what the parser will actually accept back. Built with the SDK's public
+    ``Schema.from_json_schema``, the same conversion the Phase 15 agent provider
+    uses, rather than handing the Pydantic model straight to the SDK.
+
+    That distinction is the whole point. ``SatQueryIntent.ndwi_threshold`` is an
+    ``NdwiThreshold``, which sets ``extra="forbid"``, so Pydantic emits
+    ``additionalProperties: false``. ``t_schema`` accepts that field and carries
+    it onto the wire, where ``generateContent`` rejects the entire request:
+
+        400 INVALID_ARGUMENT - Unknown name "additional_properties" at
+        'generation_config.response_schema.properties[5].value'
+
+    A schema that translates is therefore not necessarily a schema the API will
+    take, which is why the regression test asserts the SERIALIZED form.
+
+    This schema is deliberately only structurally representative - it describes
+    the shape the model should return and nothing more. It does NOT relax the
+    application contract: the response is still parsed through
+    ``SatQueryIntent``, so ``extra="forbid"`` still rejects an unexpected field
+    even though the request no longer advertises that rule.
+    """
+
+    return types.Schema.from_json_schema(
+        json_schema=types.JSONSchema(**SatQueryIntent.model_json_schema())
+    )
+
+
 class IntentParser(ABC):
     """Abstract translator from raw user text to :class:`SatQueryIntent`.
 
@@ -170,8 +201,7 @@ class GeminiIntentParser(IntentParser):
         return types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
             response_mime_type="application/json",
-            # Pass the EXISTING Pydantic model as the schema - no duplication.
-            response_schema=SatQueryIntent,
+            response_schema=_intent_response_schema(),
             temperature=0.0,
             candidate_count=1,
         )

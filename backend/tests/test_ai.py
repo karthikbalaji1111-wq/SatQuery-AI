@@ -29,6 +29,8 @@ from app.services.ai import (
 from app.services.query.schemas import SatQueryIntent, TimeRange
 from fastapi.testclient import TestClient
 from google.genai import errors as genai_errors
+from google.genai import types
+from pydantic import ValidationError
 
 PARSE_URL = "/api/v1/query/parse"
 
@@ -190,7 +192,16 @@ def test_gemini_parser_request_shape() -> None:
 
     config = capture["config"]
     assert config.response_mime_type == "application/json"
-    assert config.response_schema is SatQueryIntent  # existing model, not a copy
+    # NOT the raw Pydantic model. Passing it made the SDK emit
+    # ``additionalProperties`` (from NdwiThreshold's extra="forbid"), which
+    # generateContent rejects with 400. The schema is now derived from the same
+    # contract but converted into an API-compatible form; see
+    # ``_intent_response_schema``.
+    assert config.response_schema is not SatQueryIntent
+    assert isinstance(config.response_schema, types.Schema)
+    assert set(
+        config.response_schema.model_dump(mode="json", by_alias=True)["properties"]
+    ) == set(SatQueryIntent.model_fields)
 
     system = config.system_instruction
     for token in (
@@ -524,3 +535,146 @@ def test_an_unknown_operator_from_the_model_is_rejected() -> None:
 
     with pytest.raises(IntentParsingError):
         asyncio.run(parser.parse_intent("ndwi roughly 0.3"))
+
+
+# =========================================================================== #
+# The response schema must be accepted by the Gemini API, not merely by the SDK
+# =========================================================================== #
+#
+# A live 400 that the whole offline suite missed:
+#
+#   Invalid JSON payload received. Unknown name "additional_properties" at
+#   'generation_config.response_schema.properties[5].value': Cannot find field.
+#
+# ``NdwiThreshold`` sets ``extra="forbid"``, so Pydantic emits
+# ``additionalProperties: false``. ``t_schema`` ACCEPTS that and carries it onto
+# the wire, where generateContent rejects the entire request. Translation
+# succeeding therefore proves nothing - the Phase 15 Commit 4 lesson recurring
+# one layer further out - so these tests assert the SERIALIZED wire schema.
+#
+# The application contract is unchanged: ``extra="forbid"`` stays, and Pydantic
+# remains the authority on what is accepted back.
+
+#: Keys the Gemini generateContent API rejects outright, or that the Commit 4
+#: audit established it cannot express.
+GEMINI_REJECTED_SCHEMA_KEYS = (
+    "additionalProperties",
+    "additional_properties",
+    "discriminator",
+    "oneOf",
+    "one_of",
+    "$ref",
+    "$defs",
+    "allOf",
+    "patternProperties",
+)
+
+
+def wire_schema(schema: Any) -> dict[str, Any]:
+    """What is actually serialized onto the request, aliases included."""
+
+    return schema.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def find_keys(node: Any, names: tuple[str, ...], path: str = "$") -> list[str]:
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in names:
+                found.append(f"{path}.{key}")
+            found.extend(find_keys(value, names, f"{path}.{key}"))
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            found.extend(find_keys(item, names, f"{path}[{index}]"))
+    return found
+
+
+def test_the_parser_does_not_send_the_raw_pydantic_model() -> None:
+    """Passing the model let the SDK emit a field the API refuses."""
+
+    config = GeminiIntentParser(settings=Settings(gemini_api_key=FAKE_KEY))._build_config()
+
+    assert config.response_schema is not SatQueryIntent
+    assert isinstance(config.response_schema, types.Schema)
+
+
+def test_the_parser_schema_carries_no_gemini_rejected_keys() -> None:
+    config = GeminiIntentParser(settings=Settings(gemini_api_key=FAKE_KEY))._build_config()
+
+    offenders = find_keys(wire_schema(config.response_schema), GEMINI_REJECTED_SCHEMA_KEYS)
+    assert offenders == [], f"schema carries API-rejected keys: {offenders}"
+
+
+def test_the_raw_model_would_have_carried_the_rejected_key() -> None:
+    """Pins the actual defect: the old path really did emit it."""
+
+    from google.genai import _transformers
+
+    raw = wire_schema(_transformers.t_schema(None, SatQueryIntent))
+    assert "additionalProperties" in raw["properties"]["ndwi_threshold"]
+
+
+def test_the_parser_schema_preserves_the_intent_contract() -> None:
+    config = GeminiIntentParser(settings=Settings(gemini_api_key=FAKE_KEY))._build_config()
+    schema = wire_schema(config.response_schema)
+
+    assert set(schema["properties"]) == set(SatQueryIntent.model_fields)
+    assert set(schema["required"]) == {
+        "location_query",
+        "temporal_mode",
+        "time_windows",
+        "modalities",
+        "task",
+    }
+    assert schema["properties"]["task"]["enum"] == [
+        "visualize",
+        "change_detection",
+        "object_identification",
+    ]
+    assert schema["properties"]["modalities"]["items"]["enum"] == [
+        "sentinel-2-optical",
+        "sentinel-1-sar",
+    ]
+
+
+def test_the_optional_threshold_is_represented_correctly() -> None:
+    config = GeminiIntentParser(settings=Settings(gemini_api_key=FAKE_KEY))._build_config()
+    threshold = wire_schema(config.response_schema)["properties"]["ndwi_threshold"]
+
+    assert threshold["nullable"] is True  # optional, not required
+    assert threshold["type"].upper() == "OBJECT"
+    assert threshold["properties"]["operator"]["enum"] == ["gt", "gte", "lt", "lte"]
+    assert threshold["properties"]["value"]["minimum"] == -1.0
+    assert threshold["properties"]["value"]["maximum"] == 1.0
+    assert set(threshold["required"]) == {"operator", "value"}
+
+
+def test_pydantic_still_forbids_extra_fields_on_the_threshold() -> None:
+    """The wire schema is looser than the contract - deliberately.
+
+    The Gemini schema only has to be API-compatible and structurally
+    representative. What is ACCEPTED BACK is still decided by Pydantic, so
+    dropping ``additionalProperties`` from the request does not widen the
+    application contract by one field.
+    """
+
+    from app.services.query.schemas import NdwiThreshold
+
+    with pytest.raises(ValidationError):
+        NdwiThreshold.model_validate({"operator": "gt", "value": 0.3, "unit": "m"})
+
+
+def test_an_unexpected_threshold_field_from_the_model_is_rejected() -> None:
+    """End to end: a response carrying an extra key never becomes an intent."""
+
+    body = {
+        **MOCK_INTENT_JSON,
+        "ndwi_threshold": {"operator": "gt", "value": 0.3, "injected": "x"},
+    }
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(body), capture={}),
+    )
+
+    with pytest.raises(IntentParsingError):
+        asyncio.run(parser.parse_intent("ndwi above 0.3"))
