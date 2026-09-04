@@ -316,3 +316,147 @@ describe("App - NDWI overlay reaches the map", () => {
     expect(within(mapPanel).queryByText(/NDWI/i)).not.toBeInTheDocument();
   });
 });
+
+describe("App - temporal change overlay reaches the map", () => {
+  const CHANGE_OVERLAY = {
+    scene_id: "S2_TARGET",
+    window_label: "baseline→target",
+    media_type: "image/png",
+    image_base64: "Q0hBTkdF",
+    width: 2,
+    height: 2,
+    crs: "EPSG:32644",
+    transform: [10, 0, 399960, 0, -10, 1500000],
+    corners_wgs84: [
+      [80.1, 13.1],
+      [80.3, 13.101],
+      [80.301, 12.9],
+      [80.101, 12.899],
+    ],
+    value_min: -0.72,
+    value_max: 0.81,
+    valid_pixel_count: 33600,
+  };
+
+  function comparison(overlay: unknown) {
+    return {
+      first: {
+        window_label: "baseline",
+        scene_id: "S2_BASE",
+        acquired_at: null,
+        cloud_cover: null,
+        measurements: [],
+        transform: null,
+      },
+      second: {
+        window_label: "target",
+        scene_id: "S2_TARGET",
+        acquired_at: null,
+        cloud_cover: null,
+        measurements: [],
+        transform: null,
+      },
+      compatibility: {
+        same_modality: true,
+        temporal_separation_days: 189,
+        bbox_overlap: "full",
+        crs_match: "unknown",
+        resolution_match: "unknown",
+        processing_level_match: "same",
+        limitations: [],
+        co_registration_status: "not_evaluated",
+      },
+      differences: [],
+      change:
+        overlay === null
+          ? null
+          : {
+              baseline_scene_id: "S2_BASE",
+              target_scene_id: "S2_TARGET",
+              baseline_acquired_at: null,
+              target_acquired_at: null,
+              window_label: "baseline→target",
+              paired_valid_pixel_count: 33600,
+              change_mean: 0.118,
+              change_min: -0.72,
+              change_max: 0.81,
+              crs: "EPSG:32644",
+              transform: [10, 0, 399960, 0, -10, 1500000],
+              corners_wgs84: CHANGE_OVERLAY.corners_wgs84,
+              overlay,
+            },
+      warnings: [],
+    };
+  }
+
+  function analysisWith(change: unknown) {
+    return {
+      status: "ok",
+      task: "visualize",
+      answer: "Analysed.",
+      windows_considered: [],
+      warnings: [],
+      measurements: [],
+      ndwi_overlay: null,
+      spatial_measurement: null,
+      temporal_comparison: comparison(change),
+    };
+  }
+
+  const EXECUTION = {
+    plan: {
+      intent: {
+        location_query: "Chennai",
+        temporal_mode: "single",
+        time_windows: [{ start_date: "2024-07-01", end_date: "2024-07-01" }],
+        modalities: ["sentinel-2-optical"],
+        task: "visualize",
+      },
+      bbox: CHENNAI.bbox,
+    },
+    executed_modalities: ["sentinel-2-optical"],
+    skipped_modalities: [],
+    windows: [],
+    catalog: "https://example.test/v1",
+  };
+
+  async function runQuery(change: unknown) {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/query/execute": EXECUTION,
+      "/query/analyze": analysisWith(change),
+    });
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Place name"), {
+      target: { value: "Chennai" },
+    });
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+  }
+
+  it("passes a change overlay through App to the map panel", async () => {
+    await runQuery(CHANGE_OVERLAY);
+
+    const mapPanel = screen
+      .getByRole("heading", { name: "Map" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(within(mapPanel).getByText(/NDWI change/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("shows no change on the map when the grids were not comparable", async () => {
+    await runQuery(null);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+    const mapPanel = screen
+      .getByRole("heading", { name: "Map" })
+      .closest("section") as HTMLElement;
+    expect(within(mapPanel).queryByText(/NDWI change/i)).not.toBeInTheDocument();
+  });
+});

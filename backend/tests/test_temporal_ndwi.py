@@ -19,6 +19,7 @@ import dataclasses
 import pathlib
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -37,7 +38,10 @@ from app.services.analysis import service as service_mod
 from app.services.analysis.engines import (
     HIGH_CLOUD_COVER_PERCENT,
     MEAN_NDWI_DIFFERENCE,
+    NDWI_CHANGE_DISPLAY_RANGE,
     compare_ndwi_observations,
+    compute_ndwi_measurements,
+    compute_ndwi_temporal_change,
 )
 from app.services.analysis.schemas import (
     Measurement,
@@ -55,7 +59,7 @@ from app.services.query.schemas import (
     TimeRange,
 )
 from app.services.satellite import ImageryService
-from app.services.satellite.raster import BandWindow
+from app.services.satellite.raster import BandWindow, image_corners_wgs84
 from app.services.satellite.schemas import Scene
 from fastapi.testclient import TestClient
 from rasterio.io import MemoryFile
@@ -1165,3 +1169,514 @@ def test_each_observation_keeps_its_own_transform() -> None:
     assert comparison.second.transform == list(second_green.transform)[:6]
     assert comparison.first.transform != comparison.second.transform
     assert comparison.first.resolution != comparison.second.resolution
+
+
+# =========================================================================== #
+# Phase 17.3 - georeferenced multitemporal NDWI change
+# =========================================================================== #
+#
+# The first thing in SatQuery that compares two observations PIXEL BY PIXEL -
+# and therefore the first that must refuse to. Two scenes sharing a requested
+# bbox are not thereby on the same grid: each was reprojected and clamped on
+# its own, so subtracting them without checking would paint change wherever the
+# grids disagree.
+#
+# Compatibility is checked before any arithmetic, and a mismatch produces no
+# difference at all. Nothing is resampled: co-registration stays out of scope,
+# so the honest outcome for an incompatible pair is a refusal with a reason.
+
+
+def change_band(
+    values: list[list[float]],
+    *,
+    dtype: str = "uint16",
+    nodata: float | None = 0.0,
+    transform: Any = None,
+    crs: str | None = "EPSG:32644",
+) -> BandWindow:
+    array = np.asarray(values, dtype=dtype)
+    valid = np.isfinite(array) if np.issubdtype(array.dtype, np.floating) else (
+        np.ones(array.shape, dtype=bool)
+    )
+    if nodata is not None:
+        valid = valid & (array != nodata)
+    return BandWindow(
+        values=array,
+        valid=valid,
+        width=array.shape[1],
+        height=array.shape[0],
+        crs=crs,
+        transform=transform or from_origin(399960.0, 1500000.0, 10.0, 10.0),
+        resolution=10.0,
+        nodata=nodata,
+        window={
+            "col_off": 0,
+            "row_off": 0,
+            "width": array.shape[1],
+            "height": array.shape[0],
+        },
+        source_shape=[array.shape[0], array.shape[1]],
+    )
+
+
+def change_of(
+    base_g: list[list[float]],
+    base_n: list[list[float]],
+    targ_g: list[list[float]],
+    targ_n: list[list[float]],
+    **kwargs: Any,
+) -> Any:
+    bands = {k: kwargs.pop(k, None) for k in ("baseline_kwargs", "target_kwargs")}
+    bk = bands["baseline_kwargs"] or {}
+    tk = bands["target_kwargs"] or {}
+    return compute_ndwi_temporal_change(
+        baseline_green=change_band(base_g, **bk),
+        baseline_nir=change_band(base_n, **bk),
+        target_green=change_band(targ_g, **tk),
+        target_nir=change_band(targ_n, **tk),
+        baseline_scene_id=kwargs.pop("baseline_scene_id", "scene-a"),
+        target_scene_id=kwargs.pop("target_scene_id", "scene-b"),
+        baseline_acquired_at=kwargs.pop("baseline_acquired_at", None),
+        target_acquired_at=kwargs.pop("target_acquired_at", None),
+        window_label=kwargs.pop("window_label", "baseline→target"),
+    )
+
+
+def decode_change(overlay: Any) -> np.ndarray:
+    import base64
+    import io
+
+    from PIL import Image
+
+    raw = base64.b64decode(overlay.image_base64)
+    return np.array(Image.open(io.BytesIO(raw)).convert("RGBA"))
+
+
+# NDWI 0.5 everywhere in the baseline; the target varies.
+#   baseline: (3-1)/4 = 0.5
+BASE_G, BASE_N = [[3, 3], [3, 3]], [[1, 1], [1, 1]]
+
+
+# --- 1-4. the arithmetic --------------------------------------------------- #
+
+
+def test_change_is_target_minus_baseline() -> None:
+    # target NDWI: (9-1)/10 = 0.8 ; change = 0.8 - 0.5 = +0.3
+    c = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+
+    assert c is not None
+    assert c.change_mean == pytest.approx(0.3)
+
+
+def test_a_rising_index_is_positive() -> None:
+    c = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+    assert c is not None and c.change_mean > 0
+
+
+def test_a_falling_index_is_negative() -> None:
+    # target NDWI: (1-3)/4 = -0.5 ; change = -0.5 - 0.5 = -1.0
+    c = change_of(BASE_G, BASE_N, [[1, 1], [1, 1]], [[3, 3], [3, 3]])
+
+    assert c is not None
+    assert c.change_mean == pytest.approx(-1.0)
+
+
+def test_an_unchanged_index_is_zero() -> None:
+    c = change_of(BASE_G, BASE_N, BASE_G, BASE_N)
+
+    assert c is not None
+    assert c.change_mean == 0.0
+    assert c.change_min == 0.0
+    assert c.change_max == 0.0
+
+
+def test_min_and_max_span_the_actual_change() -> None:
+    # per-pixel targets: 0.8, 0.5, -0.5, 0.5 -> changes +0.3, 0.0, -1.0, 0.0
+    c = change_of(BASE_G, BASE_N, [[9, 3], [1, 3]], [[1, 1], [3, 1]])
+
+    assert c is not None
+    assert c.change_max == pytest.approx(0.3)
+    assert c.change_min == pytest.approx(-1.0)
+    assert c.change_mean == pytest.approx((0.3 + 0.0 - 1.0 + 0.0) / 4)
+
+
+# --- 5-10. paired validity ------------------------------------------------- #
+
+
+def test_only_pixels_valid_in_both_observations_are_paired() -> None:
+    """A pixel measured once is not evidence of change."""
+
+    c = change_of([[3, 0], [3, 3]], [[1, 1], [1, 1]], [[9, 9], [0, 9]], [[1, 1], [1, 1]])
+
+    assert c is not None
+    assert c.paired_valid_pixel_count == 2  # one nodata each side
+
+
+def test_nodata_is_excluded_from_the_pairing() -> None:
+    c = change_of([[3, 0]], [[1, 1]], [[9, 9]], [[1, 1]])
+
+    assert c is not None
+    assert c.paired_valid_pixel_count == 1
+
+
+def test_non_finite_samples_are_excluded() -> None:
+    c = compute_ndwi_temporal_change(
+        baseline_green=change_band(
+            [[3.0, float("nan"), float("inf")]], dtype="float32", nodata=None
+        ),
+        baseline_nir=change_band([[1.0, 1.0, 1.0]], dtype="float32", nodata=None),
+        target_green=change_band([[9.0, 9.0, 9.0]], dtype="float32", nodata=None),
+        target_nir=change_band([[1.0, 1.0, 1.0]], dtype="float32", nodata=None),
+        baseline_scene_id="a",
+        target_scene_id="b",
+        baseline_acquired_at=None,
+        target_acquired_at=None,
+        window_label="w",
+    )
+
+    assert c is not None
+    assert c.paired_valid_pixel_count == 1
+
+
+def test_a_zero_denominator_pixel_is_excluded() -> None:
+    c = compute_ndwi_temporal_change(
+        baseline_green=change_band([[-1.0, 3.0]], dtype="float32", nodata=None),
+        baseline_nir=change_band([[1.0, 1.0]], dtype="float32", nodata=None),
+        target_green=change_band([[9.0, 9.0]], dtype="float32", nodata=None),
+        target_nir=change_band([[1.0, 1.0]], dtype="float32", nodata=None),
+        baseline_scene_id="a",
+        target_scene_id="b",
+        baseline_acquired_at=None,
+        target_acquired_at=None,
+        window_label="w",
+    )
+
+    assert c is not None
+    assert c.paired_valid_pixel_count == 1
+
+
+def test_no_paired_pixel_yields_no_change_result() -> None:
+    """Nothing comparable means no comparison - not a zero change."""
+
+    # One pixel valid on both sides -> a comparison exists.
+    assert change_of([[3, 3]], [[1, 1]], [[0, 9]], [[1, 1]]) is not None
+    # Disjoint validity: each pixel measured once, so nothing is comparable.
+    assert change_of([[3, 0]], [[1, 1]], [[0, 9]], [[1, 1]]) is None
+    # Nothing valid at all.
+    assert change_of([[0, 0]], [[1, 1]], [[9, 9]], [[1, 1]]) is None
+
+
+# --- 11-15. grid compatibility, checked before any subtraction ------------- #
+
+
+def test_matching_grids_are_compared() -> None:
+    c = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+    assert c is not None and c.overlay is not None
+
+
+def test_mismatched_dimensions_are_refused() -> None:
+    assert change_of(BASE_G, BASE_N, [[9, 9]], [[1, 1]]) is None
+
+
+def test_a_mismatched_crs_is_refused() -> None:
+    assert (
+        change_of(
+            BASE_G,
+            BASE_N,
+            [[9, 9], [9, 9]],
+            [[1, 1], [1, 1]],
+            target_kwargs={"crs": "EPSG:32645"},
+        )
+        is None
+    )
+
+
+def test_a_mismatched_resolution_is_refused() -> None:
+    coarse = from_origin(399960.0, 1500000.0, 20.0, 20.0)
+    assert (
+        change_of(
+            BASE_G,
+            BASE_N,
+            [[9, 9], [9, 9]],
+            [[1, 1], [1, 1]],
+            target_kwargs={"transform": coarse},
+        )
+        is None
+    )
+
+
+def test_a_shifted_affine_is_refused() -> None:
+    """Same size, same CRS, same resolution - different ground. Still refused."""
+
+    shifted = from_origin(399970.0, 1500000.0, 10.0, 10.0)
+    assert (
+        change_of(
+            BASE_G,
+            BASE_N,
+            [[9, 9], [9, 9]],
+            [[1, 1], [1, 1]],
+            target_kwargs={"transform": shifted},
+        )
+        is None
+    )
+
+
+def test_an_absent_crs_is_refused() -> None:
+    assert (
+        change_of(
+            BASE_G,
+            BASE_N,
+            [[9, 9], [9, 9]],
+            [[1, 1], [1, 1]],
+            baseline_kwargs={"crs": None},
+            target_kwargs={"crs": None},
+        )
+        is None
+    )
+
+
+# --- 16-18. provenance and georeferencing ---------------------------------- #
+
+
+def test_the_change_carries_both_scenes_and_their_dates() -> None:
+    base_at = datetime(2025, 1, 4, 5, 0, tzinfo=UTC)
+    targ_at = datetime(2025, 7, 12, 5, 0, tzinfo=UTC)
+    c = change_of(
+        BASE_G,
+        BASE_N,
+        [[9, 9], [9, 9]],
+        [[1, 1], [1, 1]],
+        baseline_scene_id="S2_BASE",
+        target_scene_id="S2_TARGET",
+        baseline_acquired_at=base_at,
+        target_acquired_at=targ_at,
+        window_label="baseline→target",
+    )
+
+    assert c is not None
+    assert (c.baseline_scene_id, c.target_scene_id) == ("S2_BASE", "S2_TARGET")
+    assert c.baseline_acquired_at == base_at
+    assert c.target_acquired_at == targ_at
+    assert c.window_label == "baseline→target"
+
+
+def test_the_transform_is_preserved_exactly() -> None:
+    c = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+
+    assert c is not None
+    assert c.crs == "EPSG:32644"
+    assert c.transform == [10.0, 0.0, 399960.0, 0.0, -10.0, 1500000.0]
+
+
+def test_corners_come_from_the_authoritative_transform() -> None:
+    c = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+
+    assert c is not None
+    assert c.corners_wgs84 == image_corners_wgs84(
+        from_origin(399960.0, 1500000.0, 10.0, 10.0),
+        width=2,
+        height=2,
+        crs="EPSG:32644",
+    )
+
+
+# --- 19-22. the overlay ---------------------------------------------------- #
+
+
+def test_the_overlay_matches_the_compared_grid() -> None:
+    c = change_of(
+        [[3, 3, 3]], [[1, 1, 1]], [[9, 9, 9]], [[1, 1, 1]]
+    )
+
+    assert c is not None and c.overlay is not None
+    assert (c.overlay.width, c.overlay.height) == (3, 1)
+    assert decode_change(c.overlay).shape == (1, 3, 4)
+
+
+def test_unpaired_pixels_are_transparent() -> None:
+    c = change_of([[3, 0]], [[1, 1]], [[9, 9]], [[1, 1]])
+
+    assert c is not None and c.overlay is not None
+    rgba = decode_change(c.overlay)
+    assert rgba[0, 1, 3] == 0
+    assert rgba[0, 0, 3] > 0
+
+
+def test_zero_change_is_visually_neutral_and_signs_differ() -> None:
+    """A diverging ramp: no change reads as neutral, +/- are distinguishable."""
+
+    c = change_of([[3, 3, 3]], [[1, 1, 1]], [[9, 3, 1]], [[1, 1, 3]])
+
+    assert c is not None and c.overlay is not None
+    rgba = decode_change(c.overlay)
+    rise, none, fall = rgba[0, 0], rgba[0, 1], rgba[0, 2]
+
+    assert tuple(rise[:3]) != tuple(fall[:3])
+    assert abs(int(none[0]) - int(none[2])) < 40  # neutral: red ~= blue
+    assert int(rise[2]) > int(none[2])  # rising index -> bluer
+    assert int(fall[0]) > int(none[0])  # falling index -> redder
+
+
+def test_the_display_range_is_fixed_not_per_scene() -> None:
+    """Identical change must colour identically regardless of the other pixels."""
+
+    small = change_of([[3, 3]], [[1, 1]], [[9, 3]], [[1, 1]])
+    large = change_of([[3, 3]], [[1, 1]], [[9, 1]], [[1, 3]])
+
+    assert small is not None and large is not None
+    assert small.overlay is not None and large.overlay is not None
+    # Pixel 0 is +0.3 in both; a per-scene stretch would colour them differently.
+    assert tuple(decode_change(small.overlay)[0, 0]) == tuple(
+        decode_change(large.overlay)[0, 0]
+    )
+
+
+def test_the_change_display_range_is_symmetric_about_zero() -> None:
+    assert NDWI_CHANGE_DISPLAY_RANGE == (-1.0, 1.0)
+
+
+# --- 23-24. determinism and non-interference ------------------------------- #
+
+
+def test_the_change_is_deterministic() -> None:
+    first = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+    second = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+
+    assert first is not None and second is not None
+    assert first.model_dump() == second.model_dump()
+
+
+def test_rendering_does_not_disturb_the_per_observation_statistics() -> None:
+    base_g, base_n = change_band(BASE_G), change_band(BASE_N)
+    before = named(compute_ndwi_measurements(base_g, base_n))
+    change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+    after = named(compute_ndwi_measurements(base_g, base_n))
+
+    assert before == after
+
+
+def test_the_change_contract_carries_no_raster_arrays() -> None:
+    c = change_of(BASE_G, BASE_N, [[9, 9], [9, 9]], [[1, 1], [1, 1]])
+
+    assert c is not None
+    dumped = c.model_dump()
+    assert not any(isinstance(v, (list, bytes)) and len(str(v)) > 5000 for v in dumped.values())
+
+
+# --- service wiring: the change rides the existing temporal reads ---------- #
+
+
+def analyze_change(
+    execution: QueryExecutionResult, imagery: FakeImageryService | None = None
+) -> tuple[AnalysisResult, FakeImageryService]:
+    return analyze_temporal(execution, imagery)
+
+
+def paired_imagery(
+    *, target_transform: Any = None, target_crs: str = "EPSG:32644"
+) -> FakeImageryService:
+    """scene-a NDWI 0.5 everywhere; scene-b NDWI 0.8 -> change +0.3."""
+
+    tk: dict[str, Any] = {"crs": target_crs}
+    if target_transform is not None:
+        tk["transform"] = target_transform
+    return FakeImageryService(
+        bands={
+            "scene-a": {
+                "green": change_band([[3, 3]]),
+                "nir": change_band([[1, 1]]),
+            },
+            "scene-b": {
+                "green": change_band([[9, 9]], **tk),
+                "nir": change_band([[1, 1]], **tk),
+            },
+        }
+    )
+
+
+def test_a_compatible_pair_produces_the_change() -> None:
+    result, _ = analyze_change(two_window_execution(), paired_imagery())
+    comparison = result.temporal_comparison
+
+    assert comparison is not None
+    assert comparison.change is not None
+    assert comparison.change.change_mean == pytest.approx(0.3)
+    assert comparison.change.paired_valid_pixel_count == 2
+
+
+def test_the_change_uses_the_same_four_band_reads() -> None:
+    """No second retrieval path: still two reads per observation."""
+
+    _, imagery = analyze_change(two_window_execution(), paired_imagery())
+
+    assert len(imagery.calls) == 4
+    assert [c["asset"] for c in imagery.calls] == ["green", "nir", "green", "nir"]
+
+
+def test_an_incompatible_grid_produces_no_change_but_keeps_the_statistics() -> None:
+    shifted = from_origin(399970.0, 1500000.0, 10.0, 10.0)
+    result, _ = analyze_change(
+        two_window_execution(), paired_imagery(target_transform=shifted)
+    )
+    comparison = result.temporal_comparison
+
+    assert comparison is not None
+    assert comparison.change is None
+    # The per-observation statistics survive intact.
+    assert named(comparison.first.measurements)["ndwi_mean"] == pytest.approx(0.5)
+    assert named(comparison.second.measurements)["ndwi_mean"] == pytest.approx(0.8)
+
+
+def test_an_incompatible_grid_explains_itself() -> None:
+    shifted = from_origin(399970.0, 1500000.0, 10.0, 10.0)
+    result, _ = analyze_change(
+        two_window_execution(), paired_imagery(target_transform=shifted)
+    )
+    comparison = result.temporal_comparison
+
+    assert comparison is not None
+    text = " ".join(comparison.warnings).lower()
+    # Says what was wrong...
+    assert "grid" in text or "transform" in text
+    # ...and explicitly denies the thing a reader might otherwise assume.
+    assert "nothing was resampled" in text
+    assert "not co-registered" in text
+
+
+def test_a_mismatched_crs_explains_itself() -> None:
+    result, _ = analyze_change(
+        two_window_execution(), paired_imagery(target_crs="EPSG:32645")
+    )
+    comparison = result.temporal_comparison
+
+    assert comparison is not None
+    assert comparison.change is None
+    assert any("crs" in w.lower() for w in comparison.warnings)
+
+
+def test_the_change_carries_both_scenes() -> None:
+    result, _ = analyze_change(two_window_execution(), paired_imagery())
+    comparison = result.temporal_comparison
+
+    assert comparison is not None and comparison.change is not None
+    assert comparison.change.baseline_scene_id == "scene-a"
+    assert comparison.change.target_scene_id == "scene-b"
+
+
+def test_the_aggregate_difference_is_unchanged_by_the_paired_change() -> None:
+    """Phase 14's statistic still means what it meant; the two coexist."""
+
+    result, _ = analyze_change(two_window_execution(), paired_imagery())
+    comparison = result.temporal_comparison
+
+    assert comparison is not None
+    assert named(comparison.differences)[MEAN_NDWI_DIFFERENCE] == pytest.approx(0.3)
+
+
+def test_the_comparison_serializes_with_the_change() -> None:
+    result, _ = analyze_change(two_window_execution(), paired_imagery())
+    restored = AnalysisResult.model_validate_json(result.model_dump_json())
+
+    assert restored.temporal_comparison is not None
+    assert restored.temporal_comparison.change is not None
+    assert restored.temporal_comparison.change.corners_wgs84 is not None

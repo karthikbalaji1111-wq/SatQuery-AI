@@ -184,6 +184,51 @@ class NdwiOverlay(BaseModel):
     valid_pixel_count: int
 
 
+class NdwiTemporalChange(BaseModel):
+    """Paired-pixel NDWI change between a baseline and a target observation.
+
+    The first result in SatQuery derived by comparing two observations PIXEL BY
+    PIXEL, and therefore the first that has to refuse to. Two scenes sharing a
+    requested bbox are not thereby on the same grid: each was reprojected and
+    clamped on its own. This model exists only when the two grids were verified
+    identical - same size, same CRS, same affine - so every difference in it is
+    between two measurements of the same ground.
+
+    ``change = target_NDWI - baseline_NDWI``. Positive means the index rose,
+    negative that it fell. It is an INDEX change, not water gained or lost:
+    nothing here classifies water, and the statistics are computed only over
+    pixels valid in BOTH observations.
+
+    Nothing is resampled or co-registered. An incompatible pair produces no
+    instance of this model at all, with the reason reported as a warning, which
+    is the honest outcome while co-registration remains out of scope.
+
+    The per-observation statistics stay in ``TemporalIndexComparison.first`` and
+    ``.second`` and are not copied here.
+    """
+
+    baseline_scene_id: str
+    target_scene_id: str
+    baseline_acquired_at: datetime | None = None
+    target_acquired_at: datetime | None = None
+    window_label: str
+
+    #: Pixels valid in BOTH observations - the denominator for every statistic
+    #: below. A pixel measured only once is not evidence of change.
+    paired_valid_pixel_count: int = Field(gt=0)
+    change_mean: float
+    change_min: float
+    change_max: float
+
+    #: The shared grid the comparison was performed on.
+    crs: str
+    transform: list[float] = Field(min_length=6, max_length=6)
+    corners_wgs84: list[list[float]] = Field(min_length=4, max_length=4)
+
+    #: The difference rendered as a georeferenced PNG, when it could be drawn.
+    overlay: NdwiOverlay | None = None
+
+
 class TemporalIndexComparison(BaseModel):
     """Two independently indexed observations, reported side by side.
 
@@ -204,6 +249,9 @@ class TemporalIndexComparison(BaseModel):
     second: ObservationIndexResult
     compatibility: CompatibilityReport
     differences: list[Measurement] = Field(default_factory=list)
+    #: Paired-pixel change, present ONLY when the two grids were verified
+    #: identical. ``None`` when they were not - see ``warnings`` for why.
+    change: NdwiTemporalChange | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
