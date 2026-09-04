@@ -4,6 +4,8 @@ import { Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
+  CHANGE_LAYER_ID,
+  CHANGE_SOURCE_ID,
   footprintExtent,
   isValidFootprint,
   NDWI_LAYER_ID,
@@ -96,6 +98,8 @@ interface MapPanelProps {
   imagery?: MapImagery | null;
   /** The NDWI raster to draw over it, or `null` for none. */
   ndwi?: MapNdwi | null;
+  /** The temporal NDWI change raster, or `null` for none. */
+  change?: MapNdwi | null;
   /** Injected in tests; jsdom has no WebGL, so the real map cannot be built. */
   createMap?: MapFactory;
 }
@@ -117,6 +121,7 @@ interface MapPanelProps {
 export function MapPanel({
   imagery = null,
   ndwi = null,
+  change = null,
   createMap,
 }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -155,6 +160,7 @@ export function MapPanel({
 
   const hasFootprint = isValidFootprint(imagery?.corners_wgs84);
   const hasNdwiFootprint = isValidFootprint(ndwi?.corners_wgs84);
+  const hasChangeFootprint = isValidFootprint(change?.corners_wgs84);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -165,22 +171,28 @@ export function MapPanel({
       layerId: SATELLITE_LAYER_ID,
       raster: imagery,
     });
-    // NDWI goes on last, so it draws above the true-colour image.
+    // NDWI goes on above the true-colour image...
     const ndwiCorners = syncImageOverlay(map, {
       sourceId: NDWI_SOURCE_ID,
       layerId: NDWI_LAYER_ID,
       raster: ndwi,
+    });
+    // ...and the temporal change above that, being the most derived result.
+    const changeCorners = syncImageOverlay(map, {
+      sourceId: CHANGE_SOURCE_ID,
+      layerId: CHANGE_LAYER_ID,
+      raster: change,
     });
 
     // Framing only - without this a small AOI is a few pixels at the initial
     // zoom and reads as "nothing rendered". Positions still come entirely from
     // the corners; this only moves the camera. The index wins when both are
     // present, because that is what the user asked to look at.
-    const frameTo = ndwiCorners ?? rgbCorners;
+    const frameTo = changeCorners ?? ndwiCorners ?? rgbCorners;
     if (frameTo) {
       map.fitBounds(footprintExtent(frameTo), { padding: 24, duration: 0 });
     }
-  }, [imagery, ndwi, ready]);
+  }, [imagery, ndwi, change, ready]);
 
   return (
     <section className="panel" aria-labelledby="map-heading">
@@ -193,6 +205,8 @@ export function MapPanel({
       <MapStatus
         imagery={imagery}
         ndwi={ndwi}
+        change={change}
+        hasChangeFootprint={hasChangeFootprint}
         hasFootprint={hasFootprint}
         hasNdwiFootprint={hasNdwiFootprint}
         unavailable={unavailable}
@@ -205,14 +219,18 @@ export function MapPanel({
 function MapStatus({
   imagery,
   ndwi,
+  change,
   hasFootprint,
   hasNdwiFootprint,
+  hasChangeFootprint,
   unavailable,
 }: {
   imagery: MapImagery | null;
   ndwi: MapNdwi | null;
+  change: MapNdwi | null;
   hasFootprint: boolean;
   hasNdwiFootprint: boolean;
+  hasChangeFootprint: boolean;
   unavailable: boolean;
 }) {
   if (unavailable) {
@@ -220,11 +238,31 @@ function MapStatus({
       <p className="hint" role="status">
         The map could not be started in this browser, which needs WebGL2.
         Everything else on this page still works.
-        {ndwi
-          ? ` An NDWI result for scene ${ndwi.scene_id} was produced but cannot be drawn here.`
-          : imagery
-            ? ` Scene ${imagery.scene_id} was retrieved but cannot be drawn here.`
-            : ""}
+        {change
+          ? ` An NDWI change result for scene ${change.scene_id} was produced but cannot be drawn here.`
+          : ndwi
+            ? ` An NDWI result for scene ${ndwi.scene_id} was produced but cannot be drawn here.`
+            : imagery
+              ? ` Scene ${imagery.scene_id} was retrieved but cannot be drawn here.`
+              : ""}
+      </p>
+    );
+  }
+  if (hasChangeFootprint && change) {
+    return (
+      <p className="hint">
+        Showing NDWI change (target minus baseline) for scene{" "}
+        {change.scene_id}. Colour maps the index difference only - it is not a
+        map of water gained or lost. Pixels not measured in both observations
+        are transparent.
+      </p>
+    );
+  }
+  if (change && !hasChangeFootprint) {
+    return (
+      <p className="hint" role="status">
+        An NDWI change result was produced but has no usable geographic
+        footprint, so it is not shown on the map.
       </p>
     );
   }

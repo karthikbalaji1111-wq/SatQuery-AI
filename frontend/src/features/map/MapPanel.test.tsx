@@ -2,6 +2,8 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CHANGE_LAYER_ID,
+  CHANGE_SOURCE_ID,
   NDWI_LAYER_ID,
   NDWI_SOURCE_ID,
   SATELLITE_LAYER_ID,
@@ -625,5 +627,166 @@ describe("MapPanel NDWI overlay", () => {
   it("names the NDWI scene in the status line", () => {
     renderWith({ ndwi: ndwi() });
     expect(screen.getByText(/NDWI/i)).toBeInTheDocument();
+  });
+});
+
+// =========================================================================== //
+// Phase 17.3 - the temporal NDWI change overlay
+// =========================================================================== //
+//
+// A third raster on the same map, through the same shared primitive. It is a
+// different grid again, so it carries and is placed by its own corners.
+
+const CHANGE_CORNERS: number[][] = [
+  [80.1, 13.1],
+  [80.3, 13.101],
+  [80.301, 12.9],
+  [80.101, 12.899],
+];
+
+function change(overrides: Partial<MapNdwi> = {}): MapNdwi {
+  return {
+    scene_id: "S2B_TARGET",
+    media_type: "image/png",
+    image_base64: "Q0hBTkdF",
+    corners_wgs84: CHANGE_CORNERS,
+    ...overrides,
+  };
+}
+
+function renderAll(props: {
+  imagery?: MapImagery | null;
+  ndwi?: MapNdwi | null;
+  change?: MapNdwi | null;
+}) {
+  const created: FakeMap[] = [];
+  const createMap = vi.fn(() => {
+    const map = new FakeMap();
+    created.push(map);
+    return map;
+  });
+  render(
+    <MapPanel
+      imagery={props.imagery ?? null}
+      ndwi={props.ndwi ?? null}
+      change={props.change ?? null}
+      createMap={createMap}
+    />,
+  );
+  act(() => created.forEach((m) => m.emit("load")));
+  return { created, createMap };
+}
+
+describe("MapPanel temporal change overlay", () => {
+  it("adds exactly one change source and layer", () => {
+    const { created } = renderAll({ change: change() });
+    const map = created[0];
+
+    expect(map.getSource(CHANGE_SOURCE_ID)).toBeDefined();
+    expect(map.getLayer(CHANGE_LAYER_ID)).toBeDefined();
+    expect(map.sources.size).toBe(1);
+  });
+
+  it("passes the change corners through unchanged", () => {
+    const { created } = renderAll({ change: change() });
+    const source = created[0].getSource(CHANGE_SOURCE_ID) as {
+      coordinates: number[][];
+      url: string;
+    };
+
+    expect(source.coordinates).toEqual(CHANGE_CORNERS);
+    expect(source.url).toBe("data:image/png;base64,Q0hBTkdF");
+  });
+
+  it("removes the change overlay when it becomes null", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    const { rerender } = render(
+      <MapPanel imagery={null} ndwi={null} change={change()} createMap={createMap} />,
+    );
+    act(() => created.forEach((m) => m.emit("load")));
+    rerender(
+      <MapPanel imagery={null} ndwi={null} change={null} createMap={createMap} />,
+    );
+
+    expect(created[0].getSource(CHANGE_SOURCE_ID)).toBeUndefined();
+    expect(created[0].sources.size).toBe(0);
+  });
+
+  it("replaces rather than stacks a change overlay", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    const { rerender } = render(
+      <MapPanel imagery={null} ndwi={null} change={change()} createMap={createMap} />,
+    );
+    act(() => created.forEach((m) => m.emit("load")));
+    rerender(
+      <MapPanel
+        imagery={null}
+        ndwi={null}
+        change={change({ image_base64: "TkVX" })}
+        createMap={createMap}
+      />,
+    );
+
+    expect(created[0].sources.size).toBe(1);
+    expect(created[0].calls).toContain(`removeLayer:${CHANGE_LAYER_ID}`);
+    expect((created[0].getSource(CHANGE_SOURCE_ID) as { url: string }).url).toBe(
+      "data:image/png;base64,TkVX",
+    );
+  });
+
+  it("coexists with RGB, each on its own footprint", () => {
+    const { created } = renderAll({ imagery: imagery(), change: change() });
+    const map = created[0];
+
+    expect(map.sources.size).toBe(2);
+    expect(
+      (map.getSource(SATELLITE_SOURCE_ID) as { coordinates: number[][] }).coordinates,
+    ).toEqual(CORNERS);
+    expect(
+      (map.getSource(CHANGE_SOURCE_ID) as { coordinates: number[][] }).coordinates,
+    ).toEqual(CHANGE_CORNERS);
+  });
+
+  it("frames to the change footprint when it is present", () => {
+    const { created } = renderAll({
+      imagery: imagery(),
+      ndwi: ndwi(),
+      change: change(),
+    });
+
+    expect(created[0].fitBoundsCalls.at(-1)?.bounds).toEqual([
+      [80.1, 12.899],
+      [80.301, 13.101],
+    ]);
+  });
+
+  it("rejects a malformed change footprint without touching the others", () => {
+    const { created } = renderAll({
+      imagery: imagery(),
+      change: change({ corners_wgs84: [[181, 13], [80, 13], [80, 12], [79, 12]] }),
+    });
+
+    expect(created[0].getSource(CHANGE_SOURCE_ID)).toBeUndefined();
+    expect(created[0].getSource(SATELLITE_SOURCE_ID)).toBeDefined();
+  });
+
+  it("leaves the single-scene NDWI overlay unchanged", () => {
+    const { created } = renderAll({ ndwi: ndwi(), change: change() });
+    const map = created[0];
+
+    expect(map.getSource(NDWI_SOURCE_ID)).toBeDefined();
+    expect(
+      (map.getSource(NDWI_SOURCE_ID) as { coordinates: number[][] }).coordinates,
+    ).toEqual(NDWI_CORNERS);
   });
 });

@@ -16,6 +16,11 @@ export const SATELLITE_LAYER_ID = "satellite-image-layer";
 export const NDWI_SOURCE_ID = "ndwi-image";
 export const NDWI_LAYER_ID = "ndwi-image-layer";
 
+/** Ids of the temporal NDWI change overlay - again its own source, because it
+ * is a third raster on a third grid with its own footprint. */
+export const CHANGE_SOURCE_ID = "ndwi-change-image";
+export const CHANGE_LAYER_ID = "ndwi-change-image-layer";
+
 /**
  * The imagery the map can draw. A structural subset of `ImageryResponse`: the
  * picture and its footprint, and nothing else.

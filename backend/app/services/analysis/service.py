@@ -33,8 +33,10 @@ from fastapi.concurrency import run_in_threadpool
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.services.analysis.engines import (
+    _grids_are_comparable,
     compare_ndwi_observations,
     compute_ndwi_measurements,
+    compute_ndwi_temporal_change,
     compute_ndwi_threshold_measurement,
     render_ndwi_overlay,
 )
@@ -60,6 +62,7 @@ from app.services.query.schemas import (
     QueryTask,
 )
 from app.services.satellite import ImageryService
+from app.services.satellite.raster import BandWindow
 
 logger = get_logger("analysis")
 
@@ -330,12 +333,16 @@ class AnalysisService(DomainService):
 
     async def _observation_index(
         self, observation: Observation, bbox: BoundingBox
-    ) -> ObservationIndexResult:
+    ) -> tuple[ObservationIndexResult, BandWindow, BandWindow]:
         """Index ONE observation on its own pixels. Two reads, no comparison.
 
         Uses the unchanged ``ImageryService.read_band`` path - raw values at
         native resolution, never the display path. The collection comes straight
         off the acquired scene.
+
+        The two band windows are returned alongside the result so a paired
+        comparison can reuse them. They are already in memory; re-reading them
+        would be a second retrieval path for the same pixels.
         """
 
         green = await run_in_threadpool(
@@ -352,7 +359,7 @@ class AnalysisService(DomainService):
             asset=_NDWI_NIR_ASSET,
             collection=observation.collection,
         )
-        return ObservationIndexResult(
+        result = ObservationIndexResult(
             window_label=observation.window_label,
             scene_id=observation.scene_id,
             acquired_at=observation.acquired_at,
@@ -369,6 +376,7 @@ class AnalysisService(DomainService):
             # through unchanged - not reconstructed from the plan bbox.
             transform=list(green.transform)[:6],
         )
+        return result, green, nir
 
     async def _temporal_ndwi(
         self, execution: QueryExecutionResult
@@ -415,8 +423,12 @@ class AnalysisService(DomainService):
 
         bbox = execution.plan.bbox
         try:
-            first = await self._observation_index(pair.first, bbox)
-            second = await self._observation_index(pair.second, bbox)
+            first, first_green, first_nir = await self._observation_index(
+                pair.first, bbox
+            )
+            second, second_green, second_nir = await self._observation_index(
+                pair.second, bbox
+            )
         except AppError as exc:
             logger.info(
                 "Temporal NDWI unavailable for pair %s/%s [%s]: %s",
@@ -436,12 +448,46 @@ class AnalysisService(DomainService):
         differences, comparison_warnings = compare_ndwi_observations(
             first=first, second=second, compatibility=compatibility
         )
+
+        # Paired-pixel change, on the bands already read. The engine verifies
+        # the two grids are identical and returns None when they are not; this
+        # method never resamples to force a comparison.
+        incomparable = _grids_are_comparable(first_green, second_green)
+        change = (
+            compute_ndwi_temporal_change(
+                baseline_green=first_green,
+                baseline_nir=first_nir,
+                target_green=second_green,
+                target_nir=second_nir,
+                baseline_scene_id=first.scene_id,
+                target_scene_id=second.scene_id,
+                baseline_acquired_at=first.acquired_at,
+                target_acquired_at=second.acquired_at,
+                window_label=f"{first.window_label}\u2192{second.window_label}",
+            )
+            if incomparable is None
+            else None
+        )
+        if incomparable is not None:
+            comparison_warnings.append(
+                "Per-pixel NDWI change was not computed because "
+                f"{incomparable}. The observations are NOT co-registered and "
+                "nothing was resampled onto a shared grid, so the aggregate "
+                "statistics above remain the only comparison available."
+            )
+        elif change is None:
+            comparison_warnings.append(
+                "Per-pixel NDWI change was not computed because no pixel was "
+                "valid in both observations."
+            )
+
         return (
             TemporalIndexComparison(
                 first=first,
                 second=second,
                 compatibility=compatibility,
                 differences=differences,
+                change=change,
                 warnings=comparison_warnings,
             ),
             warnings,

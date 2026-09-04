@@ -18,6 +18,7 @@ import type {
   Modality,
   NdwiComparison,
   NdwiOverlay,
+  NdwiTemporalChange,
   SpatialMeasurement,
   QueryExecutionResult,
   QueryTask,
@@ -154,9 +155,18 @@ interface QueryPanelProps {
    * already made, travelling upward - never a second fetch.
    */
   onNdwi?: (overlay: NdwiOverlay | null) => void;
+  /**
+   * Called with the temporal NDWI change overlay a query produced, or `null`
+   * when the grids were not comparable and nothing was subtracted.
+   */
+  onChange?: (overlay: NdwiOverlay | null) => void;
 }
 
-export function QueryPanel({ onImagery, onNdwi }: QueryPanelProps = {}) {
+export function QueryPanel({
+  onImagery,
+  onNdwi,
+  onChange,
+}: QueryPanelProps = {}) {
   const [place, setPlace] = useState("");
   const [resolveState, setResolveState] = useState<ResolveState>({
     status: "idle",
@@ -325,6 +335,7 @@ export function QueryPanel({ onImagery, onNdwi }: QueryPanelProps = {}) {
     // A new query invalidates whatever the map is showing, before any
     // new result exists to replace it.
     onNdwi?.(null);
+    onChange?.(null);
     setAnalyzeState({ status: "idle" });
 
     let result: QueryExecutionResult;
@@ -356,9 +367,13 @@ export function QueryPanel({ onImagery, onNdwi }: QueryPanelProps = {}) {
       // null when the analysis produced no overlay, so the map never keeps one
       // from an earlier query.
       onNdwi?.(analysis.ndwi_overlay ?? null);
+      // null when the grids were not comparable, so a stale change overlay can
+      // never outlive the comparison that produced it.
+      onChange?.(analysis.temporal_comparison?.change?.overlay ?? null);
     } catch (error) {
       setAnalyzeState({ status: "error", message: errorMessage(error) });
       onNdwi?.(null);
+      onChange?.(null);
     }
   }
 
@@ -927,6 +942,46 @@ function SpatialMeasurementView({
 }
 
 
+/** A signed change, so a rise and a fall are never confused. */
+function signed(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(3)}`;
+}
+
+/**
+ * The paired-pixel change, rendered only when the backend produced one.
+ *
+ * Absent means the two observations were not on the same grid and nothing was
+ * subtracted - the reason is in the comparison's warnings. It is deliberately
+ * called NDWI change, not water gained or lost: the index moved, and this
+ * system has not classified water.
+ */
+function TemporalChangeView({ change }: { change: NdwiTemporalChange }) {
+  const baseline = change.baseline_acquired_at?.slice(0, 10);
+  const target = change.target_acquired_at?.slice(0, 10);
+  return (
+    <div className="analysis-measurement">
+      <p className="measurement-headline">NDWI Change (target − baseline)</p>
+      <p className="hint">
+        Baseline: {baseline ?? "date unknown"} · {change.baseline_scene_id}
+      </p>
+      <p className="hint">
+        Target: {target ?? "date unknown"} · {change.target_scene_id}
+      </p>
+      <p className="measurement-value">
+        Mean change: {signed(change.change_mean)}
+      </p>
+      <p className="hint">
+        Min: {signed(change.change_min)} · Max: {signed(change.change_max)}
+      </p>
+      <p className="hint">
+        Paired pixels:{" "}
+        {change.paired_valid_pixel_count.toLocaleString("en-US")} · {change.crs}
+      </p>
+    </div>
+  );
+}
+
+
 function AnalysisView({ result }: { result: AnalysisResult }) {
   return (
     <div className="result analysis-result">
@@ -963,6 +1018,10 @@ function AnalysisView({ result }: { result: AnalysisResult }) {
             </div>
           ))}
         </dl>
+      )}
+
+      {result.temporal_comparison?.change && (
+        <TemporalChangeView change={result.temporal_comparison.change} />
       )}
 
       {result.temporal_comparison && (

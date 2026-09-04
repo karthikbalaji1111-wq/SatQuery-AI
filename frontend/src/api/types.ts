@@ -292,11 +292,40 @@ export interface ObservationIndexResult {
  * difference of statistics over two separate sets of pixels, not a spatial
  * comparison, and it is suppressed entirely when that framing would mislead.
  */
+/**
+ * Paired-pixel NDWI change between a baseline and a target observation.
+ *
+ * Present ONLY when the two grids were verified identical - same size, same
+ * CRS, same affine - so every difference is between two measurements of the
+ * same ground. `change = target_NDWI - baseline_NDWI`: an INDEX change, not
+ * water gained or lost. Statistics cover only pixels valid in BOTH
+ * observations. Nothing is resampled or co-registered; an incompatible pair
+ * yields `null` and a warning explaining why.
+ */
+export interface NdwiTemporalChange {
+  baseline_scene_id: string;
+  target_scene_id: string;
+  baseline_acquired_at: string | null;
+  target_acquired_at: string | null;
+  window_label: string;
+  /** Pixels valid in BOTH observations - the denominator for every statistic. */
+  paired_valid_pixel_count: number;
+  change_mean: number;
+  change_min: number;
+  change_max: number;
+  crs: string;
+  transform: number[];
+  corners_wgs84: number[][];
+  overlay: NdwiOverlay | null;
+}
+
 export interface TemporalIndexComparison {
   first: ObservationIndexResult;
   second: ObservationIndexResult;
   compatibility: CompatibilityReport;
   differences: Measurement[];
+  /** Paired-pixel change, or `null` when the grids were not comparable. */
+  change?: NdwiTemporalChange | null;
   warnings: string[];
 }
 

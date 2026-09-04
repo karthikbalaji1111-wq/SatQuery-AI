@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { QueryPanel } from "./QueryPanel";
@@ -1961,5 +1967,112 @@ describe("QueryPanel - spatial NDWI measurement", () => {
     // prose is never parsed for figures.
     await renderWithMeasurement(measurement());
     expect(screen.getByText(/12,481 \/ 33,600 pixels/)).toBeInTheDocument();
+  });
+});
+
+describe("QueryPanel - temporal NDWI change", () => {
+  function temporalChange(overrides: Record<string, unknown> = {}) {
+    return {
+      baseline_scene_id: "S2_BASE",
+      target_scene_id: "S2_TARGET",
+      baseline_acquired_at: "2025-01-04T05:00:00Z",
+      target_acquired_at: "2025-07-12T05:00:00Z",
+      window_label: "baseline→target",
+      paired_valid_pixel_count: 33600,
+      change_mean: 0.118,
+      change_min: -0.72,
+      change_max: 0.81,
+      crs: "EPSG:32644",
+      transform: [10, 0, 399960, 0, -10, 1500000],
+      corners_wgs84: [
+        [80.1, 13.1],
+        [80.3, 13.101],
+        [80.301, 12.9],
+        [80.101, 12.899],
+      ],
+      overlay: null,
+      ...overrides,
+    };
+  }
+
+  function comparison(change: unknown) {
+    return {
+      first: {
+        window_label: "baseline",
+        scene_id: "S2_BASE",
+        acquired_at: "2025-01-04T05:00:00Z",
+        cloud_cover: 1,
+        measurements: [],
+        transform: null,
+      },
+      second: {
+        window_label: "target",
+        scene_id: "S2_TARGET",
+        acquired_at: "2025-07-12T05:00:00Z",
+        cloud_cover: 2,
+        measurements: [],
+        transform: null,
+      },
+      compatibility: {
+        same_modality: true,
+        temporal_separation_days: 189,
+        bbox_overlap: "full",
+        crs_match: "unknown",
+        resolution_match: "unknown",
+        processing_level_match: "same",
+        limitations: [],
+        co_registration_status: "not_evaluated",
+      },
+      differences: [],
+      change,
+      warnings: [],
+    };
+  }
+
+  async function renderChange(change: unknown) {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: analysisResult({ temporal_comparison: comparison(change) }),
+      },
+    });
+    render(<QueryPanel />);
+    runFullQuery();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+  }
+
+  it("renders the compact change summary", async () => {
+    await renderChange(temporalChange());
+
+    expect(screen.getByText(/NDWI Change/i)).toBeInTheDocument();
+    expect(screen.getByText(/33,600/)).toBeInTheDocument();
+    expect(screen.getByText(/\+0\.118/)).toBeInTheDocument();
+    expect(screen.getByText(/-0\.720/)).toBeInTheDocument();
+    expect(screen.getByText(/\+0\.810/)).toBeInTheDocument();
+  });
+
+  it("shows both acquisition dates in the change summary", async () => {
+    await renderChange(temporalChange());
+
+    // The existing per-observation view also shows dates, so scope to the
+    // change block rather than asserting global uniqueness.
+    const block = screen
+      .getByText(/NDWI Change/i)
+      .closest("div") as HTMLElement;
+    expect(within(block).getByText(/2025-01-04/)).toBeInTheDocument();
+    expect(within(block).getByText(/2025-07-12/)).toBeInTheDocument();
+  });
+
+  it("renders nothing when the grids were not comparable", async () => {
+    await renderChange(null);
+    expect(screen.queryByText(/NDWI Change/i)).not.toBeInTheDocument();
+  });
+
+  it("signs a falling index correctly", async () => {
+    await renderChange(temporalChange({ change_mean: -0.25 }));
+    expect(screen.getByText(/-0\.250/)).toBeInTheDocument();
   });
 });

@@ -23,6 +23,7 @@ from app.core.errors import ImageryError
 from app.services.analysis.schemas import (
     Measurement,
     NdwiOverlay,
+    NdwiTemporalChange,
     ObservationIndexResult,
     SpatialMeasurement,
 )
@@ -334,6 +335,156 @@ def compute_ndwi_measurements(
 # than reported with a caveat, because a number a reader can see is a number a
 # reader will use.
 # --------------------------------------------------------------------------- #
+
+#: The change range the diverging ramp spans. NDWI is bounded to [-1, 1], so a
+#: difference is bounded to [-2, 2]; the ramp is clipped to a symmetric [-1, 1]
+#: because that is where real change lives and a symmetric range is what keeps
+#: zero at the exact centre. Fixed rather than stretched per scene, so the same
+#: colour means the same change in every overlay.
+NDWI_CHANGE_DISPLAY_RANGE = (-1.0, 1.0)
+
+
+def _grids_are_comparable(baseline: BandWindow, target: BandWindow) -> str | None:
+    """Why these two grids may NOT be subtracted, or ``None`` if they may.
+
+    A shared requested bbox proves nothing: each observation was reprojected
+    from its own scene and floor/ceil clamped onto its own source grid, so two
+    reads over the same AOI routinely differ in size or origin. Subtracting
+    them anyway would paint change wherever the grids disagree - a border of
+    pure artefact around every image.
+
+    The affine is compared exactly. A ten-metre shift is a different pixel over
+    different ground, and no tolerance would make it the same one.
+    """
+
+    if baseline.crs is None or target.crs is None:
+        return "the CRS of at least one observation could not be established"
+    if baseline.crs != target.crs:
+        return f"the observations are in different CRSs ({baseline.crs} vs {target.crs})"
+    if (baseline.width, baseline.height) != (target.width, target.height):
+        return (
+            "the observations cover different pixel dimensions "
+            f"({baseline.width}x{baseline.height} vs {target.width}x{target.height})"
+        )
+    if tuple(baseline.transform)[:6] != tuple(target.transform)[:6]:
+        return (
+            "the observations sit on different pixel grids: their affine "
+            "transforms differ, so the same pixel index is not the same ground"
+        )
+    return None
+
+
+def _change_rgba(change: np.ndarray, paired: np.ndarray) -> np.ndarray:
+    """Colour the difference. Falling index -> red, no change -> neutral grey,
+    rising index -> blue.
+
+    Diverging and centred on zero, so "no change" is visually inert and the two
+    directions are distinguishable at a glance. No threshold is encoded: the
+    ramp is continuous, and nothing here marks a value as water gained or lost.
+    Unpaired pixels are alpha 0 - "not comparable" must not look like "no
+    change", which is exactly what a neutral colour would say.
+    """
+
+    low, high = NDWI_CHANGE_DISPLAY_RANGE
+    t = np.clip((change - low) / (high - low), 0.0, 1.0)  # 0 -> fall, 0.5 -> none
+
+    rgba = np.zeros((*change.shape, 4), dtype=np.uint8)
+    rgba[..., 0] = (215 - t * 175).astype(np.uint8)  # red fades as the index rises
+    rgba[..., 1] = (120 - np.abs(t - 0.5) * 120).astype(np.uint8)  # grey at centre
+    rgba[..., 2] = (40 + t * 175).astype(np.uint8)  # blue grows as the index rises
+    rgba[..., 3] = np.where(paired, 200, 0).astype(np.uint8)
+    return rgba
+
+
+def compute_ndwi_temporal_change(
+    *,
+    baseline_green: BandWindow,
+    baseline_nir: BandWindow,
+    target_green: BandWindow,
+    target_nir: BandWindow,
+    baseline_scene_id: str,
+    target_scene_id: str,
+    baseline_acquired_at: datetime | None,
+    target_acquired_at: datetime | None,
+    window_label: str,
+) -> NdwiTemporalChange | None:
+    """``target_NDWI - baseline_NDWI`` over pixels valid in both, or ``None``.
+
+    Computed from the four band windows the temporal statistics already read -
+    no second retrieval path, and no extra read.
+
+    Returns ``None``, never a partial or approximated answer, when the two
+    grids are not verifiably identical, when no pixel is valid in both, or when
+    the shared grid has no derivable footprint. Nothing is resampled to force a
+    comparison: co-registration is out of scope, so an incompatible pair is
+    reported as incomparable rather than compared badly.
+    """
+
+    if _grids_are_comparable(baseline_green, target_green) is not None:
+        return None
+
+    baseline_ndwi, baseline_valid = _ndwi_grid(baseline_green, baseline_nir)
+    target_ndwi, target_valid = _ndwi_grid(target_green, target_nir)
+
+    paired = baseline_valid & target_valid
+    paired_count = int(np.count_nonzero(paired))
+    if paired_count == 0:
+        return None
+
+    try:
+        corners = image_corners_wgs84(
+            target_green.transform,
+            width=target_green.width,
+            height=target_green.height,
+            crs=target_green.crs,
+        )
+    except ImageryError:
+        return None
+    if target_green.crs is None:  # pragma: no cover - refused above
+        return None
+
+    change = np.zeros(baseline_ndwi.shape, dtype=np.float64)
+    np.subtract(target_ndwi, baseline_ndwi, out=change, where=paired)
+    measured = change[paired]
+
+    overlay: NdwiOverlay | None = None
+    try:
+        buffer = io.BytesIO()
+        Image.fromarray(_change_rgba(change, paired), mode="RGBA").save(
+            buffer, format="PNG"
+        )
+        overlay = NdwiOverlay(
+            scene_id=target_scene_id,
+            window_label=window_label,
+            image_base64=base64.b64encode(buffer.getvalue()).decode("ascii"),
+            width=int(target_green.width),
+            height=int(target_green.height),
+            crs=target_green.crs,
+            transform=list(target_green.transform)[:6],
+            corners_wgs84=corners,
+            value_min=float(measured.min()),
+            value_max=float(measured.max()),
+            valid_pixel_count=paired_count,
+        )
+    except (ValueError, TypeError, OSError) as exc:  # pragma: no cover
+        raise ImageryError("Failed to encode the NDWI change overlay.") from exc
+
+    return NdwiTemporalChange(
+        baseline_scene_id=baseline_scene_id,
+        target_scene_id=target_scene_id,
+        baseline_acquired_at=baseline_acquired_at,
+        target_acquired_at=target_acquired_at,
+        window_label=window_label,
+        paired_valid_pixel_count=paired_count,
+        change_mean=float(measured.mean()),
+        change_min=float(measured.min()),
+        change_max=float(measured.max()),
+        crs=target_green.crs,
+        transform=list(target_green.transform)[:6],
+        corners_wgs84=corners,
+        overlay=overlay,
+    )
+
 
 #: The one derived measurement this engine may emit.
 MEAN_NDWI_DIFFERENCE = "mean_ndwi_difference"
