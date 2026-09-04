@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import base64
 import io
+from collections.abc import Callable
+from datetime import datetime
 
 import numpy as np
 from PIL import Image
@@ -22,8 +24,10 @@ from app.services.analysis.schemas import (
     Measurement,
     NdwiOverlay,
     ObservationIndexResult,
+    SpatialMeasurement,
 )
 from app.services.query.compatibility import CompatibilityReport
+from app.services.query.schemas import NdwiThreshold
 from app.services.satellite.raster import BandWindow, image_corners_wgs84
 
 # --------------------------------------------------------------------------- #
@@ -142,6 +146,77 @@ def _ndwi_rgba(ndwi: np.ndarray, valid: np.ndarray) -> np.ndarray:
     rgba[..., 2] = (40 + t * 215).astype(np.uint8)  # blue rises with the index
     rgba[..., 3] = np.where(valid, 200, 0).astype(np.uint8)
     return rgba
+
+
+#: Exact comparisons, chosen by the operator alone. No tolerance is applied:
+#: a pixel whose index equals the threshold matches ``gte``/``lte`` and not
+#: ``gt``/``lt``, which is what "above 0.3" means in plain reading.
+_COMPARISONS: dict[str, Callable[[np.ndarray, float], np.ndarray]] = {
+    "gt": lambda values, threshold: values > threshold,
+    "gte": lambda values, threshold: values >= threshold,
+    "lt": lambda values, threshold: values < threshold,
+    "lte": lambda values, threshold: values <= threshold,
+}
+
+
+def compute_ndwi_threshold_measurement(
+    green: BandWindow,
+    nir: BandWindow,
+    *,
+    threshold: NdwiThreshold,
+    scene_id: str,
+    window_label: str,
+    acquired_at: datetime | None,
+) -> SpatialMeasurement | None:
+    """Count the analysed pixels that satisfy ``threshold``.
+
+    Computed from the same two band windows the statistics and the overlay come
+    from, so all three describe identical pixels. The arithmetic is entirely
+    here: nothing about this number originates in a language model, which may
+    only have supplied the threshold being asked about.
+
+    The denominator is the VALID pixel count - nodata, non-finite and
+    zero-denominator pixels are excluded from both the numerator and the
+    denominator, because a pixel that was never measured cannot be evidence
+    either way.
+
+    Returns ``None`` when there is no valid pixel at all: no denominator means
+    no percentage, and 0% would assert that the area was measured and found
+    empty. A grid with no usable CRS still returns the count, without a
+    footprint - the number is real even when its position is not establishable.
+    """
+
+    ndwi, valid = _ndwi_grid(green, nir)
+    valid_count = int(np.count_nonzero(valid))
+    if valid_count == 0:
+        return None
+
+    compare = _COMPARISONS[threshold.operator]
+    matching = int(np.count_nonzero(compare(ndwi, threshold.value) & valid))
+
+    try:
+        corners = image_corners_wgs84(
+            green.transform,
+            width=green.width,
+            height=green.height,
+            crs=green.crs,
+        )
+        crs = green.crs
+    except ImageryError:
+        corners, crs = None, None
+
+    return SpatialMeasurement(
+        operator=threshold.operator,
+        threshold=threshold.value,
+        matching_pixel_count=matching,
+        valid_pixel_count=valid_count,
+        percentage=matching / valid_count * 100.0,
+        scene_id=scene_id,
+        acquired_at=acquired_at,
+        window_label=window_label,
+        crs=crs,
+        corners_wgs84=corners,
+    )
 
 
 def render_ndwi_overlay(

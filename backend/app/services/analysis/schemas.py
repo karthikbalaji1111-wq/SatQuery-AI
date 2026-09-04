@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from app.services.query.compatibility import CompatibilityReport
 from app.services.query.schemas import (
     Modality,
+    NdwiComparison,
     QueryExecutionResult,
     QueryTask,
     TimeRange,
@@ -101,6 +102,50 @@ class ObservationIndexResult(BaseModel):
     #: shared between them, and it is never derived from the requested bbox.
     transform: list[float] | None = Field(
         default=None, min_length=6, max_length=6
+    )
+
+
+class SpatialMeasurement(BaseModel):
+    """A threshold count over the analysed NDWI pixels, with its provenance.
+
+    Deterministic evidence: ``matching_pixel_count`` and ``valid_pixel_count``
+    are counted from the raster the statistics were computed on, and
+    ``percentage`` is the ratio between them. No language model computes any of
+    these; a model may only have chosen the threshold that was asked about.
+
+    The denominator is VALID pixels, never the raster's pixel count. A nodata,
+    non-finite or zero-denominator pixel was never measured, so it can neither
+    match nor count against a match - including it would quietly understate
+    every percentage over a partially covered window.
+
+    Comparisons are exact. ``gt`` is ``>``; a pixel whose index equals the
+    threshold matches ``gte`` and ``lte`` and nothing else.
+
+    Deliberately carries no pixels. The picture lives in ``NdwiOverlay``; this
+    is the number and where it came from.
+    """
+
+    #: The index this counts over. Only ``"ndwi"`` exists in this phase.
+    metric: Literal["ndwi"] = "ndwi"
+    operator: NdwiComparison
+    threshold: float
+    matching_pixel_count: int = Field(ge=0)
+    valid_pixel_count: int = Field(gt=0)
+    #: ``matching / valid * 100``.
+    percentage: float = Field(ge=0.0, le=100.0)
+
+    scene_id: str
+    #: The real acquisition time, when the scene carried a usable one.
+    acquired_at: datetime | None = None
+    window_label: str
+    #: The grid the count was performed on. ``None`` when the read carried no
+    #: usable CRS - the count is still real, so it is reported without a
+    #: footprint rather than withheld.
+    crs: str | None = None
+    #: Four ``[lon, lat]`` pairs, ``[NW, NE, SE, SW]``, from the read's own
+    #: affine - never from the requested bbox.
+    corners_wgs84: list[list[float]] | None = Field(
+        default=None, min_length=4, max_length=4
     )
 
 
@@ -208,4 +253,8 @@ class AnalysisResult(BaseModel):
     #: could be positioned honestly. ``None`` otherwise - a missing overlay
     #: never suppresses the measurements, which remain the product.
     ndwi_overlay: NdwiOverlay | None = None
+    #: A deterministic threshold count over the analysed NDWI pixels, when the
+    #: intent stated a threshold and there were valid pixels to count. ``None``
+    #: otherwise - never a fabricated 0%.
+    spatial_measurement: SpatialMeasurement | None = None
     temporal_comparison: TemporalIndexComparison | None = None

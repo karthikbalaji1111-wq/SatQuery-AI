@@ -38,6 +38,9 @@ MOCK_INTENT_JSON = {
     "time_windows": [{"start_date": "2024-01-01", "end_date": "2024-01-31"}],
     "modalities": ["sentinel-2-optical"],
     "task": "visualize",
+    # Phase 17.2, additive: always serialized, null unless the request stated
+    # an explicit NDWI threshold.
+    "ndwi_threshold": None,
 }
 
 GEMINI_INTENT_JSON = {
@@ -49,6 +52,7 @@ GEMINI_INTENT_JSON = {
     },
     "modalities": ["sentinel-2-optical", "sentinel-1-sar"],
     "task": "change_detection",
+    "ndwi_threshold": None,
 }
 
 FAKE_KEY = "test-key-not-real"
@@ -443,3 +447,80 @@ def test_provider_coupling_is_confined_to_parser_module() -> None:
 
     parser_src = (ai_dir / "parser.py").read_text()
     assert "from google import genai" in parser_src
+
+
+# =========================================================================== #
+# Phase 17.2 - an explicitly stated NDWI threshold
+# =========================================================================== #
+#
+# The parser may extract the threshold the user NAMED. It never computes a
+# count or a percentage from it: those come from real pixels, later.
+
+
+def test_the_prompt_describes_the_threshold_field() -> None:
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(MOCK_INTENT_JSON), capture={}),
+    )
+    capture: dict[str, Any] = {}
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(MOCK_INTENT_JSON), capture=capture),
+    )
+    asyncio.run(parser.parse_intent("ndwi above 0.3 in Chennai"))
+
+    system = capture["config"].system_instruction
+    for token in ("ndwi_threshold", "gt", "gte", "lt", "lte"):
+        assert token in system
+    # The model is told to extract, never to compute.
+    assert "NEVER compute" in system or "never compute" in system
+
+
+def test_a_parsed_threshold_reaches_the_intent() -> None:
+    body = {**MOCK_INTENT_JSON, "ndwi_threshold": {"operator": "gt", "value": 0.3}}
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(body), capture={}),
+    )
+    intent = asyncio.run(parser.parse_intent("what percentage has NDWI above 0.3"))
+
+    assert intent.ndwi_threshold is not None
+    assert intent.ndwi_threshold.operator == "gt"
+    assert intent.ndwi_threshold.value == 0.3
+
+
+def test_an_intent_without_a_threshold_is_unchanged() -> None:
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(MOCK_INTENT_JSON), capture={}),
+    )
+    intent = asyncio.run(parser.parse_intent("show me Chennai"))
+
+    assert intent.ndwi_threshold is None
+
+
+def test_an_out_of_range_threshold_from_the_model_is_rejected() -> None:
+    """A model-supplied threshold is validated like any other input."""
+
+    body = {**MOCK_INTENT_JSON, "ndwi_threshold": {"operator": "gt", "value": 7.0}}
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(body), capture={}),
+    )
+
+    with pytest.raises(IntentParsingError):
+        asyncio.run(parser.parse_intent("ndwi above 7"))
+
+
+def test_an_unknown_operator_from_the_model_is_rejected() -> None:
+    body = {
+        **MOCK_INTENT_JSON,
+        "ndwi_threshold": {"operator": "roughly", "value": 0.3},
+    }
+    parser = GeminiIntentParser(
+        settings=Settings(gemini_api_key=FAKE_KEY),
+        client=FakeGeminiClient(text=json.dumps(body), capture={}),
+    )
+
+    with pytest.raises(IntentParsingError):
+        asyncio.run(parser.parse_intent("ndwi roughly 0.3"))

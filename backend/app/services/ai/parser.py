@@ -78,6 +78,16 @@ task (string, required) - exactly one of:
 - "change_detection"      : "what changed", "before vs after", growth / loss.
 - "object_identification" : "find / count / locate <objects>".
 
+ndwi_threshold (optional) - ONLY when the request names an explicit numeric
+NDWI threshold ("NDWI above 0.3", "NDWI greater than 0.4", "NDWI below 0.1"):
+- {"operator": "gt"|"gte"|"lt"|"lte", "value": <number between -1 and 1>}.
+- "above"/"greater than"/"more than" -> "gt"; "at least"/"or more" -> "gte";
+  "below"/"less than" -> "lt"; "at most"/"or less" -> "lte".
+- Omit it entirely (or use null) when no explicit numeric threshold is stated.
+  Do NOT infer one from words like "water", "wet" or "flooded".
+- Extract the number the user said. NEVER compute a count, a percentage or any
+  other statistic from it - the server counts real pixels.
+
 RULES
 - Extract only information the user's request actually supports. Use the allowed
   enum values only.

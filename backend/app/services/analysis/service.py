@@ -26,6 +26,8 @@ engines are dispatched from here without changing this contract.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.errors import AppError
@@ -33,6 +35,7 @@ from app.core.logging import get_logger
 from app.services.analysis.engines import (
     compare_ndwi_observations,
     compute_ndwi_measurements,
+    compute_ndwi_threshold_measurement,
     render_ndwi_overlay,
 )
 from app.services.analysis.schemas import (
@@ -42,6 +45,7 @@ from app.services.analysis.schemas import (
     Measurement,
     NdwiOverlay,
     ObservationIndexResult,
+    SpatialMeasurement,
     TemporalIndexComparison,
 )
 from app.services.base import DomainService
@@ -147,6 +151,27 @@ def _not_implemented_answer(task: QueryTask, window_count: int) -> str:
     )
 
 
+def _selected_acquisition(
+    execution: QueryExecutionResult, window: ExecutedWindow
+) -> datetime | None:
+    """When the window's selected scene was actually acquired.
+
+    The REAL acquisition time, not the requested window - the distinction
+    Phase 12 exists to draw. Read through the derived observations, which
+    already own that parsing, rather than re-parsing the timestamp here.
+    ``None`` when the scene carries no usable timestamp, which is reported as
+    unknown rather than filled in.
+    """
+
+    for observation in execution.observations.observations:
+        if (
+            observation.window_label == window.label
+            and observation.scene.id == window.selected_scene_id
+        ):
+            return observation.acquired_at
+    return None
+
+
 def _scene_collection(window: ExecutedWindow) -> str | None:
     """STAC collection of the window's selected scene, from discovery itself.
 
@@ -196,7 +221,9 @@ class AnalysisService(DomainService):
 
     async def _ndwi_measurements(
         self, execution: QueryExecutionResult, *, with_overlay: bool = False
-    ) -> tuple[list[Measurement], list[str], NdwiOverlay | None]:
+    ) -> tuple[
+        list[Measurement], list[str], NdwiOverlay | None, SpatialMeasurement | None
+    ]:
         """Single-scene NDWI for one optical window. Returns (measurements, warnings).
 
         Pixels are read server-side through ``ImageryService`` and the arithmetic
@@ -211,6 +238,7 @@ class AnalysisService(DomainService):
                     "NDWI was requested but no Sentinel-2 optical window with a "
                     "selected scene was available; no index was computed."
                 ],
+                None,
                 None,
             )
 
@@ -254,6 +282,21 @@ class AnalysisService(DomainService):
                 if with_overlay
                 else None
             )
+            # The threshold travels on the intent, so no separate request path
+            # is needed. The engine does the counting; nothing here computes it.
+            threshold = execution.plan.intent.ndwi_threshold
+            spatial = (
+                compute_ndwi_threshold_measurement(
+                    green,
+                    nir,
+                    threshold=threshold,
+                    scene_id=window.selected_scene_id,
+                    window_label=window.label,
+                    acquired_at=_selected_acquisition(execution, window),
+                )
+                if threshold is not None
+                else None
+            )
         except AppError as exc:
             logger.info(
                 "NDWI unavailable for window %s [%s]: %s",
@@ -265,7 +308,7 @@ class AnalysisService(DomainService):
                 f"NDWI could not be computed for the {window.modality} window "
                 f"{window.label!r}: {exc.message}"
             )
-            return [], warnings, None
+            return [], warnings, None, None
 
         warnings.append(
             "NDWI values are a spectral index computed from raw Sentinel-2 "
@@ -278,7 +321,12 @@ class AnalysisService(DomainService):
                 "from the read window's own georeferencing, so no overlay was "
                 "produced; the statistics above are unaffected."
             )
-        return measurements, warnings, overlay
+        if threshold is not None and spatial is None:
+            warnings.append(
+                "An NDWI threshold was requested but no valid pixel was "
+                "available to count, so no percentage was produced."
+            )
+        return measurements, warnings, overlay, spatial
 
     async def _observation_index(
         self, observation: Observation, bbox: BoundingBox
@@ -416,8 +464,14 @@ class AnalysisService(DomainService):
 
         measurements: list[Measurement] = []
         ndwi_overlay: NdwiOverlay | None = None
+        spatial_measurement: SpatialMeasurement | None = None
         if request.include_ndwi:
-            measurements, ndwi_warnings, ndwi_overlay = await self._ndwi_measurements(
+            (
+                measurements,
+                ndwi_warnings,
+                ndwi_overlay,
+                spatial_measurement,
+            ) = await self._ndwi_measurements(
                 execution, with_overlay=request.include_ndwi_overlay
             )
             warnings.extend(ndwi_warnings)
@@ -459,5 +513,6 @@ class AnalysisService(DomainService):
             warnings=warnings,
             measurements=measurements,
             ndwi_overlay=ndwi_overlay,
+            spatial_measurement=spatial_measurement,
             temporal_comparison=temporal_comparison,
         )

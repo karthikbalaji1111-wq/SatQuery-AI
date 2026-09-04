@@ -149,12 +149,25 @@ export interface TemporalComparison {
   target: TimeRange;
 }
 
+/**
+ * How a threshold compares an index value. Exact: `gt` is `>`, never `>=`.
+ */
+export type NdwiComparison = "gt" | "gte" | "lt" | "lte";
+
+/** A numeric NDWI threshold the request stated explicitly. */
+export interface NdwiThreshold {
+  operator: NdwiComparison;
+  value: number;
+}
+
 export interface SatQueryIntent {
   location_query: string;
   temporal_mode: TemporalMode;
   time_windows: TemporalComparison | TimeRange[];
   modalities: Modality[];
   task: QueryTask;
+  /** Present only when the request named an explicit NDWI threshold. */
+  ndwi_threshold?: NdwiThreshold | null;
 }
 
 export interface ResolvedQueryPlan {
@@ -336,6 +349,28 @@ export interface NdwiOverlay {
   valid_pixel_count: number;
 }
 
+/**
+ * A deterministic threshold count over the analysed NDWI pixels.
+ *
+ * `percentage` is `matching_pixel_count / valid_pixel_count * 100` - the
+ * denominator is VALID pixels, never the raster's size, because a nodata or
+ * non-finite pixel was never measured and cannot count either way. Computed
+ * server-side from real pixels; no language model produces these numbers.
+ */
+export interface SpatialMeasurement {
+  metric: "ndwi";
+  operator: NdwiComparison;
+  threshold: number;
+  matching_pixel_count: number;
+  valid_pixel_count: number;
+  percentage: number;
+  scene_id: string;
+  acquired_at: string | null;
+  window_label: string;
+  crs: string | null;
+  corners_wgs84: number[][] | null;
+}
+
 export interface AnalysisResult {
   status: AnalysisStatus;
   task: QueryTask;
@@ -355,6 +390,12 @@ export interface AnalysisResult {
    * suppresses the measurements, which remain the product.
    */
   ndwi_overlay?: NdwiOverlay | null;
+  /**
+   * A threshold count over the analysed NDWI pixels, when the intent stated a
+   * threshold and there were valid pixels to count. `null` otherwise - never a
+   * fabricated 0%.
+   */
+  spatial_measurement?: SpatialMeasurement | null;
 }
 
 // --------------------------------------------------------------------------- //
