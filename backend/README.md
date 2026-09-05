@@ -38,4 +38,4 @@ uv run pytest
 Each `app/services/<domain>/` package defines an interface and a stub that raises
 `NotImplementedError`. No AI or satellite logic is implemented yet.
 
-Added NVIDIA api support
+
