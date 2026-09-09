@@ -31,6 +31,14 @@ prose or invented evidence. When the answer is withheld the deterministic
 result is still returned, because the measurements are the product and the
 sentence is only a presentation of them.
 
+The two provider failures also carry an :class:`AgentFailure` saying WHICH
+stage broke and why, so a caller can tell a temporary rate limit from an
+outage from a misconfigured key. That distinction matters most in the case
+that looks least like a failure: ``synthesis_unavailable`` returns a complete
+set of valid measurements, and describing it as a lack of evidence would be
+false. A synthesizer that genuinely found the evidence wanting says so in a
+successful answer instead, and carries no failure at all.
+
 An executed step is reported because the **executor** said it ran, never
 because it appeared in the requested plan. ``trace.plan`` records what was
 asked for; ``trace.steps`` records what happened; they are allowed to differ.
@@ -49,6 +57,7 @@ from app.services.agent.grounding import validate_answer
 from app.services.agent.planner import AgentPlanner
 from app.services.agent.schemas import (
     AgentEvidence,
+    AgentFailure,
     AgentQuestionRequest,
     AgentResult,
     AgentTrace,
@@ -71,6 +80,32 @@ def _passed(validation: AnswerValidation) -> bool:
         validation.numeric_grounding == "pass"
         and validation.forbidden_terms == "pass"
         and validation.evidence_refs == "pass"
+    )
+
+
+def _failure(stage: str, exc: AppError) -> AgentFailure:
+    """Record why a provider stage failed, in a shape a caller can act on.
+
+    The message and code come from the :class:`AppError` the provider raised.
+    Those messages are written by this system - never passed through from an
+    upstream response - so they are safe to return, and some of them are the
+    only actionable thing a misconfigured deployment gets ("GEMINI_API_KEY is
+    not configured..."). Discarding them left the caller a bare status.
+
+    ``retry_after_seconds`` is read reflectively because it is an OPTIONAL hint:
+    a provider that knows how long the service asked us to wait may attach it,
+    and one that does not is not obliged to invent a number. Reading it here
+    rather than importing a provider type keeps this service free of any
+    provider import, which is the property the whole package is arranged
+    around.
+    """
+
+    hint = getattr(exc, "retry_after_seconds", None)
+    return AgentFailure(
+        stage=stage,  # type: ignore[arg-type]
+        code=exc.code,
+        message=exc.message,
+        retry_after_seconds=hint if isinstance(hint, (int, float)) else None,
     )
 
 
@@ -119,6 +154,7 @@ class AgentService(DomainService):
             return AgentResult(
                 status="planner_unavailable",
                 answer=None,
+                failure=_failure("planning", exc),
                 trace=AgentTrace(),
                 evidence=AgentEvidence(),
             )
@@ -138,6 +174,10 @@ class AgentService(DomainService):
             return AgentResult(
                 status="synthesis_unavailable",
                 answer=None,
+                # The evidence below is intact and was computed deterministically.
+                # This records that the PROSE stage failed - not that the
+                # question went unanswered for want of evidence.
+                failure=_failure("synthesis", exc),
                 trace=AgentTrace(plan=plan, steps=outcome.steps),
                 evidence=outcome.evidence,
             )

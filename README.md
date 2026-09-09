@@ -60,7 +60,8 @@ Natural-language question
         ├─ Scene selection .......... deterministic, not model-chosen
         ├─ Imagery retrieval ........ windowed COG reads → PNG
         ├─ Quantitative bands ....... raw uint16, never the display path
-        ├─ NDWI / temporal NDWI ..... pure functions
+        ├─ NDVI · NDWI · NDBI ....... pure functions, raw DN
+        ├─ Temporal NDWI ............ two dates, exact-grid change
         └─ Georeferencing ........... source affine → WGS 84 corners
         │
         ▼
@@ -131,7 +132,7 @@ availability and free-tier limits change over time.
 | `POST` | `/api/v1/query/parse` | Text → structured intent |
 | `POST` | `/api/v1/query/build-plan` | Intent → resolved plan with AOI |
 | `POST` | `/api/v1/query/execute` | Run discovery, selection, optional imagery |
-| `POST` | `/api/v1/query/analyze` | NDWI / temporal NDWI over a result |
+| `POST` | `/api/v1/query/analyze` | Spectral indices / temporal NDWI over a result |
 | `POST` | `/api/v1/geospatial/resolve` | Place name → bounding box |
 | `POST` | `/api/v1/satellite/search` | STAC scene discovery |
 | `POST` | `/api/v1/satellite/imagery` | Bounded windowed raster → PNG |
@@ -207,7 +208,7 @@ cd backend  && uv run pytest -q && uv run ruff check .
 cd frontend && npm test -- --run && npx tsc -b --noEmit && npm run lint && npm run build
 ```
 
-**1321 backend tests · 209 frontend tests.** Every phase was written test-first:
+**1356 backend tests · 210 frontend tests.** Every phase was written test-first:
 the tests were added, observed failing for the expected reason, and only then
 satisfied.
 
@@ -226,6 +227,16 @@ satisfied.
 Stated plainly, because a system that reports what it cannot do is more useful
 than one that implies it can do everything.
 
+- **These are spectral indices, not classifiers.** NDVI, NDWI and NDBI are
+  normalised differences over Sentinel-2 bands. A high NDBI is a built-up-like
+  *reflectance signature*, not a detected building; a high NDVI is not verified
+  healthy vegetation. Nothing here performs land-cover classification.
+- **NDBI resolves no finer than 20 m.** SWIR (B11) is a 20 m band against NIR's
+  10 m. The two are placed on the 10 m grid by explicit whole-cell assignment -
+  each 20 m value is used by the four 10 m pixels it contains, which invents no
+  values because the grids are exactly 2:1 nested with a shared origin (verified
+  from the COG headers). The arithmetic runs at 10 m; the detail is still 20 m,
+  and that is reported with the result.
 - **NDWI is a spectral index, not a water classifier.** A threshold is reported
   as *"% of valid pixels with NDWI > 0.3"*, never as detected water. No
   validated water or flood classification exists here.
@@ -239,8 +250,19 @@ than one that implies it can do everything.
 - **Grounding is containment, not proof.** It establishes that numbers trace to
   evidence and citations resolve. It cannot establish that a qualitative claim
   is correct — an unquantified sentence passes.
-- **Sentinel-1 VV is display-only** — percentile-stretched for visualisation, not
-  calibrated. No speckle filtering or terrain correction.
+- **Sentinel-1 is discovery-only.** Scene search and per-modality selection work
+  against the live catalog. **Bounded VV retrieval does not** — it is refused
+  with a clear error rather than failing obscurely. Verified against live Earth
+  Search (2026-09), three separate things block it, and none is a bug in this
+  code: the measurement asset is published as an `s3://` URI on a
+  requester-pays bucket; the GRD product is in radar geometry (`crs=None`, 210
+  GCPs) rather than a map projection; and the pixels are uncalibrated `uint16`
+  DN amplitude whose calibration LUTs live in separate XML assets. Closing this
+  needs S3 credential configuration, GCP-based geometry, and LUT
+  interpolation — real work, deliberately not faked. **Future research work.**
+  The display code path is retained and tested; it is correct for a projected
+  single-band asset and simply has no such asset to read. No quantitative SAR
+  path exists at all: `vv`/`vh` are absent from the analysis band allowlist.
 - **`/query/parse` is Gemini-only.** It predates the provider abstraction and is
   not routed through it; the agent path is fully provider-agnostic.
 - Cloud masking (`scl`) is deferred; cloud cover is reported as context.
@@ -256,7 +278,7 @@ backend/
     services/
       geospatial/      place → bounding box
       satellite/       STAC discovery · windowed raster reads
-      analysis/        NDWI engines, temporal statistics
+      analysis/        spectral index engines, temporal statistics
       query/           orchestration, observations, compatibility
       agent/           planner · executor · grounding · synthesizer
         providers/     gemini · nvidia · catalog · factory

@@ -17,6 +17,7 @@ from app.api.routes.query import (
     get_query_execution_service,
     get_query_service,
 )
+from app.core.config import Settings
 from app.core.errors import (
     ImageryError,
     InvalidInputError,
@@ -42,6 +43,7 @@ from app.services.query.execution import (
     _select_scene_sar,
 )
 from app.services.query.schemas import ResolvedQueryPlan, SatQueryIntent, TimeRange
+from app.services.satellite import ImageryService
 from app.services.satellite.schemas import (
     ImageryResponse,
     QueryEcho,
@@ -262,6 +264,7 @@ def build_service(
 ) -> QueryExecutionService:
     geo = geo or FakeGeospatialService()
     return QueryExecutionService(
+        settings=Settings(stac_s1_collection="sentinel-1-grd"),
         query_service=QueryService(geospatial_service=geo),  # type: ignore[arg-type]
         satellite_service=satellite or FakeSatelliteService(),  # type: ignore[arg-type]
         imagery_service=imagery or FakeImageryService(),  # type: ignore[arg-type]
@@ -1522,3 +1525,195 @@ def test_execution_result_round_trips_through_json_with_observations() -> None:
     restored = QueryExecutionResult.model_validate(payload)
     assert restored.model_dump(mode="json") == payload
     assert restored.observations.observations[0].scene_id == "scene-a"
+
+
+# --------------------------------------------------------------------------- #
+# Integration: a REAL ImageryService inside the execution path
+# --------------------------------------------------------------------------- #
+#
+# Everything above builds `QueryExecutionService` from FakeImageryService, so
+# nothing proved that a real ImageryService failure reaches `imagery_error`
+# through the whole path and out over HTTP. That gap is exactly how a broken
+# capability once stayed green: the unit boundary was tested, the composition
+# was not.
+#
+# These use the real ImageryService with only the catalog lookup stubbed, and
+# the item they stub is shaped like the one Earth Search actually returns for
+# Sentinel-1: an `s3://` href on a requester-pays bucket. Bounded S1 retrieval
+# is refused at the scheme boundary, and this pins that the refusal survives
+# serialization instead of being dropped somewhere between the raster layer
+# and the response body.
+
+
+def _real_imagery_service_for_sentinel_1() -> ImageryService:
+    item = {
+        "id": "S1A_IW_GRDH_1SDV_20241230T003219_20241230T003244_057214_07096B",
+        "properties": {"sar:product_type": "GRD"},
+        "assets": {
+            "vv": {
+                "href": "s3://sentinel-s1-l1c/GRD/2024/12/30/IW/DV/iw-vv.tiff",
+                "type": (
+                    "image/tiff; application=geotiff; profile=cloud-optimized"
+                ),
+                "raster:bands": [{"nodata": 0, "data_type": "uint16"}],
+            }
+        },
+    }
+    return ImageryService(stac_item_fetcher=lambda *a, **k: item)
+
+
+def test_a_real_sentinel_1_failure_reaches_imagery_error_over_http() -> None:
+    scene = make_scene("S1A_IW_GRDH_1SDV_20241230T003219", cloud_cover=None)
+    satellite = FakeSatelliteService(responses=make_search_response(scene))
+    service = QueryExecutionService(
+        query_service=QueryService(geospatial_service=FakeGeospatialService()),  # type: ignore[arg-type]
+        satellite_service=satellite,  # type: ignore[arg-type]
+        imagery_service=_real_imagery_service_for_sentinel_1(),
+    )
+    client = make_client(service)
+
+    response = client.post(
+        EXECUTE_URL,
+        json={
+            "intent": intent_dict(modalities=["sentinel-1-sar"]),
+            "include_imagery": True,
+        },
+    )
+
+    assert response.status_code == 200
+    window = response.json()["windows"][0]
+
+    # Discovery and selection still succeeded - only retrieval degraded.
+    assert window["selected_scene_id"] == scene.id
+    assert window["imagery"] is None
+
+    # The reason survives all the way to the client, and names the cause
+    # rather than reading as a credentials problem.
+    error = window["imagery_error"]
+    assert error is not None
+    assert "s3://" in error
+    assert "credential" not in error.lower()
+
+
+def test_imagery_error_is_actually_serialized_and_not_dropped() -> None:
+    """A guard against the field being excluded from the response model.
+
+    The service-level assertions elsewhere would all still pass if the route
+    stopped serializing this field, and the user would silently lose every
+    explanation of why an image is missing.
+    """
+
+    scene = make_scene("S1A_IW_GRDH_1SDV_20241230T003219", cloud_cover=None)
+    service = QueryExecutionService(
+        query_service=QueryService(geospatial_service=FakeGeospatialService()),  # type: ignore[arg-type]
+        satellite_service=FakeSatelliteService(  # type: ignore[arg-type]
+            responses=make_search_response(scene)
+        ),
+        imagery_service=_real_imagery_service_for_sentinel_1(),
+    )
+    response = make_client(service).post(
+        EXECUTE_URL,
+        json={
+            "intent": intent_dict(modalities=["sentinel-1-sar"]),
+            "include_imagery": True,
+        },
+    )
+    assert "imagery_error" in response.json()["windows"][0]
+
+
+# --------------------------------------------------------------------------- #
+# The pipeline is generic: no place is special
+# --------------------------------------------------------------------------- #
+#
+# Verified live against Earth Search across five UTM zones and two hemispheres
+# (Delhi 43RFM, Mumbai 42QZF, Bengaluru 43PHQ, Hyderabad 43QHV, Chennai 44PMV,
+# New York 18TWK, London 30UYB) plus a raw "lat, lon" string. These tests keep
+# it that way: a location allowlist or a hardcoded scene would be a regression
+# that no functional test would otherwise catch, because any single location
+# would still pass.
+
+
+def test_no_production_module_hardcodes_a_place_or_coordinate() -> None:
+    """Production code must not name a city or pin a coordinate.
+
+    Docstrings and comments are allowed to cite verified examples - that is how
+    the findings in this repository are recorded - so only executable lines are
+    scanned.
+    """
+
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "app"
+    banned = (
+        "marina beach",
+        "chennai",
+        "mumbai",
+        "delhi",
+        "bengaluru",
+        "hyderabad",
+        "kolkata",
+    )
+    offenders: list[str] = []
+
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            # String constants only, and never a docstring: an expression whose
+            # whole body is a string is documentation, not behaviour.
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                lowered = node.value.lower()
+                if any(name in lowered for name in banned):
+                    offenders.append(f"{path.name}:{node.lineno} {node.value[:60]!r}")
+
+    # The mock parser and mock planner carry one deterministic example intent
+    # each, used only when no provider is configured. They are named here
+    # rather than pattern-matched so a NEW hardcoded place cannot hide.
+    allowed = {"parser.py", "planner.py", "prompts.py"}
+    unexpected = [o for o in offenders if o.split(":")[0] not in allowed]
+    assert not unexpected, f"hardcoded place in production logic: {unexpected}"
+
+
+def test_the_resolved_bbox_reaches_the_catalog_search_verbatim() -> None:
+    """Whatever the geocoder returns is what gets searched - nothing rewrites it."""
+
+    geo = FakeGeospatialService(
+        bbox=BoundingBox(west=-74.26, south=40.47, east=-73.70, north=40.92)
+    )
+    satellite = FakeSatelliteService(responses=make_search_response(make_scene("s")))
+    run(build_service(geo=geo, satellite=satellite).execute(
+        QueryExecutionRequest(intent=make_intent(), include_imagery=False)
+    ))
+
+    assert satellite.requests, "no catalog search was issued"
+    searched = satellite.requests[0].bbox
+    assert (searched.west, searched.south, searched.east, searched.north) == (
+        -74.26,
+        40.47,
+        -73.70,
+        40.92,
+    )
+
+
+def test_two_different_places_search_two_different_areas() -> None:
+    """A different location must produce a different search, not a cached one."""
+
+    seen = []
+    for bbox in (
+        BoundingBox(west=77.0, south=28.4, east=77.3, north=28.7),   # Delhi-ish
+        BoundingBox(west=-0.5, south=51.3, east=0.3, north=51.7),    # London-ish
+    ):
+        geo = FakeGeospatialService(bbox=bbox)
+        satellite = FakeSatelliteService(
+            responses=make_search_response(make_scene("s"))
+        )
+        run(build_service(geo=geo, satellite=satellite).execute(
+            QueryExecutionRequest(intent=make_intent(), include_imagery=False)
+        ))
+        seen.append(satellite.requests[0].bbox)
+
+    assert seen[0] != seen[1]
+    # Inequality alone would also hold if both were rewritten to different
+    # wrong values, so pin the actual extents that were searched.
+    assert (seen[0].west, seen[0].north) == (77.0, 28.7)
+    assert (seen[1].west, seen[1].north) == (-0.5, 51.7)

@@ -14,6 +14,7 @@ from app.core.errors import UpstreamServiceError
 from app.core.logging import get_logger
 from app.services.base import DomainService
 from app.services.geospatial.schemas import BoundingBox
+from app.services.satellite.rtc import RTC_COLLECTION, catalog_for
 from app.services.satellite.schemas import (
     QueryEcho,
     Scene,
@@ -33,6 +34,10 @@ _USEFUL_ASSET_KEYS = (
     "visual",
     "granule_metadata",
     "tileinfo_metadata",
+    "vv",
+    "vh",
+    "hh",
+    "hv",
 )
 _THUMBNAIL_KEYS = ("thumbnail", "overview", "rendered_preview", "preview")
 
@@ -92,6 +97,10 @@ def _processing_level(props: dict[str, Any], collection: str | None) -> str | No
     level = _str_or_none(props.get("processing:level"))
     if level:
         return level
+    if collection == RTC_COLLECTION:
+        return "RTC (provider terrain-corrected gamma naught)"
+    if collection == "sentinel-1-grd":
+        return "GRD (uncalibrated radar geometry)"
     if collection == "sentinel-2-l2a":
         return "L2A"
     if collection == "sentinel-2-l1c":
@@ -139,6 +148,9 @@ def _normalize_scene(feature: object) -> Scene:
         processing_level=_processing_level(props, collection),
         thumbnail_url=thumbnail_url,
         assets=assets,
+        sar_polarizations=_str_list_or_none(props.get("sar:polarizations")),
+        sar_instrument_mode=_str_or_none(props.get("sar:instrument_mode")),
+        orbit_state=_str_or_none(props.get("sat:orbit_state")),
     )
 
 
@@ -230,5 +242,5 @@ class SatelliteService(DomainService):
             ),
             scene_count=len(scenes),
             scenes=scenes,
-            catalog=self._settings.stac_base_url,
+            catalog=catalog_for(collection, self._settings),
         )

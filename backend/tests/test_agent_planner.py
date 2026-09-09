@@ -741,7 +741,8 @@ def test_the_generation_schema_expresses_the_union_as_any_of() -> None:
     """
 
     branches = _wire_schema()["properties"]["steps"]["items"]["anyOf"]
-    assert len(branches) == 2
+    # discovery, spectral indices, parameterless analysis, visual
+    assert len(branches) == 4
 
     by_tool = {
         tuple(branch["properties"]["tool"]["enum"]): set(branch["properties"])
@@ -753,9 +754,16 @@ def test_the_generation_schema_expresses_the_union_as_any_of() -> None:
         "include_imagery",
         "max_cloud_cover",
     }
-    # The analysis branch offers ONLY the tool name - no field the contract
-    # would refuse.
+    # The parameterless analysis branch offers ONLY the tool name - no field
+    # the contract would refuse.
     assert by_tool[("ndwi_statistics", "temporal_ndwi_statistics")] == {"tool"}
+    # The index branch offers WHICH indices to compute and nothing else: no
+    # band, no threshold, no scene. Choosing an index is a planning decision;
+    # how it is computed is not.
+    assert by_tool[("spectral_indices",)] == {"tool", "indices"}
+    # The visual branch offers the question and NOTHING that would let the
+    # model choose an image: no scene id, no asset, no url, no bytes.
+    assert by_tool[("rs_model_analysis",)] == {"tool", "question"}
 
 
 def test_the_generation_schema_offers_only_registered_tool_names() -> None:
@@ -778,7 +786,9 @@ def test_the_generation_schema_offers_only_registered_tool_names() -> None:
 
     walk(dumped)
     assert offered >= REGISTERED_TOOLS
-    for forbidden in ("retrieve_imagery", "compatibility_report", "rs_model_analysis"):
+    # ``rs_model_analysis`` was on this list until Phase 18.1 registered it; the
+    # two below remain deliberately unreachable.
+    for forbidden in ("retrieve_imagery", "compatibility_report"):
         assert forbidden not in offered
 
 

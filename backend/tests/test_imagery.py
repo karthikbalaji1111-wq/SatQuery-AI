@@ -19,7 +19,12 @@ import pytest
 import rasterio
 from app.api.routes.satellite import get_imagery_service
 from app.core.config import get_settings
-from app.core.errors import ImageryError, InvalidInputError, UpstreamServiceError
+from app.core.errors import (
+    AppError,
+    ImageryError,
+    InvalidInputError,
+    UpstreamServiceError,
+)
 from app.main import create_app
 from app.services.geospatial.schemas import BoundingBox
 from app.services.satellite import ImageryService
@@ -1175,10 +1180,20 @@ def test_band_window_rejects_oversized_dimension_instead_of_decimating(
     monkeypatch: Any,
 ) -> None:
     data = ramp_uint16(200, 200)
-    with band_raster(data) as mem, pytest.raises(InvalidInputError, match="not decimated"):
+    with band_raster(data) as mem, pytest.raises(InvalidInputError) as caught:
         read_band_from(
             mem, monkeypatch, Window(0, 0, 200, 200), max_dimension=64
         )
+
+    message = str(caught.value)
+    # The invariant is the refusal, not the wording: a quantitative read must
+    # never be silently downsampled to fit. The message must also say so, and
+    # name the limit, because it reaches the interface.
+    assert "downsampled" in message
+    assert "64" in message and "200" in message
+    # And it must be actionable rather than developer shorthand.
+    assert "smaller area" in message
+    assert "bbox" not in message
 
 
 def test_band_window_rejects_oversized_pixel_count(monkeypatch: Any) -> None:
@@ -1370,7 +1385,11 @@ def test_read_band_is_collection_aware() -> None:
     assert fetcher.scene_ids == ["scene-x"]
 
 
-@pytest.mark.parametrize("asset", ["swir16", "scl", "visual", "vv", "vh"])
+# swir16 is now readable (NDBI needs it, through an explicit guarded
+# co-registration). scl stays out - cloud masking is not implemented - and
+# the display assets stay out because display and analysis are different
+# concerns that must not merge.
+@pytest.mark.parametrize("asset", ["scl", "visual", "vv", "vh"])
 def test_read_band_rejects_assets_outside_the_analysis_allowlist(asset: str) -> None:
     service, fetcher, reader = band_service()
     with pytest.raises(InvalidInputError, match="quantitative"):
@@ -1384,9 +1403,14 @@ def test_read_band_rejects_assets_outside_the_analysis_allowlist(asset: str) -> 
 def test_read_band_allowlist_is_separate_from_the_display_whitelist() -> None:
     from app.services.satellite.schemas import SUPPORTED_IMAGERY_ASSETS
 
-    assert ANALYSIS_BAND_ASSETS == ("green", "nir", "red")
-    assert SUPPORTED_IMAGERY_ASSETS == ("visual", "vv")
+    assert ANALYSIS_BAND_ASSETS == ("green", "nir", "red", "swir16")
+    assert SUPPORTED_IMAGERY_ASSETS == ("visual", "vv", "vh")
+    # The invariant this test exists for: a display rendering is never a
+    # measurement, so the two lists must not overlap. Adding swir16 to the
+    # analysis side does not weaken that.
     assert not set(ANALYSIS_BAND_ASSETS) & set(SUPPORTED_IMAGERY_ASSETS)
+    # And SAR is still not a quantitative band, whatever else changes.
+    assert not {"vv", "vh"} & set(ANALYSIS_BAND_ASSETS)
 
 
 def test_read_band_refuses_a_jp2_asset() -> None:
@@ -2371,3 +2395,158 @@ def test_the_real_sentinel_2_orientation_is_accepted() -> None:
 
     assert corners_of(MARINA_AFFINE, MARINA_SIZE) is not None
     assert corners_of(CHENNAI_AFFINE, CHENNAI_SIZE) is not None
+
+
+# --------------------------------------------------------------------------- #
+# Sentinel-1: the limitation as it ACTUALLY is against Earth Search
+# --------------------------------------------------------------------------- #
+#
+# The synthetic SAR fixtures above describe a Sentinel-1 asset this catalog
+# does not publish: they use an ``https://`` href, ``float32`` dB-like values
+# and a projected CRS. Verified against live Earth Search (2026-09), a real
+# ``sentinel-1-grd`` item is none of those things:
+#
+#   vv.href          s3://sentinel-s1-l1c/...          (not https)
+#   raster:bands     [{"nodata": 0, "data_type": "uint16"}]   (no scale/offset)
+#   sar:product_type "GRD"  -> Level-1 detected amplitude DN, not calibrated
+#   the COG itself   crs=None, transform=identity, 210 GCPs (radar geometry)
+#
+# Those fixtures therefore proved the code worked on data that does not exist,
+# which is how a non-functional capability stayed green. These tests pin the
+# real behaviour instead: bounded Sentinel-1 retrieval is refused, clearly and
+# early, and the refusal names the cause.
+
+
+def _s1_item_as_published(href: str = "s3://sentinel-s1-l1c/GRD/x/iw-vv.tiff") -> dict:
+    """A Sentinel-1 STAC item shaped like the ones Earth Search returns."""
+
+    return {
+        "id": "S1A_IW_GRDH_1SDV_20241230T003219_20241230T003244_057214_07096B",
+        "properties": {
+            "sar:product_type": "GRD",
+            "sar:polarizations": ["VV", "VH"],
+        },
+        "assets": {
+            "vv": {
+                "href": href,
+                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                "raster:bands": [{"nodata": 0, "data_type": "uint16"}],
+            }
+        },
+    }
+
+
+def test_an_s3_asset_is_refused_before_any_raster_open() -> None:
+    """The href reaches GDAL otherwise, which reports a credentials error.
+
+    That message describes the symptom and hides the cause, so the refusal
+    happens at the boundary that knows why.
+    """
+
+    service = ImageryService(stac_item_fetcher=lambda *a, **k: _s1_item_as_published())
+
+    with pytest.raises(InvalidInputError) as caught:
+        service.retrieve(
+            ImageryRequest(
+                scene_id="S1A_IW_GRDH_1SDV_20241230T003219_20241230T003244_057214_07096B",
+                bbox=BoundingBox(west=80.2, south=13.0, east=80.3, north=13.1),
+                asset="vv",
+                collection="sentinel-1-grd",
+            )
+        )
+
+    message = str(caught.value)
+    assert "s3://" in message
+    assert "Sentinel-1" in message
+    # It must not read as a credentials problem - that is not the cause.
+    assert "credential" not in message.lower()
+
+
+def test_the_refusal_names_the_scheme_it_cannot_read() -> None:
+    service = ImageryService(
+        stac_item_fetcher=lambda *a, **k: _s1_item_as_published("ftp://example.test/x.tif")
+    )
+
+    with pytest.raises(InvalidInputError, match="ftp://"):
+        service.retrieve(
+            ImageryRequest(
+                scene_id="S1A_IW_GRDH_1SDV_20241230T003219_20241230T003244_057214_07096B",
+                bbox=BoundingBox(west=80.2, south=13.0, east=80.3, north=13.1),
+                asset="vv",
+                collection="sentinel-1-grd",
+            )
+        )
+
+
+def test_an_https_asset_is_still_accepted() -> None:
+    """The guard restricts the scheme; it must not break optical retrieval.
+
+    Reaching the raster layer at all proves the scheme check passed - the read
+    then fails only because the href points at nothing.
+    """
+
+    service = ImageryService(
+        stac_item_fetcher=lambda *a, **k: _s1_item_as_published(
+            "https://example.test/does-not-exist.tif"
+        )
+    )
+
+    with pytest.raises(AppError) as caught:
+        service.retrieve(
+            ImageryRequest(
+                scene_id="S1A_IW_GRDH_1SDV_20241230T003219_20241230T003244_057214_07096B",
+                bbox=BoundingBox(west=80.2, south=13.0, east=80.3, north=13.1),
+                asset="vv",
+                collection="sentinel-1-grd",
+            )
+        )
+    assert "s3://" not in str(caught.value)
+
+
+def test_quantitative_sar_is_not_reachable_at_all() -> None:
+    """Level 2 does not exist: no SAR band is in the analysis allowlist.
+
+    Sentinel-1 GRD ships raw DN amplitude with the calibration LUTs in
+    separate XML assets, so calibrated backscatter cannot be derived from the
+    band alone. Nothing may quietly start treating VV as a measurement.
+    """
+
+    from app.services.satellite.schemas import ANALYSIS_BAND_ASSETS
+
+    for sar_band in ("vv", "vh"):
+        assert sar_band not in ANALYSIS_BAND_ASSETS
+
+
+@pytest.mark.parametrize(
+    ("label", "href"),
+    [
+        ("NUL", "https://example.test/a.tif\x00.s3"),
+        ("CR", "https://example.test/a.tif\rs3://elsewhere"),
+        ("LF", "https://example.test/a.tif\ns3://elsewhere"),
+        ("tab", "https://example.test/a\t.tif"),
+    ],
+)
+def test_a_control_character_in_an_href_is_refused(label: str, href: str) -> None:
+    """One string must not be able to become two.
+
+    The scheme here is a perfectly good ``https``, so the scheme test alone
+    passes every one of these. A NUL truncates the path for any C consumer -
+    GDAL and curl are C - and CR/LF are the separators of an HTTP request, so
+    either can make the request actually sent differ from the URL that was
+    checked. The href comes from an EXTERNAL catalog, so that gap is worth
+    closing even though no live catalog publishes such a href today.
+    """
+
+    service = ImageryService(
+        stac_item_fetcher=lambda *a, **k: _s1_item_as_published(href)
+    )
+
+    with pytest.raises(InvalidInputError, match="control character"):
+        service.retrieve(
+            ImageryRequest(
+                scene_id="S1A_IW_GRDH_1SDV_20241230T003219",
+                bbox=BoundingBox(west=80.2, south=13.0, east=80.3, north=13.1),
+                asset="vv",
+                collection="sentinel-1-grd",
+            )
+        )

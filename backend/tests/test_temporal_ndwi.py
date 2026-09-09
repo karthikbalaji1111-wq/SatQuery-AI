@@ -45,6 +45,7 @@ from app.services.analysis.engines import (
 )
 from app.services.analysis.schemas import (
     Measurement,
+    NdwiTemporalChange,
     ObservationIndexResult,
     TemporalIndexComparison,
 )
@@ -101,6 +102,7 @@ def band(
     *,
     dtype: str = "uint16",
     nodata: float | None = 0.0,
+    crs: str = "EPSG:32644",
 ) -> BandWindow:
     array = np.asarray(values, dtype=dtype).reshape(1, -1)
     valid = (
@@ -115,7 +117,7 @@ def band(
         valid=valid,
         width=array.shape[1],
         height=1,
-        crs="EPSG:32644",
+        crs=crs,
         transform=from_origin(399960.0, 1500000.0, 10.0, 10.0),
         resolution=10.0,
         nodata=nodata,
@@ -757,7 +759,7 @@ def test_the_two_ndwi_flags_are_independent() -> None:
     assert len(imagery.calls) == 6  # 2 single-scene + 4 temporal
 
 
-def test_unimplemented_tasks_still_receive_a_comparison() -> None:
+def test_computed_temporal_change_reports_success() -> None:
     execution = make_execution(
         windows=[
             make_window(label="baseline", scene=make_scene("scene-a")),
@@ -770,7 +772,8 @@ def test_unimplemented_tasks_still_receive_a_comparison() -> None:
     )
     result, _ = analyze_temporal(execution)
 
-    assert result.status == "not_implemented"
+    assert result.status == "ok"
+    assert "not implemented" not in result.answer.lower()
     assert result.temporal_comparison is not None
 
 
@@ -1230,14 +1233,14 @@ def change_of(
     bk = bands["baseline_kwargs"] or {}
     tk = bands["target_kwargs"] or {}
     return compute_ndwi_temporal_change(
-        baseline_green=change_band(base_g, **bk),
-        baseline_nir=change_band(base_n, **bk),
-        target_green=change_band(targ_g, **tk),
-        target_nir=change_band(targ_n, **tk),
-        baseline_scene_id=kwargs.pop("baseline_scene_id", "scene-a"),
-        target_scene_id=kwargs.pop("target_scene_id", "scene-b"),
-        baseline_acquired_at=kwargs.pop("baseline_acquired_at", None),
-        target_acquired_at=kwargs.pop("target_acquired_at", None),
+        first_green=change_band(base_g, **bk),
+        first_nir=change_band(base_n, **bk),
+        second_green=change_band(targ_g, **tk),
+        second_nir=change_band(targ_n, **tk),
+        first_scene_id=kwargs.pop("first_scene_id", "scene-a"),
+        second_scene_id=kwargs.pop("second_scene_id", "scene-b"),
+        first_acquired_at=kwargs.pop("first_acquired_at", None),
+        second_acquired_at=kwargs.pop("second_acquired_at", None),
         window_label=kwargs.pop("window_label", "baseline→target"),
     )
 
@@ -1321,16 +1324,16 @@ def test_nodata_is_excluded_from_the_pairing() -> None:
 
 def test_non_finite_samples_are_excluded() -> None:
     c = compute_ndwi_temporal_change(
-        baseline_green=change_band(
+        first_green=change_band(
             [[3.0, float("nan"), float("inf")]], dtype="float32", nodata=None
         ),
-        baseline_nir=change_band([[1.0, 1.0, 1.0]], dtype="float32", nodata=None),
-        target_green=change_band([[9.0, 9.0, 9.0]], dtype="float32", nodata=None),
-        target_nir=change_band([[1.0, 1.0, 1.0]], dtype="float32", nodata=None),
-        baseline_scene_id="a",
-        target_scene_id="b",
-        baseline_acquired_at=None,
-        target_acquired_at=None,
+        first_nir=change_band([[1.0, 1.0, 1.0]], dtype="float32", nodata=None),
+        second_green=change_band([[9.0, 9.0, 9.0]], dtype="float32", nodata=None),
+        second_nir=change_band([[1.0, 1.0, 1.0]], dtype="float32", nodata=None),
+        first_scene_id="a",
+        second_scene_id="b",
+        first_acquired_at=None,
+        second_acquired_at=None,
         window_label="w",
     )
 
@@ -1340,14 +1343,14 @@ def test_non_finite_samples_are_excluded() -> None:
 
 def test_a_zero_denominator_pixel_is_excluded() -> None:
     c = compute_ndwi_temporal_change(
-        baseline_green=change_band([[-1.0, 3.0]], dtype="float32", nodata=None),
-        baseline_nir=change_band([[1.0, 1.0]], dtype="float32", nodata=None),
-        target_green=change_band([[9.0, 9.0]], dtype="float32", nodata=None),
-        target_nir=change_band([[1.0, 1.0]], dtype="float32", nodata=None),
-        baseline_scene_id="a",
-        target_scene_id="b",
-        baseline_acquired_at=None,
-        target_acquired_at=None,
+        first_green=change_band([[-1.0, 3.0]], dtype="float32", nodata=None),
+        first_nir=change_band([[1.0, 1.0]], dtype="float32", nodata=None),
+        second_green=change_band([[9.0, 9.0]], dtype="float32", nodata=None),
+        second_nir=change_band([[1.0, 1.0]], dtype="float32", nodata=None),
+        first_scene_id="a",
+        second_scene_id="b",
+        first_acquired_at=None,
+        second_acquired_at=None,
         window_label="w",
     )
 
@@ -1446,17 +1449,17 @@ def test_the_change_carries_both_scenes_and_their_dates() -> None:
         BASE_N,
         [[9, 9], [9, 9]],
         [[1, 1], [1, 1]],
-        baseline_scene_id="S2_BASE",
-        target_scene_id="S2_TARGET",
-        baseline_acquired_at=base_at,
-        target_acquired_at=targ_at,
+        first_scene_id="S2_BASE",
+        second_scene_id="S2_TARGET",
+        first_acquired_at=base_at,
+        second_acquired_at=targ_at,
         window_label="baseline→target",
     )
 
     assert c is not None
-    assert (c.baseline_scene_id, c.target_scene_id) == ("S2_BASE", "S2_TARGET")
-    assert c.baseline_acquired_at == base_at
-    assert c.target_acquired_at == targ_at
+    assert (c.first_scene_id, c.second_scene_id) == ("S2_BASE", "S2_TARGET")
+    assert c.first_acquired_at == base_at
+    assert c.second_acquired_at == targ_at
     assert c.window_label == "baseline→target"
 
 
@@ -1659,8 +1662,8 @@ def test_the_change_carries_both_scenes() -> None:
     comparison = result.temporal_comparison
 
     assert comparison is not None and comparison.change is not None
-    assert comparison.change.baseline_scene_id == "scene-a"
-    assert comparison.change.target_scene_id == "scene-b"
+    assert comparison.change.first_scene_id == "scene-a"
+    assert comparison.change.second_scene_id == "scene-b"
 
 
 def test_the_aggregate_difference_is_unchanged_by_the_paired_change() -> None:
@@ -1680,3 +1683,145 @@ def test_the_comparison_serializes_with_the_change() -> None:
     assert restored.temporal_comparison is not None
     assert restored.temporal_comparison.change is not None
     assert restored.temporal_comparison.change.corners_wgs84 is not None
+
+
+# --------------------------------------------------------------------------- #
+# Acquisition order vs requested role
+# --------------------------------------------------------------------------- #
+#
+# `TemporalComparison` does not require the baseline window to precede the
+# target - nothing validates that, and a user may legitimately ask to compare
+# December against the previous June. Pairing orders by ACQUISITION time, so in
+# that case the window labelled "target" is the earlier one.
+#
+# The change result must therefore never name its sides after the requested
+# roles. It names them `first` (earlier) and `second` (later), and the
+# requested roles stay readable in `window_label`. These tests pin that, because
+# an inverted request previously reported the target scene as the baseline.
+
+
+def inverted_execution() -> QueryExecutionResult:
+    """A 'baseline' window acquired AFTER the 'target' window."""
+
+    return make_execution(
+        windows=[
+            make_window(
+                label="baseline",
+                scene=make_scene("scene-b", datetime_="2024-03-05T05:00:00Z"),
+            ),
+            make_window(
+                label="target",
+                scene=make_scene("scene-a", datetime_="2024-01-05T05:00:00Z"),
+            ),
+        ]
+    )
+
+
+def test_first_and_second_follow_acquisition_not_the_requested_role() -> None:
+    result, _ = analyze_temporal(inverted_execution())
+    change = result.temporal_comparison.change
+    assert change is not None
+
+    # scene-a was acquired in January, scene-b in March. Whatever the request
+    # called them, the earlier one is first.
+    assert change.first_scene_id == "scene-a"
+    assert change.second_scene_id == "scene-b"
+    assert change.first_acquired_at < change.second_acquired_at
+
+    # The requested roles are not lost - they are just not the axis names.
+    assert change.window_label == "target→baseline"
+
+
+def test_the_change_sign_is_later_minus_earlier_in_both_request_orders() -> None:
+    """The number must describe time, not the order the user typed windows in.
+
+    scene-a indexes to NDWI 0.5 and scene-b to 0.0, and scene-a is the earlier
+    acquisition, so the index FELL over time. The reported change must be
+    negative whichever way round the request named the windows.
+    """
+
+    normal, _ = analyze_temporal(two_window_execution())
+    inverted, _ = analyze_temporal(inverted_execution())
+
+    assert normal.temporal_comparison.change is not None
+    assert inverted.temporal_comparison.change is not None
+    assert normal.temporal_comparison.change.change_mean < 0
+    assert (
+        normal.temporal_comparison.change.change_mean
+        == inverted.temporal_comparison.change.change_mean
+    )
+
+
+def test_no_axis_is_named_after_a_requested_role() -> None:
+    """A structural guard against reintroducing baseline/target field names.
+
+    The naming, not the arithmetic, was the defect: the value was right and the
+    label was wrong, which is the harder kind to notice.
+    """
+
+    fields = set(NdwiTemporalChange.model_fields)
+    assert not {f for f in fields if "baseline" in f or "target" in f}
+    assert {"first_scene_id", "second_scene_id"} <= fields
+
+
+# --------------------------------------------------------------------------- #
+# The paired-pixel change must be citable
+# --------------------------------------------------------------------------- #
+#
+# These are the numbers the interface shows for a temporal query. If they are
+# not offered as evidence, an answer quoting the mean change is judged
+# ungrounded and withheld - a real, pixel-derived measurement rejected because
+# nothing had presented it. The failure is silent and in the worst direction,
+# so it is pinned here.
+
+
+def test_paired_pixel_change_reaches_agent_evidence() -> None:
+    from app.services.agent.executor import _analysis_items
+
+    result, _ = analyze_temporal(two_window_execution())
+    assert result.temporal_comparison.change is not None
+
+    ids = {item.id for item in _analysis_items(result)}
+    assert "temporal_ndwi.change.ndwi_change_mean" in ids
+    assert "temporal_ndwi.change.paired_valid_pixel_count" in ids
+    assert "temporal_ndwi.change.pair" in ids
+
+
+def test_the_change_evidence_is_numerically_authoritative() -> None:
+    """Its source must be one grounding accepts, or the answer is withheld."""
+
+    from app.services.agent.executor import _analysis_items
+    from app.services.agent.grounding import _NUMERIC_AUTHORITIES
+
+    result, _ = analyze_temporal(two_window_execution())
+    change_items = [
+        item
+        for item in _analysis_items(result)
+        if item.id.startswith("temporal_ndwi.change.")
+        and item.measurement is not None
+    ]
+
+    assert change_items
+    for item in change_items:
+        assert item.source in _NUMERIC_AUTHORITIES
+
+
+def test_no_change_evidence_when_the_grids_were_refused() -> None:
+    """Nothing may be cited for a comparison that was declined."""
+
+    from app.services.agent.executor import _analysis_items
+
+    bands = {
+        "scene-a": {"green": band([3]), "nir": band([1])},
+        "scene-b": {
+            "green": band([5], crs="EPSG:32643"),
+            "nir": band([5], crs="EPSG:32643"),
+        },
+    }
+    result, _ = analyze_temporal(
+        two_window_execution(), FakeImageryService(bands=bands)
+    )
+
+    assert result.temporal_comparison.change is None
+    ids = {item.id for item in _analysis_items(result)}
+    assert not any(i.startswith("temporal_ndwi.change.") for i in ids)

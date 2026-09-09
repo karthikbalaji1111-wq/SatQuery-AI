@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.core.logging import get_logger
@@ -82,6 +83,42 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(exc.code, exc.message),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _handle_request_validation(
+        _: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Give a schema rejection the same envelope as every other error.
+
+        FastAPI's default renders ``{"detail": [...]}``, so a 422 arrived in one
+        of two shapes depending on whether Pydantic or an :class:`AppError`
+        produced it. A client reading ``error.message`` got nothing from the
+        first kind and fell back to a status-code-only string, discarding the
+        one useful thing a validation failure carries: which field, and why.
+
+        The code stays distinct from ``invalid_input``: a structurally
+        malformed body and a well-formed but semantically invalid one are
+        different failures, and only the envelope is being unified here.
+
+        The offending VALUE is deliberately never echoed - only its location
+        and the reason. Echoing input back is how a request's own contents
+        return to it through an error, and a request body may carry a
+        credential the sender should not be handed back.
+        """
+
+        details = []
+        for error in exc.errors():
+            location = ".".join(
+                str(part) for part in error.get("loc", ()) if part != "body"
+            )
+            reason = str(error.get("msg", "is invalid"))
+            details.append(f"{location or 'body'}: {reason}")
+        message = "; ".join(details) or "The request body is invalid."
+        logger.info("Request validation failed: %s", message)
+        return JSONResponse(
+            status_code=422,  # Unprocessable Content, as above
+            content=_error_body("validation_error", message),
         )
 
     @app.exception_handler(Exception)

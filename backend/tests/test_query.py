@@ -15,7 +15,9 @@ from app.main import create_app
 from app.services.geospatial import ResolveRequest, ResolveResponse
 from app.services.geospatial.schemas import BoundingBox
 from app.services.query import QueryService, SatQueryIntent
+from app.services.query.schemas import MAX_TIME_WINDOWS, TimeRange
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 BUILD_PLAN_URL = "/api/v1/query/build-plan"
 
@@ -329,3 +331,60 @@ def test_service_build_plan_returns_intent_and_bbox() -> None:
     assert plan.intent == intent
     assert plan.bbox == DEFAULT_BBOX
     assert fake.calls[0].place == "Chennai"
+
+
+# --------------------------------------------------------------------------- #
+# Temporal windows are a resource bound, not just a shape
+# --------------------------------------------------------------------------- #
+#
+# Execution runs one catalog search per (modality x window), sequentially, and
+# with imagery each additionally performs a windowed COG read and a PNG encode
+# whose base64 is held in the response. The endpoint is unauthenticated, so an
+# unbounded list turns ONE request into an unbounded number of outbound
+# requests against a third-party catalog, and into unbounded memory here.
+# Measured before the bound existed: 500 windows x 2 modalities issued 1000
+# upstream searches, and 50,000 windows were accepted without complaint.
+
+
+def test_a_query_may_not_span_more_windows_than_the_bound() -> None:
+    client, fake = make_client()
+    window = {"start_date": "2024-01-01", "end_date": "2024-01-02"}
+    response = client.post(
+        BUILD_PLAN_URL,
+        json=intent_body(
+            temporal_mode="timeseries",
+            time_windows=[window] * (MAX_TIME_WINDOWS + 1),
+        ),
+    )
+    assert response.status_code == 422
+    # Rejected before anything downstream was contacted.
+    assert fake.calls == []
+
+
+def test_the_bound_itself_is_accepted() -> None:
+    """The limit must not be so tight that a legitimate series is refused."""
+
+    client, _ = make_client()
+    window = {"start_date": "2024-01-01", "end_date": "2024-01-02"}
+    response = client.post(
+        BUILD_PLAN_URL,
+        json=intent_body(
+            temporal_mode="timeseries",
+            time_windows=[window] * MAX_TIME_WINDOWS,
+        ),
+    )
+    assert response.status_code == 200
+
+
+def test_the_bound_applies_to_the_intent_itself_not_just_one_route() -> None:
+    """One boundary, so every path that builds an intent inherits it."""
+
+    window = TimeRange(start_date="2024-01-01", end_date="2024-01-02")
+    with pytest.raises(ValidationError, match="at most"):
+        SatQueryIntent(
+            location_query="Chennai",
+            temporal_mode="timeseries",
+            time_windows=[window] * (MAX_TIME_WINDOWS + 1),
+            modalities=["sentinel-2-optical"],
+            task="visualize",
+        )

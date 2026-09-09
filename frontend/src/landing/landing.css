@@ -1,0 +1,770 @@
+/* ==========================================================================
+   SatQuery AI — landing page
+   ==========================================================================
+   Editorial, not SaaS. The page is mostly dark because the subject is space,
+   but it is dark like a printed page at night rather than like a dashboard:
+   no glass, no glow, no gradient blobs, no card grid. Hierarchy comes from
+   type size and whitespace, and the one bright object on screen is the planet.
+   ========================================================================== */
+
+:root {
+  --space: #05070c;
+  --space-2: #0a0f18;
+  --ink: #f2f5f8;
+  --ink-2: #b9c4d0;
+  --ink-3: #8b97a6;
+  --line: rgb(255 255 255 / 0.12);
+  --line-soft: rgb(255 255 255 / 0.07);
+  --blue: #7fb4e8;
+  --cyan: #86d9e0;
+  --green: #86c9a0;
+  --sun: #f0c48a;
+
+  --font: "Aptos Display", "Aptos", "Segoe UI", system-ui, -apple-system,
+    "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  /* Native scrolling, untouched. Smooth behaviour is left off deliberately:
+     the camera easing already provides the smoothness, and doing both makes
+     anchor jumps feel sluggish. */
+  background: var(--space);
+}
+
+body {
+  margin: 0;
+  background: var(--space);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* --------------------------------------------------------------- 3D stage */
+
+.earth-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.earth-canvas,
+.earth-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.earth-canvas {
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.earth-canvas[data-ready="true"] {
+  opacity: 1;
+}
+
+/* Present from first paint, and the whole visual when WebGL is unavailable.
+   A dim off-centre disc reads as a planet edge rather than as a loading
+   spinner, so nothing ever looks broken. */
+.earth-fallback {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      62% 62% at 34% 46%,
+      rgb(38 68 110 / 0.55) 0%,
+      rgb(14 26 46 / 0.5) 42%,
+      transparent 68%
+    ),
+    radial-gradient(120% 90% at 50% 0%, #0a1220 0%, var(--space) 62%);
+  opacity: 1;
+  transition: opacity 700ms ease;
+}
+
+.earth-fallback[data-hidden="true"] {
+  opacity: 0;
+}
+
+/* ----------------------------------------------------------- chrome/nav */
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  padding: 10px 16px;
+  background: var(--ink);
+  color: var(--space);
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  left: 16px;
+  top: 16px;
+}
+
+.landing-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 40px;
+  /* Not a solid bar - the planet should still read through - but enough of a
+     falloff that the wordmark never lands on a bright limb or collides with
+     a chapter scrolling underneath it. */
+  /* Opaque where the wordmark and nav actually sit, then falling away. An
+     earlier softer ramp let chapter text scroll through it and collide with
+     the wordmark - measured at three scroll positions, not guessed. */
+  background: linear-gradient(
+    180deg,
+    rgb(5 7 12 / 1) 0%,
+    rgb(5 7 12 / 1) 62%,
+    rgb(5 7 12 / 0.78) 82%,
+    transparent 100%
+  );
+}
+
+.wordmark {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.wordmark span {
+  color: var(--blue);
+}
+
+.landing-header nav {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+
+.landing-header a {
+  color: var(--ink-2);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.landing-header a:hover {
+  color: var(--ink);
+}
+
+.nav-cta {
+  padding: 7px 15px;
+  border: 1px solid var(--line);
+  color: var(--ink) !important;
+}
+
+.nav-cta:hover {
+  border-color: rgb(255 255 255 / 0.34);
+}
+
+/* ------------------------------------------------------------- chapters */
+
+main {
+  position: relative;
+  z-index: 1;
+}
+
+.chapter {
+  /* Positioned so the readability scrim below is scoped to THIS chapter.
+     Without it the scrim resolves against `main` and each of the seven
+     chapters paints a full-page wash over the canvas - which is exactly what
+     happened, and it hid the planet completely. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 100svh;
+  padding: 96px 40px;
+}
+
+.chapter[data-align="right"] {
+  justify-content: flex-end;
+}
+
+.chapter[data-align="centre"] {
+  justify-content: center;
+  text-align: center;
+}
+
+.chapter-inner {
+  max-width: 620px;
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 800ms ease, transform 800ms ease;
+}
+
+.chapter[data-shown="true"] .chapter-inner {
+  opacity: 1;
+  transform: none;
+}
+
+/* A readable ground behind text that sits over the planet. Not a card: no
+   border, no radius, no blur - just enough falloff that type never fights
+   a coastline. */
+.chapter[data-align="left"] .chapter-inner,
+.chapter[data-align="right"] .chapter-inner {
+  padding: 4px 0;
+}
+
+.chapter::before {
+  content: "";
+  position: absolute;
+  /* Extended past the chapter and feathered top and bottom. Each scrim is a
+     box, so with hard edges the seam between two chapters drew a visible
+     rectangle straight across the planet. Overlapping and fading them means
+     the backdrop reads as one continuous shot, which is the whole point. */
+  inset: -14vh 0;
+  pointer-events: none;
+  z-index: -1;
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000 14%,
+    #000 86%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000 14%,
+    #000 86%,
+    transparent 100%
+  );
+}
+
+/* Held near-opaque across the whole text column, then falling away fast.
+   An earlier, gentler version let headlines land on a lit coastline, which is
+   the one thing this page cannot afford: the planet is the backdrop and the
+   words are the point. */
+.chapter[data-align="left"]::before {
+  background: linear-gradient(
+    95deg,
+    rgb(5 7 12 / 0.95) 0%,
+    rgb(5 7 12 / 0.93) 36%,
+    rgb(5 7 12 / 0.66) 54%,
+    transparent 74%
+  );
+}
+
+.chapter[data-align="right"]::before {
+  background: linear-gradient(
+    265deg,
+    rgb(5 7 12 / 0.95) 0%,
+    rgb(5 7 12 / 0.93) 36%,
+    rgb(5 7 12 / 0.66) 54%,
+    transparent 74%
+  );
+}
+
+.chapter[data-align="centre"]::before {
+  /* Lighter than the side scrims on purpose: the closing type is large and
+     bold enough to hold at lower contrast, and this frame is the emotional
+     payoff - burying the planet under it would waste the one moment the page
+     has been travelling toward. */
+  background: radial-gradient(
+    76% 66% at 50% 46%,
+    rgb(5 7 12 / 0.74) 0%,
+    rgb(5 7 12 / 0.58) 46%,
+    rgb(5 7 12 / 0.26) 72%,
+    transparent 92%
+  );
+}
+
+/* ----------------------------------------------------------- typography */
+
+h1,
+h2,
+h3 {
+  margin: 0 0 18px;
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  line-height: 1.08;
+}
+
+.hero-title {
+  font-size: clamp(40px, 6.2vw, 76px);
+  margin-bottom: 24px;
+}
+
+h2 {
+  font-size: clamp(30px, 3.9vw, 48px);
+  margin-bottom: 20px;
+}
+
+h3 {
+  font-size: 19px;
+  letter-spacing: -0.012em;
+  margin-bottom: 4px;
+}
+
+p {
+  margin: 0 0 16px;
+  color: var(--ink-2);
+}
+
+.lede {
+  font-size: clamp(16px, 1.5vw, 19px);
+  color: var(--ink-2);
+  max-width: 52ch;
+}
+
+.close-title {
+  font-size: clamp(34px, 5vw, 62px);
+}
+
+/* One editorial voice, used four times in the whole page. Italic and quiet:
+   an annotation in the margin, not a pull quote. */
+.aside {
+  margin-top: 28px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 15px;
+  font-style: italic;
+  letter-spacing: 0.004em;
+}
+
+.fineprint {
+  color: var(--ink-3);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+/* ------------------------------------------------------------------ CTA */
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.cta {
+  display: inline-block;
+  padding: 13px 26px;
+  font-size: 15px;
+  font-weight: 550;
+  text-decoration: none;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.cta-primary {
+  background: var(--ink);
+  color: var(--space);
+}
+
+.cta-primary:hover {
+  background: #ffffff;
+}
+
+.cta-secondary {
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.cta-secondary:hover {
+  border-color: rgb(255 255 255 / 0.36);
+}
+
+.scroll-cue {
+  margin-top: 54px;
+  color: var(--ink-3);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.scroll-cue span {
+  margin-right: 8px;
+}
+
+/* ---------------------------------------------------------------- lists */
+
+.plain-list {
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plain-list li {
+  padding: 11px 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-2);
+  font-size: 15.5px;
+}
+
+.plain-list strong {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+/* Pipeline: a numbered sequence with a rule running down it, so it reads as
+   one path rather than six tiles. */
+.pipeline {
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.pipeline li {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 2px 14px;
+  padding: 13px 0 13px 0;
+  border-left: 1px solid var(--line);
+  padding-left: 20px;
+  margin-left: 6px;
+  position: relative;
+}
+
+.pipeline li::before {
+  content: "";
+  position: absolute;
+  left: -3.5px;
+  top: 20px;
+  width: 6px;
+  height: 6px;
+  background: var(--blue);
+}
+
+.pipeline-index {
+  grid-row: span 2;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding-top: 3px;
+}
+
+.pipeline-step {
+  color: var(--ink);
+  font-size: 16.5px;
+  font-weight: 550;
+}
+
+.pipeline-detail {
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* -------------------------------------------------------------- sensors */
+
+.sensors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 34px;
+  margin-top: 26px;
+}
+
+.sensor h3 {
+  color: var(--ink);
+}
+
+.sensor-kind {
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  margin-bottom: 12px;
+}
+
+.sensor p {
+  font-size: 14.5px;
+}
+
+.indices {
+  margin: 14px 0;
+}
+
+.indices > div {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.indices dt {
+  color: var(--green);
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 52px;
+}
+
+.indices dd {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+/* The capability boundary. Amber, because it is a caveat - and stated in the
+   same visual language the product itself uses for limitations. */
+.boundary {
+  padding: 11px 13px;
+  border-left: 2px solid var(--sun);
+  background: rgb(240 196 138 / 0.06);
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.boundary strong {
+  color: var(--sun);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ questions */
+
+.questions {
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.questions li {
+  padding: 18px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.question-ask {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: clamp(18px, 2.1vw, 23px);
+  letter-spacing: -0.015em;
+}
+
+.question-answer {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+}
+
+.question-index {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.question-note {
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+/* --------------------------------------------------------------- trail */
+
+.trail {
+  margin: 24px 0 0;
+  padding: 0 0 0 1px;
+  list-style: none;
+  counter-reset: trail;
+}
+
+.trail li {
+  position: relative;
+  padding: 9px 0 9px 26px;
+  color: var(--ink-2);
+  font-size: 15.5px;
+  border-left: 1px solid var(--line);
+}
+
+.trail li::before {
+  content: "";
+  position: absolute;
+  left: -3.5px;
+  top: 17px;
+  width: 6px;
+  height: 6px;
+  background: var(--cyan);
+}
+
+.trail li:last-child {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.export-figure {
+  margin: 28px 0 0;
+}
+
+.export-figure figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.figure-note {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.export-figure pre {
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  background: rgb(255 255 255 / 0.025);
+  overflow-x: auto;
+}
+
+.export-figure code {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+/* -------------------------------------------------------------- footer */
+
+.landing-footer {
+  position: relative;
+  z-index: 1;
+  padding: 46px 40px 60px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--space);
+}
+
+.landing-footer p {
+  margin: 0 0 6px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.credits {
+  color: rgb(139 151 166 / 0.7);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- focus */
+
+a:focus-visible,
+.cta:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+
+/* ----------------------------------------------------------- responsive */
+
+@media (max-width: 1100px) {
+  .sensors {
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+}
+
+@media (max-width: 860px) {
+  .landing-header {
+    padding: 14px 20px;
+    /* Nearly solid here. There is no spare width on a phone, so chapter text
+       scrolls directly under the wordmark and a soft gradient let the two
+       overlap illegibly. */
+    /* Fully opaque where the wordmark and CTA sit, matching desktop. At 0.98
+       a chapter heading scrolling underneath was still legible through it -
+       caught at 390px, where there is no spare width to hide the collision. */
+    background: linear-gradient(
+      180deg,
+      rgb(5 7 12 / 1) 0%,
+      rgb(5 7 12 / 1) 74%,
+      rgb(5 7 12 / 0.8) 90%,
+      transparent 100%
+    );
+  }
+  .landing-header nav {
+    gap: 16px;
+  }
+  .landing-header nav a:not(.nav-cta) {
+    display: none;
+  }
+  .chapter {
+    padding: 80px 20px;
+    /* On a phone the planet is behind the text at all times, so every chapter
+       gets the same readable ground rather than a directional one. */
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .chapter[data-align="right"],
+  .chapter[data-align="centre"] {
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .chapter::before,
+  .chapter[data-align="right"]::before,
+  .chapter[data-align="centre"]::before {
+    background: linear-gradient(
+      180deg,
+      rgb(5 7 12 / 0.72) 0%,
+      rgb(5 7 12 / 0.86) 40%,
+      rgb(5 7 12 / 0.72) 100%
+    );
+  }
+  .chapter-inner {
+    max-width: none;
+  }
+  .landing-footer {
+    padding: 34px 20px 44px;
+  }
+}
+
+/* ------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  /* Content appears rather than animating in. The 3D scene holds its opening
+     pose (handled in EarthCanvas), so the Earth is still there - it simply
+     does not move with the page. */
+  .chapter-inner {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .earth-canvas,
+  .earth-fallback {
+    transition: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The real product, shown as evidence rather than as decoration.
+   A hairline frame and a caption - no device mockup, no perspective tilt, no
+   drop shadow pretending to be a laptop. The screenshot has to look like a
+   record of something that happened, because that is what it is. */
+.product-shot {
+  margin: 34px 0 0;
+}
+
+.product-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-soft);
+  background: var(--space-2);
+}
+
+.product-shot figcaption {
+  margin-top: 9px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+}

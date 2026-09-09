@@ -1739,3 +1739,232 @@ def test_the_measurement_is_separate_from_the_overlay() -> None:
     assert result.spatial_measurement is not None
     assert result.ndwi_overlay is not None
     assert not hasattr(result.spatial_measurement, "image_base64")
+
+
+# --------------------------------------------------------------------------- #
+# Multi-index spectral analysis
+# --------------------------------------------------------------------------- #
+#
+# NDVI, NDWI and NDBI are the same normalised difference over different band
+# pairs, so they share one engine and therefore one set of numerical
+# guarantees. These tests pin the formulas against hand-computed values and
+# prove the shared core did not change NDWI.
+
+
+def nested_band(
+    values: list[list[float]],
+    *,
+    resolution: float = 10.0,
+    origin: tuple[float, float] = (399960.0, 1500000.0),
+    crs: str | None = "EPSG:32644",
+    nodata: float | None = 0.0,
+) -> BandWindow:
+    """A 2-D BandWindow with a real affine, for grid and alignment tests."""
+
+    array = np.asarray(values, dtype="uint16")
+    valid = np.ones(array.shape, dtype=bool)
+    if nodata is not None:
+        valid = valid & (array != nodata)
+    return BandWindow(
+        values=array,
+        valid=valid,
+        width=array.shape[1],
+        height=array.shape[0],
+        crs=crs,
+        transform=from_origin(origin[0], origin[1], resolution, resolution),
+        resolution=resolution,
+        nodata=nodata,
+        window={
+            "col_off": 0,
+            "row_off": 0,
+            "width": array.shape[1],
+            "height": array.shape[0],
+        },
+        source_shape=[array.shape[0], array.shape[1]],
+    )
+
+
+def test_ndvi_matches_the_hand_computed_formula() -> None:
+    """NDVI = (nir - red) / (nir + red), on raw DN."""
+
+    from app.services.analysis.engines import compute_index_measurements
+    from app.services.analysis.indices import NDVI
+
+    # (3000-1000)/(3000+1000) = 0.5 ; (2000-3000)/(2000+3000) = -0.2
+    nir = band([3000, 2000])
+    red = band([1000, 3000])
+    values = named(compute_index_measurements(NDVI, nir, red))
+
+    assert values["ndvi_valid_pixel_count"] == 2
+    assert values["ndvi_max"] == pytest.approx(0.5)
+    assert values["ndvi_min"] == pytest.approx(-0.2)
+    assert values["ndvi_mean"] == pytest.approx(0.15)
+
+
+def test_ndbi_matches_the_hand_computed_formula() -> None:
+    """NDBI = (swir - nir) / (swir + nir), on raw DN."""
+
+    from app.services.analysis.engines import compute_index_measurements
+    from app.services.analysis.indices import NDBI
+
+    swir = band([3000, 1000])
+    nir = band([1000, 3000])
+    values = named(compute_index_measurements(NDBI, swir, nir))
+
+    assert values["ndbi_max"] == pytest.approx(0.5)
+    assert values["ndbi_min"] == pytest.approx(-0.5)
+
+
+def test_the_index_engines_agree_with_the_shipped_ndwi() -> None:
+    """The shared core must not have moved NDWI by even a float.
+
+    NDWI is the validated path; NDVI and NDBI were added by generalising its
+    arithmetic, so this pins that the generalisation was behaviour-preserving.
+    """
+
+    from app.services.analysis.engines import (
+        compute_index_measurements,
+        compute_ndwi_measurements,
+    )
+    from app.services.analysis.indices import NDWI
+
+    green = band([1500, 900, 4000])
+    nir = band([1200, 3000, 100])
+
+    shipped = named(compute_ndwi_measurements(green, nir))
+    generic = named(compute_index_measurements(NDWI, green, nir))
+
+    for key in ("ndwi_mean", "ndwi_min", "ndwi_max", "ndwi_valid_pixel_count"):
+        assert generic[key] == shipped[key]
+
+
+@pytest.mark.parametrize("index_key", ["ndvi", "ndwi", "ndbi"])
+def test_every_index_excludes_nodata_and_zero_denominators(index_key: str) -> None:
+    """The numerical guarantees are shared, so they must hold for all three."""
+
+    from app.services.analysis.engines import compute_index_measurements
+    from app.services.analysis.indices import resolve_index
+
+    index = resolve_index(index_key)
+    # Column 0: both nodata. Column 1: a real pair. Column 2: nodata in one.
+    high = band([0, 3000, 0])
+    low = band([0, 1000, 2000])
+    values = named(compute_index_measurements(index, high, low))
+
+    assert values[f"{index_key}_valid_pixel_count"] == 1
+    assert values[f"{index_key}_mean"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("index_key", ["ndvi", "ndwi", "ndbi"])
+def test_no_valid_pixels_reports_a_count_and_nothing_else(index_key: str) -> None:
+    """A fabricated statistic over zero pixels would be worse than silence."""
+
+    from app.services.analysis.engines import compute_index_measurements
+    from app.services.analysis.indices import resolve_index
+
+    index = resolve_index(index_key)
+    values = named(compute_index_measurements(index, band([0, 0]), band([0, 0])))
+
+    assert values == {f"{index_key}_valid_pixel_count": 0.0}
+
+
+def test_an_unknown_index_is_refused_not_guessed() -> None:
+    from app.core.errors import InvalidInputError
+    from app.services.analysis.indices import resolve_index
+
+    with pytest.raises(InvalidInputError, match="Unknown spectral index"):
+        resolve_index("ndsi")
+
+
+def test_every_index_pair_shares_one_scale_so_it_cancels() -> None:
+    """The raw-DN decision only holds if both bands of a pair share a scale.
+
+    Verified against the live catalog: red, green, nir and swir16 all advertise
+    scale 0.0001. This pins the ASSUMPTION so that adding a future index over a
+    differently scaled band cannot silently invalidate the arithmetic.
+    """
+
+    from app.services.analysis.indices import SPECTRAL_INDICES
+
+    same_scale = {"red", "green", "nir", "swir16", "swir22"}
+    for index in SPECTRAL_INDICES.values():
+        assert {index.high_band, index.low_band} <= same_scale, (
+            f"{index.label} pairs a band outside the verified equal-scale set; "
+            "the scale would no longer cancel in the normalised difference."
+        )
+
+
+# --- co-registration ------------------------------------------------------- #
+
+
+def test_a_coarse_band_is_replicated_whole_onto_the_finer_grid() -> None:
+    """Whole-cell assignment invents no values - every number already existed."""
+
+    from app.services.analysis.engines import coregister_to_finer_grid
+
+    coarse = nested_band([[10, 20], [30, 40]], resolution=20.0)
+    fine = nested_band([[0] * 4] * 4, resolution=10.0)
+
+    aligned = coregister_to_finer_grid(coarse, fine)
+
+    assert aligned.values.shape == (4, 4)
+    assert set(np.unique(aligned.values).tolist()) == {10, 20, 30, 40}
+    # Each 20 m cell covers exactly its own four 10 m children.
+    assert aligned.values[0, 0] == 10 and aligned.values[1, 1] == 10
+    assert aligned.values[0, 2] == 20 and aligned.values[3, 3] == 40
+
+
+def test_alignment_is_refused_across_different_crs() -> None:
+    from app.services.analysis.engines import coregister_to_finer_grid
+
+    coarse = nested_band([[1, 2], [3, 4]], resolution=20.0, crs="EPSG:32643")
+    fine = nested_band([[0] * 4] * 4, resolution=10.0)
+
+    with pytest.raises(ImageryError, match="different coordinate"):
+        coregister_to_finer_grid(coarse, fine)
+
+
+def test_alignment_is_refused_on_a_non_nested_resolution() -> None:
+    """15 m into 10 m is not a whole-cell relationship, so it is declined."""
+
+    from app.services.analysis.engines import coregister_to_finer_grid
+
+    coarse = nested_band([[1, 2], [3, 4]], resolution=15.0)
+    fine = nested_band([[0] * 4] * 4, resolution=10.0)
+
+    with pytest.raises(ImageryError, match="whole multiple"):
+        coregister_to_finer_grid(coarse, fine)
+
+
+def test_alignment_marks_uncovered_pixels_invalid_rather_than_filling_them() -> None:
+    """A fine pixel with no parent is unmeasured, never substituted."""
+
+    from app.services.analysis.engines import coregister_to_finer_grid
+
+    # One 20 m cell covers only the top-left 2x2 of a 4x4 10 m window.
+    coarse = nested_band([[10]], resolution=20.0)
+    fine = nested_band([[0] * 4] * 4, resolution=10.0)
+
+    aligned = coregister_to_finer_grid(coarse, fine)
+
+    assert aligned.valid[:2, :2].all()
+    assert not aligned.valid[2:, :].any()
+    assert not aligned.valid[:, 2:].any()
+
+
+@pytest.mark.parametrize("index_key", ["ndvi", "ndwi", "ndbi"])
+@pytest.mark.parametrize("mismatch", ["crs", "affine"])
+def test_equal_shape_bands_on_different_ground_are_rejected(index_key, mismatch):
+    from app.services.analysis.engines import compute_index_measurements
+    from app.services.analysis.indices import resolve_index
+
+    high = nested_band([[3, 4]])
+    low = nested_band(
+        [[1, 2]],
+        crs="EPSG:32643" if mismatch == "crs" else "EPSG:32644",
+        origin=(399970.0, 1500000.0) if mismatch == "affine" else (399960.0, 1500000.0),
+    )
+    with pytest.raises(ImageryError, match="grids differ"):
+        compute_index_measurements(resolve_index(index_key), high, low)
+    with pytest.raises(ImageryError, match="grids differ"):
+        render_ndwi_overlay(high, low, scene_id="s", window_label="single")

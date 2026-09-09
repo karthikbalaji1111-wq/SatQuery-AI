@@ -14,6 +14,7 @@ import httpx
 from app.core.config import Settings
 from app.core.errors import UpstreamServiceError
 from app.core.logging import get_logger
+from app.services.satellite.rtc import catalog_for
 
 logger = get_logger("satellite.stac")
 
@@ -32,7 +33,7 @@ async def search_items(
 
     try:
         async with httpx.AsyncClient(
-            base_url=settings.stac_base_url,
+            base_url=catalog_for(body["collections"][0], settings),
             timeout=settings.http_timeout_seconds,
             headers={
                 "Accept": "application/geo+json",

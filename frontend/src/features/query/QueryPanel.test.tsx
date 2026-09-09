@@ -152,7 +152,7 @@ describe("QueryPanel - Sentinel-2 scene search", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument(),
+      expect(screen.getAllByText("S2B_44PLA_20240715_0_L2A").length).toBeGreaterThan(0),
     );
     expect(screen.getByText(/1 scene ·/)).toBeInTheDocument();
     expect(screen.getByText("2024-07-15T05:12:34Z")).toBeInTheDocument();
@@ -194,7 +194,7 @@ describe("QueryPanel - Sentinel-2 scene search", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument(),
+      expect(screen.getAllByText("S2B_44PLA_20240715_0_L2A").length).toBeGreaterThan(0),
     );
     const searchCall = fetchMock.mock.calls.find((c) =>
       String(c[0]).includes("/satellite/search"),
@@ -232,7 +232,7 @@ describe("QueryPanel - Sentinel-2 scene search", () => {
     } as Response);
 
     await waitFor(() =>
-      expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument(),
+      expect(screen.getAllByText("S2B_44PLA_20240715_0_L2A").length).toBeGreaterThan(0),
     );
   });
 
@@ -348,7 +348,7 @@ async function resolveSearchAndAwaitScene() {
     screen.getByRole("button", { name: /search sentinel-2 scenes/i }),
   );
   await waitFor(() =>
-    expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument(),
+    expect(screen.getAllByText("S2B_44PLA_20240715_0_L2A").length).toBeGreaterThan(0),
   );
 }
 
@@ -948,7 +948,7 @@ describe("QueryPanel - run full query", () => {
         screen.getByRole("heading", { name: /sentinel-2-optical/ }),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument();
+    expect(screen.getAllByText("S2B_44PLA_20240715_0_L2A").length).toBeGreaterThan(0);
     expect(screen.getByText("2024-07-01 → 2024-07-01")).toBeInTheDocument();
 
     const call = fetchMock.mock.calls.find((c) =>
@@ -1225,7 +1225,7 @@ describe("QueryPanel - analysis", () => {
     expect(
       screen.getByRole("heading", { name: /sentinel-2-optical/ }),
     ).toBeInTheDocument();
-    expect(screen.getByText("S2B_44PLA_20240715_0_L2A")).toBeInTheDocument();
+    expect(screen.getAllByText("S2B_44PLA_20240715_0_L2A").length).toBeGreaterThan(0);
     expect(
       screen.queryByRole("heading", { name: "Analysis" }),
     ).not.toBeInTheDocument();
@@ -1771,6 +1771,59 @@ describe("QueryPanel - a new preview invalidates the old one", () => {
   });
 });
 
+describe("QueryPanel - the last preview click wins", () => {
+  // Each candidate keeps its own button, so a reader can click scene B while
+  // scene A is still loading. Both requests run; before the ticket guard,
+  // whichever RESPONSE arrived last won, so a slow first click could silently
+  // replace the scene the reader actually chose second.
+  it("does not let a slow earlier preview overwrite a later one", async () => {
+    const sceneA = SCENE;
+    const sceneB = { ...SCENE, id: "S2B_FAST_0_L2A" };
+    const imageryA = imageryResponse(sceneA.id);
+    const imageryB = imageryResponse(sceneB.id);
+
+    let releaseA = () => {};
+    const slowA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+
+    let call = 0;
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": { body: searchResponse([sceneA, sceneB]) },
+      "/satellite/imagery": async () => {
+        const body = call++ === 0 ? imageryA : imageryB;
+        if (body === imageryA) await slowA;
+        return {
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(body)),
+        } as Response;
+      },
+    });
+
+    const onImagery = vi.fn();
+    render(<QueryPanel onImagery={onImagery} />);
+    await resolveSearchAndAwaitScene();
+
+    const buttons = screen.getAllByRole("button", { name: /load image/i });
+    fireEvent.click(buttons[0]); // A - will resolve LAST
+    fireEvent.click(buttons[1]); // B - resolves first; the user's real choice
+
+    await waitFor(() => expect(onImagery).toHaveBeenLastCalledWith(imageryB));
+
+    // Now let the superseded request finish. It must not commit.
+    releaseA();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(onImagery).toHaveBeenLastCalledWith(imageryB);
+    const delivered = onImagery.mock.calls
+      .map((c) => c[0])
+      .filter((v) => v !== null);
+    expect(delivered).not.toContainEqual(imageryA);
+  });
+});
+
 describe("QueryPanel - NDWI overlay handoff", () => {
   function ndwiOverlay() {
     return {
@@ -1973,10 +2026,10 @@ describe("QueryPanel - spatial NDWI measurement", () => {
 describe("QueryPanel - temporal NDWI change", () => {
   function temporalChange(overrides: Record<string, unknown> = {}) {
     return {
-      baseline_scene_id: "S2_BASE",
-      target_scene_id: "S2_TARGET",
-      baseline_acquired_at: "2025-01-04T05:00:00Z",
-      target_acquired_at: "2025-07-12T05:00:00Z",
+      first_scene_id: "S2_BASE",
+      second_scene_id: "S2_TARGET",
+      first_acquired_at: "2025-01-04T05:00:00Z",
+      second_acquired_at: "2025-07-12T05:00:00Z",
       window_label: "baseline→target",
       paired_valid_pixel_count: 33600,
       change_mean: 0.118,
@@ -2074,5 +2127,153 @@ describe("QueryPanel - temporal NDWI change", () => {
   it("signs a falling index correctly", async () => {
     await renderChange(temporalChange({ change_mean: -0.25 }));
     expect(screen.getByText(/-0\.250/)).toBeInTheDocument();
+  });
+});
+
+// The footprint map should show where a request applies however the request
+// was made — the manual path resolves a real bbox just as the agent does.
+describe("QueryPanel - resolved area reaches the footprint", () => {
+  it("reports the resolved bbox upward", async () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    const onAoi = vi.fn();
+    render(<QueryPanel onAoi={onAoi} />);
+
+    fireEvent.change(screen.getByLabelText("Place name"), {
+      target: { value: "Chennai" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /resolve location/i }));
+
+    await waitFor(() =>
+      expect(onAoi).toHaveBeenCalledWith(
+        expect.objectContaining({
+          west: CHENNAI.bbox.west,
+          east: CHENNAI.bbox.east,
+          south: CHENNAI.bbox.south,
+          north: CHENNAI.bbox.north,
+        }),
+      ),
+    );
+  });
+});
+
+// The evidence panel must be able to report a manual retrieval as fully as an
+// agent run: the same services produce the same facts either way.
+describe("QueryPanel - manual evidence reaches the workspace", () => {
+  it("reports the scene and imagery a preview retrieved", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/satellite/search": {
+        body: { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      },
+      "/satellite/imagery": { body: imageryResponse(SCENE.id) },
+    });
+    const onEvidence = vi.fn();
+    render(<QueryPanel onEvidence={onEvidence} />);
+
+    fireEvent.change(screen.getByLabelText("Place name"), {
+      target: { value: "Chennai" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /resolve location/i }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Start date")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2024-06-01" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2024-08-31" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /search sentinel-2 scenes/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /load image/i }).length)
+        .toBeGreaterThan(0),
+    );
+    fireEvent.click(
+      screen.getAllByRole("button", { name: /load image/i })[0],
+    );
+
+    await waitFor(() =>
+      expect(onEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scene: expect.objectContaining({ id: SCENE.id }),
+          imagery: expect.objectContaining({ scene_id: SCENE.id }),
+        }),
+      ),
+    );
+  });
+});
+
+describe("ConfigSummary - unsupported task labelling", () => {
+  // The task selector already marks these (above). The config rail renders the
+  // SAME tasks as chips, and it regressed independently once: an active chip
+  // reading "Change detect" with no qualifier lets a Temporal NDWI Statistics
+  // result be read as a change-detection result. Both surfaces must say it.
+  it("marks the unimplemented tasks in the config rail too", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    const text = document.body.textContent ?? "";
+    expect(/Change detect\s*\(not implemented\)/i.test(text)).toBe(true);
+    expect(/Object ID\s*\(not implemented\)/i.test(text)).toBe(true);
+  });
+});
+
+
+describe("QueryPanel - changing the analysis selection invalidates the result", () => {
+  // A displayed result answers the options that were set when it ran. Leaving
+  // it up after the selection changes shows an NDWI mean under a picker that
+  // now reads NDVI - the number is real, the label is a lie.
+  async function runNdwiAnalysis() {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": {
+        body: {
+          status: "ok",
+          task: "visualize",
+          answer: "Computed.",
+          windows_considered: 1,
+          warnings: [],
+          measurements: [
+            { name: "ndwi_mean", value: 0.42, unit: "index" },
+          ],
+          ndwi_overlay: null,
+          spatial_measurement: null,
+          temporal_comparison: null,
+        },
+      },
+    });
+    render(<QueryPanel />);
+    setPlace("Chennai");
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2024-07-01" },
+    });
+    fireEvent.click(screen.getByLabelText(/compute ndwi index statistics/i));
+    fireEvent.click(screen.getByRole("button", { name: /run full query/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/ndwi_mean/i)).toBeInTheDocument(),
+    );
+  }
+
+  it("clears a shown measurement when a spectral index is toggled", async () => {
+    await runNdwiAnalysis();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /NDVI/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByText(/ndwi_mean/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  it("clears a shown measurement when the NDWI toggle changes", async () => {
+    await runNdwiAnalysis();
+
+    fireEvent.click(screen.getByLabelText(/compute ndwi index statistics/i));
+
+    await waitFor(() =>
+      expect(screen.queryByText(/ndwi_mean/i)).not.toBeInTheDocument(),
+    );
   });
 });

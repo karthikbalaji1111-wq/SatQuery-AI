@@ -320,7 +320,7 @@ def read_rgb_window(
                 max_window_pixels=max_window_pixels,
             )
     except RasterioIOError as exc:
-        logger.warning("Raster open failed for %s: %s", href, exc)
+        logger.warning("Raster open failed for %s (%s)", href.split("?", 1)[0], type(exc).__name__)
         raise UpstreamServiceError("Could not open the remote raster.") from exc
 
     logger.info(
@@ -330,7 +330,7 @@ def read_rgb_window(
         result.window["width"],
         result.window["height"],
         result.source_shape,
-        href,
+        href.split("?", 1)[0],
     )
     return result
 
@@ -422,10 +422,28 @@ def _extract_band_window(
     if max(native_w, native_h) > max_dimension:
         # Quantitative reads are never decimated, so an oversized window is
         # refused rather than silently resampled to a coarser grid.
+        #
+        # Said in ground units as well as pixels: this message reaches the
+        # interface, and "4245 px > 2048 px, use a smaller bbox" tells a reader
+        # nothing they can act on. The limit is a real one - a measurement must
+        # come from the pixels as acquired - so the useful thing is to say how
+        # large the area may be.
+        gsd = abs(src.transform.a) if src.transform is not None else None
+        if gsd:
+            asked_km = max(native_w, native_h) * gsd / 1000.0
+            limit_km = max_dimension * gsd / 1000.0
+            extent = (
+                f" It is about {asked_km:.0f} km across, against a limit of "
+                f"roughly {limit_km:.0f} km."
+            )
+        else:
+            extent = ""
         raise InvalidInputError(
-            "The requested window exceeds the maximum quantitative read "
-            f"dimension ({max(native_w, native_h)} px > {max_dimension} px). "
-            "Quantitative reads are not decimated; use a smaller bbox."
+            "This area is too large to measure at full resolution."
+            f"{extent} Measurements are computed from the pixels as acquired "
+            "and are never downsampled, so please choose a smaller area - a "
+            "lake, a stretch of coast, or a district rather than a whole "
+            f"region. (Window {max(native_w, native_h)} px > {max_dimension} px.)"
         )
 
     try:
@@ -477,7 +495,7 @@ def read_band_window(
                 max_window_pixels=max_window_pixels,
             )
     except RasterioIOError as exc:
-        logger.warning("Raster open failed for %s: %s", href, exc)
+        logger.warning("Raster open failed for %s (%s)", href.split("?", 1)[0], type(exc).__name__)
         raise UpstreamServiceError("Could not open the remote raster.") from exc
 
     logger.info(
@@ -486,6 +504,6 @@ def read_band_window(
         result.height,
         result.values.dtype,
         result.resolution,
-        href,
+        href.split("?", 1)[0],
     )
     return result

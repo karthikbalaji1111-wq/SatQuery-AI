@@ -11,7 +11,7 @@ never reach Python execution.** The worst an unrecognised name can do is fail
 to resolve.
 
 Registering a name here is the deliberate act of granting a language model
-access to a capability. Three capabilities that exist in the system are
+access to a capability. Two capabilities that exist in the system are
 deliberately absent:
 
 * ``retrieve_imagery`` - imagery is a *parameter* on ``execute_query``. The
@@ -20,8 +20,11 @@ deliberately absent:
 * ``compatibility_report`` - already produced automatically inside the temporal
   analysis and attached to its result. A separate tool would duplicate a code
   path and let a planner request it where no pair exists.
-* ``rs_model_analysis`` - reserved for a future remote-sensing model. Not
-  implemented, and deliberately not reachable.
+``rs_model_analysis`` was reserved here through Phase 15-17 and is now
+registered (Phase 18.1). It is the one tool whose output is NOT deterministic,
+so it is marked ``operation="visual"`` rather than ``"analysis"``: it never
+reaches ``AnalysisRequest``, and its result is an attributed model observation
+that can never authorise a numeric claim.
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ from app.services.agent.schemas import ToolName
 #: ``discovery`` runs the query-execution pipeline; ``analysis`` interprets its
 #: result. The distinction is what lets the executor coalesce every analysis
 #: tool into a single ``AnalysisService.analyze`` call.
-ToolOperation = Literal["discovery", "analysis"]
+ToolOperation = Literal["discovery", "analysis", "visual"]
 
 #: The ``AnalysisRequest`` flag an analysis tool maps to. Declared here so the
 #: executor reads the mapping rather than hardcoding a second copy of it.
@@ -73,6 +76,21 @@ _SPECS: tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
+        name="spectral_indices",
+        operation="analysis",
+        # Carries a parameter rather than a flag, so the executor reads its
+        # requested indices directly.
+        analysis_flag=None,
+        description=(
+            "Sentinel-2 spectral index statistics for the discovered scene. "
+            "Choose any of: ndvi (vegetation-like response), ndwi (water-like "
+            "response), ndbi (built-up or bare response). Each is a normalised "
+            "difference on raw digital numbers. Index statistics only - none of "
+            "them is a validated land-cover classification. NDBI uses a 20 m "
+            "band, so it resolves no finer than 20 m."
+        ),
+    ),
+    ToolSpec(
         name="ndwi_statistics",
         operation="analysis",
         analysis_flag="include_ndwi",
@@ -91,6 +109,19 @@ _SPECS: tuple[ToolSpec, ...] = (
             "each observation indexed independently and reported with its "
             "compatibility report. No pixels are compared and nothing is "
             "co-registered."
+        ),
+    ),
+    ToolSpec(
+        name="rs_model_analysis",
+        operation="visual",
+        analysis_flag=None,
+        description=(
+            "Ask one question about the Sentinel-2 true-colour image the "
+            "preceding execute_query already retrieved, and report what a "
+            "vision-language model observes. The answer is an ATTRIBUTED model "
+            "observation, not a measurement: it is never mechanically "
+            "validated, and it can never authorise a numeric claim. The server "
+            "chooses the image; this tool takes a question and nothing else."
         ),
     ),
 )

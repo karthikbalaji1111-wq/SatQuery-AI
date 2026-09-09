@@ -16,13 +16,11 @@ from app.services.geospatial.schemas import BoundingBox
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 100
 
-# Windowed-readable remote rasters (COGs) supported for bounded retrieval:
-#   "visual" - Sentinel-2 true-colour 8-bit RGB, used as-is.
-#   "vv"     - Sentinel-1 GRD VV backscatter, single-band Float32, display-only
-#              normalized to 8-bit grayscale (see raster._normalize_sar_band).
+# Display-only assets. RTC VV/VH are provider terrain-corrected gamma naught;
+# visualization does not perform calibration or expose quantitative SAR analysis.
 DEFAULT_IMAGERY_ASSET = "visual"
 SAR_IMAGERY_ASSET = "vv"
-SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET)
+SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET, "vh")
 
 # Assets readable QUANTITATIVELY (raw values, native resolution) for analysis.
 # Deliberately a separate allowlist from the display whitelist above: display
@@ -31,7 +29,12 @@ SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET)
 # "green" is the key for band B03, "nir" for B08, "red" for B04. 20 m assets
 # ("swir16", "scl") are excluded: mixing them with 10 m bands would require
 # resampling, which this phase does not do.
-ANALYSIS_BAND_ASSETS = ("green", "nir", "red")
+#: ``swir16`` (B11) is 20 m where the others are 10 m. It is readable because
+#: NDBI needs it, and mixing resolutions is safe here ONLY through the explicit
+#: whole-cell co-registration in ``analysis.engines.coregister_to_finer_grid``,
+#: which is guarded and refuses anything it cannot relate exactly. Nothing
+#: resamples implicitly. ``scl`` stays out: cloud masking is not implemented.
+ANALYSIS_BAND_ASSETS = ("green", "nir", "red", "swir16")
 
 
 class SceneSearchRequest(BaseModel):
@@ -79,6 +82,9 @@ class Scene(BaseModel):
     processing_level: str | None
     thumbnail_url: str | None
     assets: list[SceneAsset]
+    sar_polarizations: list[str] | None = None
+    sar_instrument_mode: str | None = None
+    orbit_state: str | None = None
 
 
 class QueryEcho(BaseModel):

@@ -32,9 +32,14 @@ export function BackendStatus() {
     <div className="backend-status" role="status">
       {status.state === "loading" && <span>Checking backend…</span>}
       {status.state === "ok" && (
-        <span className="ok">
-          Backend online — {status.data.service} v{status.data.version} (
-          {status.data.environment})
+        // The detail moves to a tooltip: a header is for state at a glance, and
+        // the build environment in particular should not be the widest element
+        // on screen.
+        <span
+          className="ok"
+          title={`${status.data.service} v${status.data.version} · ${status.data.environment}`}
+        >
+          Operational
         </span>
       )}
       {status.state === "error" && (

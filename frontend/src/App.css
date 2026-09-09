@@ -1,281 +1,2624 @@
+/* ==========================================================================
+   SatQuery AI — premium geospatial intelligence workspace
+   --------------------------------------------------------------------------
+   Three-column instrument geometry, authored for 1440 x 900:
+
+     LEFT   236px  query configuration — location, window, sensor, task,
+                   scene candidates
+     CENTRE 1fr    the query, the pipeline, the satellite imagery (the hero),
+                   the deterministic evidence
+     RIGHT  336px  footprint context, the grounded answer, the model's
+                   observation
+
+   Dense, precise, controlled. Hairline rules and aligned columns rather than
+   floating cards; small technical values in mono; near-black type throughout.
+
+   Colour is a legend, never decoration:
+     BLUE / CYAN  geospatial, deterministic, measured
+     GREEN        operational and verified system state
+     VIOLET       vision-language model interpretation, and nothing else
+     AMBER        a qualification or a degraded state
+     RED          an actual failure
+   ========================================================================== */
+
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+
+  --ink: #101214;
+  --ink-2: #454b51;
+  /* Secondary text. Was #767d84, which measured 4.17:1 on white and 3.76:1
+     on the app background - under WCAG AA's 4.5:1 - and it carries nearly
+     every form label and panel eyebrow in the app, all at 9-10.5px where the
+     large-text exemption does not apply. #63696f measures 5.55 and 5.00 and
+     is still clearly lighter than --ink-2, so the hierarchy is unchanged. */
+  --ink-3: #63696f;
+
+  --line-strong: #c9ced2;
+  --line: #d9dee2;
+  --line-soft: #e4e7e9;
+  --line-hair: #edeff0;
+
+  --bg: #f2f3f5;
+  --surface: #ffffff;
+  --surface-alt: #f2f8fc;
+
+  --geo-blue: #0b6bcb;
+  --geo-cyan: #0e7c93;
+  --footprint-cyan: #5fd3f3;
+
+  --green: #1b7a4b;
+  --green-ink: #16603c;
+  --green-soft: #f1f8f4;
+  --violet: #5b3fd1;
+  --violet-ink: #4a2fbd;
+  --violet-soft: #f7f5ff;
+  /* Warning text. #b26a00 measured 4.24:1 on white; this measures 5.38. */
+  --amber: #9a5c00;
+  --amber-ink: #8a5300;
+  --amber-soft: #fffaf2;
+  --danger: #b3261e;
+  --danger-soft: #fdf4f3;
+
+  --void: #0f1417;
+
+  --font-display: "Aptos Display", "Aptos", "Segoe UI Variable Display",
+    "Segoe UI", system-ui, sans-serif;
+  --font-body: "Aptos", "Segoe UI Variable Text", "Segoe UI", system-ui,
+    sans-serif;
+  --font-mono: "Aptos Mono", "Cascadia Mono", ui-monospace, "SF Mono", Menlo,
+    monospace;
+
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 12px;
 }
 
 .app {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem 1.5rem;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+/* ---------------------------------------------------------------- header -- */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 41px;
+  padding: 0 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--ink);
+}
+
+.brand-glyph {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+}
+
+.brand-glyph svg {
+  width: 14px;
+  height: 14px;
+  stroke: #fff;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 2rem;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  color: var(--geo-cyan);
+}
+
+.rule-v {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--line-strong);
 }
 
 .app-header p {
-  margin: 0.25rem 0 1rem;
-  opacity: 0.75;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.header-spacer {
+  flex: 1;
+}
+
+.header-caps {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .backend-status {
-  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
 }
 
-.backend-status .ok {
-  color: #1a7f37;
+.backend-status .ok,
+.backend-status .error,
+.backend-status > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.backend-status .ok::before,
+.backend-status .error::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.backend-status .ok::before {
+  background: var(--green);
 }
 
 .backend-status .error {
-  color: #c0392b;
+  color: var(--danger);
 }
+
+.backend-status .error::before {
+  background: var(--danger);
+}
+
+/* ============================================================== workspace == */
 
 .app-main {
   display: grid;
-  gap: 1.5rem;
-  margin-top: 2rem;
+  grid-template-columns: 236px minmax(0, 1fr) 336px;
+  align-items: stretch;
+  height: calc(100vh - 41px);
 }
+
+.col-config {
+  min-width: 0;
+  height: calc(100vh - 41px);
+  position: sticky;
+  top: 41px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+
+.col-centre {
+  display: grid;
+  height: calc(100vh - 41px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The imagery takes the free height but yields enough for the evidence panel
+     to sit fully inside the first viewport at 1440x900. */
+  grid-template-rows: auto auto minmax(260px, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+}
+
+/* Before a run there is no scene to reserve height for, and a 1fr row leaves a
+   tall empty box that reads as a rendering fault. While a run is IN FLIGHT the
+   full row comes back, so the arriving image does not shove the evidence panel
+   down under the reader. */
+.col-centre[data-empty="true"] {
+  /* The frame still takes the free height - the alternative left the column's
+     grey exposed below the content, which reads as a rendering fault. What
+     changed is where the copy sits inside it: anchored near the top, so the
+     rest is a prepared canvas rather than a box with something floating in
+     the middle of it. */
+  grid-template-rows: auto auto minmax(260px, 1fr) auto;
+}
+
+.col-rail {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
+  gap: 8px;
+  min-width: 0;
+  height: calc(100vh - 41px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 8px 8px 0;
+}
+
+.agent-root {
+  display: contents;
+}
+
+/* The analysis viewport: the largest single cell in the workspace. */
+.imagery-cell {
+  position: relative;
+  min-height: 220px;
+  border: 1px solid var(--line);
+  background: var(--void);
+  overflow: hidden;
+}
+
+.locator-cell {
+  position: relative;
+  height: 168px;
+  margin: 0 -12px -12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+@media (max-width: 1279px) {
+  .app-main {
+    grid-template-columns: 208px minmax(0, 1fr) 300px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .app-main {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .col-config {
+    position: static;
+    height: auto;
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .col-rail {
+    height: auto;
+    overflow: visible;
+    padding: 0 10px 10px;
+  }
+}
+
+/* ====================================================== shared primitives == */
 
 .panel {
-  border: 1px solid rgba(128, 128, 128, 0.35);
-  border-radius: 8px;
-  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 10px 12px 12px;
+  min-width: 0;
 }
 
-.panel h2 {
-  margin-top: 0;
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.query-form {
-  display: grid;
-  gap: 0.5rem;
+.panel-note {
+  font-size: 10.5px;
+  color: var(--ink-3);
 }
 
-.query-form textarea,
-.query-form input {
-  font: inherit;
-  padding: 0.5rem;
-  border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.5);
+.panel-source {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
-.query-form button {
-  justify-self: start;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
+.eyebrow {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.field-label,
+label {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Square = deterministic, diamond = model output. */
+.mark {
+  flex: none;
+  width: 9px;
+  height: 9px;
+}
+
+.mark-blue {
+  background: var(--geo-blue);
+}
+
+.mark-violet {
+  background: var(--violet);
+  transform: rotate(45deg);
+}
+
+.mark-amber {
+  width: 8px;
+  height: 8px;
+  background: var(--amber);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .hint {
-  font-size: 0.85rem;
-  opacity: 0.7;
-}
-
-.result {
-  margin: 1rem 0 0;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.result div {
-  display: grid;
-  gap: 0.1rem;
-}
-
-.result dt {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.6;
-}
-
-.result dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
 }
 
 .result-error {
-  margin: 1rem 0 0;
-  color: #c0392b;
-  font-size: 0.9rem;
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
 }
 
-.scene-search-form {
-  margin-top: 1.25rem;
+.hint-limitation {
+  padding: 6px 8px;
+  border-left: 2px solid var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+}
+
+/* ------------------------------------------------------------- controls -- */
+
+textarea,
+input[type="text"],
+input[type="date"],
+input[type="number"],
+select {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  width: 100%;
+  padding: 4px 6px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--ink-3);
+}
+
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--geo-blue);
+  outline-offset: 1px;
+}
+
+button {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+button:disabled {
+  color: var(--ink-3);
+  border-color: var(--line-soft);
+  cursor: not-allowed;
+}
+
+.btn-primary,
+.query-form button[type="submit"],
+.plan-form > button[type="button"] {
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.btn-primary:hover:not(:disabled),
+.query-form button[type="submit"]:hover:not(:disabled),
+.plan-form > button[type="button"]:hover:not(:disabled) {
+  background: #000;
+}
+
+.btn-primary:disabled,
+.query-form button[type="submit"]:disabled,
+.plan-form > button[type="button"]:disabled {
+  color: #fff;
+  background: #9aa2aa;
+  border-color: #9aa2aa;
+}
+
+.link-button {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.link-button:hover:not(:disabled) {
+  border: 0;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-button:disabled {
+  border: 0;
+  background: none;
+}
+
+/* ==================================================== centre · query card == */
+
+.query-card {
+  padding: 10px 12px 10px;
+}
+
+.query-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+/* The query text IS the input: display type on a hairline, no box, no pill. */
+.query-input {
+  flex: 1;
+  min-width: 0;
+  height: 46px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+  resize: none;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.32;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  background: transparent;
+  text-wrap: pretty;
+  transition: border-color 0.12s;
+}
+
+/* A prompt, never content: lighter and one weight down, so an empty field can
+   never be mistaken for a hardcoded query. */
+.query-input::placeholder {
+  color: #8b939b;
+  font-weight: 400;
+  opacity: 1;
+}
+
+.query-input:hover:not(:disabled) {
+  border-bottom-color: var(--line-strong);
+}
+
+.query-input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--geo-blue);
+}
+
+.query-input:disabled {
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.query-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.query-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.agent-examples-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.example-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--geo-blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.example-link:hover:not(:disabled) {
+  border: 0;
+  color: var(--ink);
+}
+
+.example-link:disabled {
+  border: 0;
+  background: none;
+}
+
+.example-sep {
+  color: var(--line-strong);
+}
+
+/* What the server understood the question to mean — geospatial, so cyan. */
+.query-resolved {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--geo-cyan);
+}
+
+.resolved-place {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--geo-blue);
+}
+
+/* ====================================================== centre · pipeline == */
+
+.pipeline-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.stage-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.stage-flow li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.stage-glyph {
+  color: var(--green);
+}
+
+.stage-flow li[data-status="failed"] .stage-glyph {
+  color: var(--danger);
+}
+
+.stage-flow li[data-status="rejected"] .stage-glyph,
+.stage-flow li[data-status="skipped"] .stage-glyph {
+  color: var(--amber);
+}
+
+/* The model stage carries the violet key, wherever it appears. */
+.stage-flow li[data-kind="model"] .stage-name {
+  color: var(--violet-ink);
+}
+
+.stage-arrow {
+  margin-left: 3px;
+  color: var(--line-strong);
+}
+
+.stage-idle {
+  color: var(--ink-3);
+}
+
+.pipeline-tail {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.pipeline-elapsed {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.pipeline-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.pipeline-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.pipeline-state[data-state="complete"] {
+  color: var(--green-ink);
+}
+
+.pipeline-state[data-state="complete"]::before {
+  background: var(--green);
+}
+
+.pipeline-state[data-state="running"] {
+  color: var(--geo-blue);
+}
+
+.pipeline-state[data-state="running"]::before {
+  background: var(--geo-blue);
+}
+
+.pipeline-state[data-state="failed"] {
+  color: var(--danger);
+}
+
+.pipeline-state[data-state="failed"]::before {
+  background: var(--danger);
+}
+
+.pipeline-state[data-state="partial"],
+.pipeline-state[data-state="not-run"] {
+  color: var(--amber-ink);
+}
+
+.pipeline-state[data-state="partial"]::before,
+.pipeline-state[data-state="not-run"]::before {
+  background: var(--amber);
+}
+
+/* ======================================================= centre · imagery == */
+
+.map-panel {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: var(--void);
+}
+
+.map-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--void);
+}
+
+.maplibregl-map {
+  font-family: var(--font-body);
+}
+
+.imagery-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(180deg, rgba(8, 12, 14, 0.66), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.imagery-caption {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 200px;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.imagery-title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.imagery-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.layer-bar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.layer-cell {
+  padding: 3px 8px;
+  font-size: 9.5px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.layer-cell[data-active="true"] {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.94);
+  border-color: transparent;
+}
+
+.layer-name {
+  font-weight: 600;
+}
+
+.imagery-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(15, 20, 23, 0.42);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.imagery-empty-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.imagery-empty-note {
+  max-width: 40ch;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.imagery-empty-aoi {
+  background: rgba(15, 20, 23, 0.22);
+  justify-content: flex-start;
+  padding-top: 46px;
+}
+
+.imagery-empty-aoi .imagery-empty-note {
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.map-panel > .hint {
+  position: absolute;
+  left: 12px;
+  bottom: 30px;
+  z-index: 2;
+  max-width: 46%;
+  margin: 0;
+  padding: 3px 7px;
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(15, 20, 23, 0.72);
+  pointer-events: none;
+}
+
+/* The locator is context: a legible little map, no chrome, no raster. */
+.locator-panel {
+  background: var(--surface);
+}
+
+.locator-panel .map-container {
+  background: var(--surface);
+}
+
+/* ====================================== centre · deterministic evidence == */
+
+.evidence-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 0 20px;
+  align-items: start;
+}
+
+/* Measurement but no scene metadata: the readout takes the whole width rather
+   than sitting in a rail beside an empty grid. */
+.evidence-body[data-single="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.evidence-body[data-single="true"] .index-readout {
+  padding-left: 0;
+  border-left: 0;
+}
+
+/* Aligned technical columns, hairline-ruled. Dense on purpose: this is the
+   audit trail that separates the product from a chatbot. */
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 18px;
+  margin: 0;
+}
+
+.evidence-grid > div {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-hair);
+  min-width: 0;
+}
+
+.evidence-grid > div.wide {
+  grid-column: span 2;
+}
+
+.evidence-grid dt {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.evidence-grid dd {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.index-readout {
+  padding-left: 20px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.index-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+
+.index-value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.index-note {
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+
+.index-ramp {
+  height: 7px;
+  background: linear-gradient(
+    90deg,
+    #e8e2d6,
+    #dce6ea 44%,
+    #9fd3e4 62%,
+    var(--geo-cyan)
+  );
+}
+
+.index-axis {
+  position: relative;
+  height: 12px;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: var(--ink-3);
+}
+
+.index-axis .axis-min {
+  position: absolute;
+  left: 0;
+}
+
+.index-axis .axis-max {
+  position: absolute;
+  right: 0;
+}
+
+.index-axis .axis-zero {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--amber);
+}
+
+.index-tick {
+  position: absolute;
+  top: -12px;
+  width: 1.5px;
+  height: 11px;
+  background: var(--ink);
+}
+
+.index-caveat {
+  margin: 8px 0 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+/* ========================================================= rail · answer == */
+
+.footprint-panel {
+  padding-bottom: 12px;
+}
+
+.footprint-panel .panel-head {
+  margin-bottom: 0;
+}
+
+.answer-panel .eyebrow {
+  margin-bottom: 8px;
+}
+
+.agent-answer {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.agent-answer[data-length="long"] {
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+
+.agent-answer[data-length="very-long"] {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.answer-absent {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+/* The checks that actually ran. Green because they passed, not because an
+   agreement was established — nothing here claims one. */
+.validation-box {
+  margin-top: 10px;
+  padding: 7px 9px;
+  background: var(--green-soft);
+  border-left: 2px solid var(--green);
+}
+
+.validation-box-bad {
+  background: var(--danger-soft);
+  border-left-color: var(--danger);
+}
+
+.validation-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--green-ink);
+}
+
+.verdict::before {
+  content: "✓";
+  font-size: 10px;
+}
+
+.verdict-bad {
+  color: var(--danger);
+}
+
+.verdict-bad::before {
+  content: "✕";
+}
+
+.validation-note {
+  margin: 5px 0 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--violet-ink);
+}
+
+.metric-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 10px 0 0;
+}
+
+.metric-pair dt {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.metric-pair dd {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-unit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.collected-summary {
+  margin: 10px 0 0;
+}
+
+.collected-summary > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line-hair);
+}
+
+.collected-summary dt {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.collected-summary dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* =============================================== rail · visual observation == */
+
+.observation-panel .eyebrow {
+  color: var(--violet);
+}
+
+.observation-body {
+  border-left: 2px solid var(--violet);
+  padding-left: 10px;
+  background: var(--violet-soft);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-right: 8px;
+}
+
+.agent-visual-statement {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.model-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.model-name {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--violet-ink);
+}
+
+.model-meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+/* The third of three signals that this is not a measurement, with the violet
+   key and the panel qualifier. */
+.qualitative-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--amber-ink);
+}
+
+.qualitative-note .mark {
+  margin-top: 2px;
+}
+
+.rail-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.rail-actions .btn-primary {
+  flex: 1;
+}
+
+/* ============================================ left rail · configuration == */
+/* Compact controls on hairline sections. Every control the workspace already
+   had is still here and still labelled the same way - this is density, not a
+   reduction in capability. */
+
+.col-config .panel {
+  border: 0;
+  padding: 10px 12px 20px;
+}
+
+.col-config .panel > h2 {
+  margin: 0 0 10px;
+  font-family: var(--font-body);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* The panel's leading prose is guidance for the form below it; in a 236px rail
+   it would outweigh the controls, so it is held to a quiet caption. */
+.col-config .panel > .hint {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.col-config .panel > h3 {
+  margin: 16px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.col-config .panel > h3:first-of-type {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.col-config label {
+  font-size: 8.5px;
+  letter-spacing: 0.09em;
+}
+
+.col-config textarea,
+.col-config input,
+.col-config select {
+  font-size: 11px;
+  padding: 3px 5px;
+}
+
+.col-config .nl-form textarea {
+  min-height: 40px;
+}
+
+.col-config button {
+  font-size: 10.5px;
+  padding: 4px 8px;
+}
+
+.query-form,
+.scene-search-form,
+.plan-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  align-content: start;
+}
+
+.query-form button[type="submit"],
+.plan-form > button[type="button"] {
+  justify-self: start;
 }
 
 .field-row {
   display: flex;
+  gap: 6px;
   flex-wrap: wrap;
-  gap: 0.75rem;
 }
 
 .field-row > div {
   display: grid;
-  gap: 0.2rem;
+  gap: 3px;
+  flex: 1 1 84px;
+  min-width: 0;
 }
 
-.field-row label {
-  font-size: 0.75rem;
+.plan-form fieldset {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+}
+
+.plan-form fieldset legend {
+  padding: 0 3px;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.6;
+  color: var(--ink-3);
 }
 
+.plan-form fieldset label,
+.modalities label,
+.temporal-mode label,
+.include-imagery,
+.include-ndwi,
+.include-temporal-ndwi {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 3px;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--geo-blue);
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+/* ------------------------------------------------- results in the rail -- */
+
+.plan-result,
+.result,
+.analysis-result,
+.execution-result,
+.temporal-comparison {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.result h3,
+.plan-form h3 {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.result > div,
+.plan-result > div {
+  display: grid;
+  gap: 1px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line-hair);
+}
+
+.result dt,
+.plan-result dt {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.result dd,
+.plan-result dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.plan-result ul,
+.analysis-windows,
+.execution-windows,
+.temporal-observations {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-result li,
+.analysis-windows li,
+.execution-windows > li,
+.temporal-observations > li {
+  padding: 4px 6px;
+  border: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* Scene candidates: an operational list, cloud cover right-aligned. */
 .scene-results {
-  margin-top: 1rem;
+  margin-top: 10px;
 }
 
 .scene-list {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
   display: grid;
-  gap: 0.75rem;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
 .scene {
-  border: 1px solid rgba(128, 128, 128, 0.3);
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--geo-blue);
+  background: var(--surface);
 }
 
 .scene-id {
-  font-size: 0.85rem;
-  word-break: break-all;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 .scene dl {
-  margin: 0.5rem 0 0;
-  display: grid;
-  gap: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  margin: 4px 0 0;
 }
 
 .scene dl div {
-  display: grid;
-  grid-template-columns: 9rem 1fr;
-  gap: 0.5rem;
+  min-width: 0;
 }
 
 .scene dt {
-  font-size: 0.75rem;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.6;
+  color: var(--ink-3);
 }
 
 .scene dd {
   margin: 0;
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-2);
 }
 
 .preview-button {
-  margin-top: 0.75rem;
-  padding: 0.4rem 0.9rem;
-  border-radius: 6px;
+  margin-top: 6px;
 }
 
 .scene-image {
-  margin: 0.75rem 0 0;
+  margin: 6px 0 0;
 }
 
 .scene-image img {
   max-width: 100%;
   height: auto;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 4px;
-  image-rendering: pixelated;
+  display: block;
+  border: 1px solid var(--line-strong);
 }
 
 .scene-image-meta {
-  margin-top: 0.35rem;
-  font-size: 0.75rem;
-  opacity: 0.7;
-  word-break: break-word;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
 }
 
-.plan-form {
-  margin-top: 1.5rem;
-  border-top: 1px solid rgba(128, 128, 128, 0.25);
-  padding-top: 1rem;
-}
-
-.plan-form h3 {
-  margin: 0 0 0.5rem;
-}
-
-.plan-form fieldset {
-  border: 1px solid rgba(128, 128, 128, 0.3);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-
-.plan-form fieldset label {
-  display: inline-flex;
-  gap: 0.3rem;
-  align-items: center;
-  margin-right: 1rem;
-  font-size: 0.9rem;
-}
-
-.plan-result ul {
+.analysis-answer {
   margin: 0;
-  padding-left: 1.1rem;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink);
 }
 
-.nl-form textarea {
-  resize: vertical;
-}
-
-.map-container {
+.analysis-measurements,
+.temporal-differences {
   display: grid;
-  place-items: center;
-  /* A real, responsive map viewport: tall enough to be usable, capped so it
-     never crowds the panels above it on a laptop screen. */
-  height: clamp(320px, 55vh, 640px);
-  width: 100%;
-  border-radius: 6px;
-  overflow: hidden;
-  background: repeating-linear-gradient(
-    45deg,
-    rgba(128, 128, 128, 0.08),
-    rgba(128, 128, 128, 0.08) 12px,
-    rgba(128, 128, 128, 0.16) 12px,
-    rgba(128, 128, 128, 0.16) 24px
-  );
-  opacity: 0.85;
+  gap: 0;
+  margin: 0;
 }
 
-.app-footer {
-  margin-top: 2.5rem;
-  font-size: 0.85rem;
-  opacity: 0.6;
+.analysis-measurements > div,
+.temporal-differences > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line-hair);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
 }
 
-/* Phase 17.2 - the threshold count, set apart from the prose so a reader sees
-   the deterministic number before the sentence describing it. */
+.analysis-measurements dt,
+.temporal-differences dt {
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.analysis-measurements dd,
+.temporal-differences dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
 .analysis-measurement {
-  margin: 0.75rem 0;
-  padding: 0.6rem 0.75rem;
-  border-left: 3px solid rgba(56, 132, 255, 0.6);
-  background: rgba(56, 132, 255, 0.06);
-  border-radius: 4px;
+  margin: 6px 0;
+  padding: 7px 8px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--geo-blue);
 }
 
 .analysis-measurement p {
-  margin: 0.15rem 0;
+  margin: 1px 0;
+  font-size: 10px;
+  color: var(--ink-2);
 }
 
 .measurement-headline {
+  font-size: 8.5px !important;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3) !important;
 }
 
 .measurement-value {
-  font-size: 1.15rem;
+  font-family: var(--font-mono);
+  font-size: 18px !important;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink) !important;
   font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+/* Citation keys: the ids grounding resolves against, kept small and scrollable
+   so the audit trail is present without crowding the measurements above it. */
+.citation-list {
+  display: grid;
+  gap: 0;
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  max-height: 88px;
+  overflow-y: auto;
+}
+
+.citation-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.citation-list dt {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.citation-list dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* Sensor and analysis controls read as selectable cards, not a checklist. The
+   markup is unchanged - same inputs, same labels - so the form still behaves
+   exactly as it did. */
+.col-config .modalities,
+.col-config .temporal-mode {
+  border: 0;
+  padding: 0;
+}
+
+.col-config .modalities legend,
+.col-config .temporal-mode legend {
+  padding: 0;
+  margin-bottom: 5px;
+}
+
+.col-config .modalities label,
+.col-config .temporal-mode label {
+  padding: 5px 7px;
+  margin: 0 0 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.col-config .modalities label:has(input:checked),
+.col-config .temporal-mode label:has(input:checked) {
+  border-color: var(--geo-blue);
+  background: var(--surface-alt);
+  font-weight: 600;
+}
+
+.col-config .include-imagery,
+.col-config .include-ndwi,
+.col-config .include-temporal-ndwi {
+  align-items: flex-start;
+  padding: 4px 0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+/* Scene candidates: the selected scene is marked, the rest are alternatives. */
+.scene:first-child {
+  background: var(--surface-alt);
+}
+
+/* ================================================ left rail · read-out == */
+/* The configuration a run used, as an instrument reads it out: values first,
+   controls below. Hairline sections, no boxes around every field. */
+
+.config-summary {
+  display: grid;
+  gap: 0;
+  margin-top: 10px;
+}
+
+.config-block {
+  padding: 9px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.config-block:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.config-block .eyebrow {
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  margin-bottom: 5px;
+}
+
+.config-value {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.config-coords {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--geo-cyan);
+}
+
+.config-mono {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.config-note {
+  margin: 3px 0 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+.config-awaiting {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* Sensors and analysis modes read as selectable state, not as form widgets. */
+.sensor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.sensor-card {
+  display: grid;
+  gap: 1px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface);
+}
+
+.sensor-card[data-active="true"] {
+  border-color: var(--geo-blue);
+  background: var(--surface-alt);
+}
+
+.sensor-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.sensor-detail {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: var(--ink-3);
+}
+
+.sensor-card[data-active="true"] .sensor-name {
+  color: var(--ink);
+}
+
+.sensor-card[data-active="true"] .sensor-detail {
+  color: var(--geo-blue);
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.analysis-chip {
+  padding: 5px 7px;
+  border: 1px solid var(--line-soft);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.analysis-chip[data-active="true"] {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface-alt);
+}
+
+/* Scene candidates: identity, acquisition, and cloud cover as an operational
+   figure - amber and red are the honest reading of a cloudy scene. */
+.candidate-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 8px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid transparent;
+}
+
+.candidate[data-selected="true"] {
+  border-left-color: var(--geo-blue);
+  background: var(--surface-alt);
+}
+
+.candidate-id {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.candidate-time {
+  grid-column: 1;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: var(--ink-3);
+}
+
+.candidate-cloud {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.candidate-cloud[data-level="mid"] {
+  color: var(--amber);
+}
+
+.candidate-cloud[data-level="high"] {
+  color: var(--danger);
+}
+
+
+
+/* Which model answers the visual step. A setting, not a command: compact,
+   quiet, and never competing with Run analysis. */
+.model-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.model-selector select {
+  width: auto;
+  max-width: 168px;
+  padding: 2px 4px;
+  text-overflow: ellipsis;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.model-selector select option:disabled {
+  color: var(--ink-3);
+}
+
+/* The server's own word for the model's state. Green only when it is both
+   configured and compatible - never a claim that a provider is reachable. */
+.model-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--amber-ink);
+}
+
+.model-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.model-status[data-ready="true"] {
+  color: var(--green-ink);
+}
+
+.model-status[data-ready="true"]::before {
+  background: var(--green);
+}
+
+.model-selector-error {
+  color: var(--danger);
+}
+
+/* The configuration form, collapsed under the read-out it produces. Native
+   <details>: keyboard-reachable, no JS, and every control stays mounted. */
+.config-form {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.config-form > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.config-form > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A caret that states the affordance without a decorative icon. */
+.config-form > summary::before {
+  content: "▸";
+  margin-right: 6px;
+  font-size: 9px;
+  color: var(--ink-3);
+  transition: transform 0.12s ease;
+}
+
+.config-form[open] > summary::before {
+  content: "▾";
+}
+
+.config-form > summary:hover {
+  color: var(--ink);
+}
+
+.config-form > summary:focus-visible {
+  outline: 2px solid var(--geo-blue);
+  outline-offset: 2px;
+}
+
+.config-form-hint {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3);
+}
+
+.config-form-body {
+  padding-top: 4px;
+}
+
+/* The first heading inside the form must not draw a second rule under the
+   summary that already separates it. */
+.config-form-body > h3:first-child {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ============================================================ responsive == */
+/* The three-column workstation is a desktop composition. Below it the columns
+   dissolve and the PANELS reorder by importance, rather than the desktop
+   layout being shrunk until it is unusable. */
+
+/* Tablet landscape: rails narrow before anything stacks. */
+@media (max-width: 1439px) and (min-width: 1281px) {
+  .app-main {
+    grid-template-columns: 222px minmax(0, 1fr) 312px;
+  }
+}
+
+@media (max-width: 1280px) and (min-width: 1081px) {
+  .app-main {
+    grid-template-columns: 200px minmax(0, 1fr) 286px;
+  }
+
+  .evidence-body {
+    grid-template-columns: minmax(0, 1fr) 210px;
+  }
+
+  .evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Tablet portrait and below: one column, panels ordered by what a reader
+   needs first - the question, then the scene, then the conclusion, with the
+   configuration form last. */
+@media (max-width: 1080px) {
+  .app-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* The columns stop being columns so their panels can be ordered directly. */
+  .col-centre,
+  .col-rail {
+    display: contents;
+  }
+
+  .app-main > .col-config,
+  .app-main > .col-centre > *,
+  .app-main > .col-rail > * {
+    min-width: 0;
+  }
+
+  .query-card { order: 1; }
+  .pipeline-strip { order: 2; }
+  .imagery-cell { order: 3; }
+  .answer-panel { order: 4; }
+  .observation-panel { order: 5; }
+  .evidence-panel { order: 6; }
+  .footprint-panel { order: 7; }
+  .col-config { order: 8; }
+
+  /* Rails were viewport-height scroll containers; on one column the page
+     scrolls instead. A nested scroller here would trap the reader. */
+  .col-config {
+    position: static;
+    height: auto;
+    overflow: visible;
+    border-right: 0;
+    border: 1px solid var(--line);
+  }
+
+  .imagery-cell {
+    min-height: 340px;
+    max-height: 52vh;
+  }
+
+  .answer-panel,
+  .observation-panel {
+    min-height: 0;
+    border-left: 0;
+    border: 1px solid var(--line);
+  }
+
+  .locator-cell {
+    height: 200px;
+  }
+}
+
+/* Small tablet / large phone. */
+@media (max-width: 820px) {
+  .evidence-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evidence-body[data-single="true"] .index-readout,
+  .index-readout {
+    padding-left: 0;
+    border-left: 0;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .evidence-grid > div.wide {
+    grid-column: span 2;
+  }
+}
+
+/* Phone. Not a shrunken desktop: bigger targets, single-column data, and
+   nothing that depends on hover. */
+@media (max-width: 640px) {
+  /* The panel head is three items on one nowrap row; on a phone the source
+     note is the one that must give way rather than widen the page. */
+  .panel-head {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .panel-source {
+    margin-left: 0;
+    flex-basis: 100%;
+    white-space: normal;
+  }
+
+  .app-header {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 8px 12px;
+  }
+
+  /* The descriptor is the first thing to go - the wordmark already says it. */
+  .app-header p,
+  .app-header .rule-v {
+    display: none;
+  }
+
+  .header-spacer {
+    display: none;
+  }
+
+  .model-selector select {
+    max-width: 190px;
+  }
+
+  .app-main {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .query-card,
+  .panel {
+    padding: 10px;
+  }
+
+  /* The query stays the largest thing on the page, but must not run to five
+     lines on a narrow screen. */
+  .query-input {
+    font-size: 15px;
+    height: 44px;
+  }
+
+  .query-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .query-actions {
+    justify-content: flex-end;
+    padding-top: 0;
+  }
+
+  /* Comfortable tap targets. */
+  .btn-primary,
+  .query-form button[type="submit"],
+  .plan-form > button[type="button"] {
+    padding: 11px 18px;
+    font-size: 13px;
+  }
+
+  .link-button {
+    padding: 8px 6px;
+  }
+
+  .imagery-cell {
+    min-height: 260px;
+    max-height: 44vh;
+  }
+
+  .evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evidence-grid > div.wide {
+    grid-column: span 1;
+  }
+
+  .metric-pair {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .agent-answer {
+    font-size: 15px;
+  }
+
+  .sensor-grid,
+  .analysis-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .imagery-caption {
+    right: 12px;
+  }
+
+  /* Over the frame still - going static clipped them inside the fixed-height
+     cell. Moved to the bottom so they clear the caption above, and lifted
+     clear of the basemap attribution, which runs the full width of the bottom
+     edge at this size and was rendering through them. */
+  .layer-bar {
+    top: auto;
+    bottom: 32px;
+    left: 10px;
+    right: auto;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .layer-cell {
+    padding: 4px 7px;
+    font-size: 9px;
+  }
+
+  /* The scale control shares that corner on desktop; give it the other one. */
+  .map-panel .maplibregl-ctrl-bottom-left {
+    display: none;
+  }
+
+  .locator-cell {
+    height: 170px;
+  }
+
+  .pipeline-strip {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .pipeline-tail {
+    margin-left: 0;
+  }
+}
+
+/* Long machine-derived strings must wrap rather than widen the page. Scene
+   ids and coordinate pairs are the usual culprits. */
+.evidence-grid dd,
+.citation-list dt,
+.citation-list dd,
+.candidate-id,
+.model-meta,
+.config-value,
+.config-mono {
+  overflow-wrap: anywhere;
+}
+
+/* Discovery can return many candidates; the rail must not become a mile of
+   list that buries the configuration below it. Scrolls in place instead. */
+.candidate-list {
+  max-height: 268px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Interaction polish: fast, quiet feedback on the things a reader points at.
+   Nothing theatrical - a colour and a border, in 120ms. */
+.candidate {
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.candidate:hover {
+  background: var(--surface-alt);
+  border-color: var(--line-strong);
+}
+
+.sensor-card,
+.analysis-chip {
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.example-link,
+.link-button,
+.btn-primary,
+button {
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.layer-cell {
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+/* A run in flight: the frame says it is working without animating at people. */
+.imagery-empty-busy {
+  background: rgba(15, 20, 23, 0.62);
+}
+
+.imagery-empty-busy .imagery-empty-label::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--geo-cyan);
+  animation: sq-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes sq-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imagery-empty-busy .imagery-empty-label::after {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+
+/* Keyboard focus must be visible on every reachable control, including the
+   scroll containers a keyboard user can tab into. */
+.candidate-list:focus-visible,
+.col-config:focus-visible,
+.col-rail:focus-visible,
+.col-centre:focus-visible,
+details > summary:focus-visible {
+  outline: 2px solid var(--geo-blue);
+  outline-offset: -2px;
+}
+
+/* Windows high-contrast mode ignores background colours, so state that is
+   carried only by a fill needs a border to survive. */
+@media (forced-colors: active) {
+  .sensor-card[data-active="true"],
+  .analysis-chip[data-active="true"],
+  .candidate[data-selected="true"],
+  .layer-cell[data-active="true"] {
+    outline: 2px solid CanvasText;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Workspace intro — the analysis frame before it has geography
+   --------------------------------------------------------------------------
+   Occupies the same frame the imagery will, so nothing shifts when a scene
+   arrives. Deliberately quiet: this is the one surface on the page that is
+   allowed to be mostly empty, because the alternative was filling it with a
+   basemap of somewhere the user never asked about.
+   -------------------------------------------------------------------------- */
+
+.workspace-intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 22px;
+  height: 100%;
+  padding: 56px 44px 40px;
+  background: var(--surface);
+}
+
+.intro-lead {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.55;
+  letter-spacing: -0.006em;
+}
+
+.intro-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.intro-stages li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 0;
+  flex: 1 1 0;
+  min-width: 118px;
+  max-width: 190px;
+}
+
+/* A hairline between stages reads as a sequence without drawing arrows. */
+.intro-stages li + li {
+  position: relative;
+}
+
+.intro-stages li + li::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: -14px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.intro-stage-label {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.intro-stage-detail {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.intro-note {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.workspace-intro[data-busy="true"] .intro-lead {
+  color: var(--ink-2);
+}
+
+.locator-placeholder {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 16px;
+  background: var(--surface);
+}
+
+.locator-placeholder .hint {
+  margin: 0;
+  max-width: 34ch;
+}
+
+@media (max-width: 1023px) {
+  .workspace-intro {
+    padding: 28px 24px;
+    gap: 18px;
+  }
+  .intro-stages {
+    gap: 0 20px;
+  }
+  .intro-stages li + li::before {
+    left: -10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-intro {
+    padding: 22px 18px;
+  }
+  .intro-lead {
+    font-size: 15px;
+  }
+  /* Stacked, the vertical rules would run down the left edge like a quote
+     bar rather than separating a sequence, so they come off. */
+  .intro-stages li + li::before {
+    display: none;
+  }
+  .intro-stages li {
+    padding: 7px 0;
+  }
+}
+
+/* The reason a pipeline step did not succeed.
+   Previously a `title` attribute only, i.e. mouse-only on a non-focusable
+   element - the one diagnostic explaining a failed run was unreachable to
+   keyboard and screen-reader users. It wraps onto its own line so a long
+   cause cannot squeeze the stage names. */
+.stage-reason {
+  flex-basis: 100%;
+  margin-top: 2px;
+  color: var(--amber);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pipeline-stages li[data-status="failed"] .stage-reason {
+  color: var(--danger);
+}
+
+/* --------------------------------------------------------------------------
+   Imagery retrieval notice
+   --------------------------------------------------------------------------
+   A retrieval that produced no picture. The documented Sentinel-1 case is a
+   boundary, not a fault, and is styled as one: showing an expected limitation
+   in alarm red teaches a reader to distrust the panel it sits in. A genuine
+   failure still gets the danger treatment.
+   -------------------------------------------------------------------------- */
+
+.imagery-notice {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--amber);
+  background: #fdf8f0;
+}
+
+.imagery-notice-failure {
+  border-left-color: var(--danger);
+  background: #fdf5f5;
+}
+
+.imagery-notice-summary {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.45;
+}
+
+.imagery-notice-reassurance {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.imagery-notice-detail {
+  margin-top: 6px;
+}
+
+.imagery-notice-detail > summary {
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.imagery-notice-detail > p {
+  margin: 5px 0 0;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* The AOI's real bounds, over the locator.
+   The vector outline that would mark the area does not render (see the GeoJSON
+   note in MapPanel); this states the extent as the numbers it derives from
+   rather than drawing a rectangle the map is not actually showing. */
+.locator-extent {
+  position: absolute;
+  right: 8px;
+  /* Top-right: the bottom edge carries the scale bar and the basemap
+     attribution, which must stay legible. */
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 4px 7px;
+  background: rgb(255 255 255 / 0.9);
+  border: 1px solid var(--line-soft);
+  color: var(--ink-2);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+/* --------------------------------------------------------------------------
+   Spectral index picker
+   --------------------------------------------------------------------------
+   Three checkboxes, not a dashboard. Each names the index and what a HIGH
+   value indicates, phrased as a reflectance observation - the system computes
+   an index, it does not classify what is on the ground.
+   -------------------------------------------------------------------------- */
+
+.index-picker {
+  margin: 10px 0 0;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--line-soft);
+}
+
+.index-picker > legend {
+  padding: 0 4px;
+  color: var(--ink-3);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.index-picker label {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 0 7px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+
+.index-name {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.index-meaning {
+  color: var(--ink-3);
+  font-size: 11px;
 }

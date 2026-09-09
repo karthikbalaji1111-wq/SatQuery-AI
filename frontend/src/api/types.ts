@@ -56,6 +56,9 @@ export interface SatelliteScene {
   collection: string | null;
   platform: string | null;
   processing_level: string | null;
+  sar_polarizations?: string[] | null;
+  sar_instrument_mode?: string | null;
+  orbit_state?: string | null;
   thumbnail_url: string | null;
   assets: SceneAsset[];
 }
@@ -297,16 +300,19 @@ export interface ObservationIndexResult {
  *
  * Present ONLY when the two grids were verified identical - same size, same
  * CRS, same affine - so every difference is between two measurements of the
- * same ground. `change = target_NDWI - baseline_NDWI`: an INDEX change, not
+ * same ground. `change = second_NDWI - first_NDWI`, where *first* is the
+ * EARLIER acquisition and *second* the later one - never the requested
+ * baseline/target roles, which may be inverted relative to time. It is an
+ * INDEX change, not
  * water gained or lost. Statistics cover only pixels valid in BOTH
  * observations. Nothing is resampled or co-registered; an incompatible pair
  * yields `null` and a warning explaining why.
  */
 export interface NdwiTemporalChange {
-  baseline_scene_id: string;
-  target_scene_id: string;
-  baseline_acquired_at: string | null;
-  target_acquired_at: string | null;
+  first_scene_id: string;
+  second_scene_id: string;
+  first_acquired_at: string | null;
+  second_acquired_at: string | null;
   window_label: string;
   /** Pixels valid in BOTH observations - the denominator for every statistic. */
   paired_valid_pixel_count: number;
@@ -330,6 +336,12 @@ export interface TemporalIndexComparison {
 }
 
 /** The task is derived from `execution.plan.intent.task`; there is no task field. */
+/**
+ * The spectral indices the backend can compute. Closed set - the server
+ * refuses anything else rather than computing a different index.
+ */
+export type SpectralIndexKey = "ndvi" | "ndwi" | "ndbi";
+
 export interface AnalysisRequest {
   execution: QueryExecutionResult;
   /**
@@ -338,6 +350,16 @@ export interface AnalysisRequest {
    * defaults it to `false`.
    */
   include_ndwi?: boolean;
+  /**
+   * Additional spectral indices to compute over the same optical window,
+   * by key. All are normalised differences over Sentinel-2 bands:
+   * NDVI = (nir - red), NDWI = (green - nir), NDBI = (swir16 - nir), each
+   * divided by the sum of its pair.
+   *
+   * Additive and independent of `include_ndwi`, which remains the path that
+   * also produces the georeferenced overlay.
+   */
+  indices?: SpectralIndexKey[];
   /**
    * Additionally render the NDWI grid as a georeferenced PNG overlay. Requires
    * `include_ndwi`: the picture is a view of those same pixels.
@@ -437,8 +459,10 @@ export interface AnalysisResult {
 /** The closed set of tools a planner may select. */
 export type AgentToolName =
   | "execute_query"
+  | "spectral_indices"
   | "ndwi_statistics"
-  | "temporal_ndwi_statistics";
+  | "temporal_ndwi_statistics"
+  | "rs_model_analysis";
 
 /** Parameters for the discovery tool. Note there is no server `limit` here. */
 export interface ExecuteQueryParams {
@@ -446,6 +470,18 @@ export interface ExecuteQueryParams {
   intent: SatQueryIntent;
   include_imagery: boolean;
   max_cloud_cover: number | null;
+}
+
+/**
+ * Which spectral indices to compute over the discovered scene.
+ *
+ * The one analysis tool that takes a parameter: choosing WHICH index answers a
+ * question is a planning decision, while how each is computed stays a
+ * scientific constant owned by the backend engine.
+ */
+export interface SpectralIndicesParams {
+  tool: "spectral_indices";
+  indices: SpectralIndexKey[];
 }
 
 export interface NdwiParams {
@@ -456,10 +492,23 @@ export interface TemporalNdwiParams {
   tool: "temporal_ndwi_statistics";
 }
 
+/**
+ * One visual question about the image the server already retrieved.
+ *
+ * Carries the question and nothing else - deliberately no scene, asset, URL or
+ * bytes. The server decides which image the model looks at.
+ */
+export interface RsModelParams {
+  tool: "rs_model_analysis";
+  question: string;
+}
+
 export type AgentToolCall =
   | ExecuteQueryParams
+  | SpectralIndicesParams
   | NdwiParams
-  | TemporalNdwiParams;
+  | TemporalNdwiParams
+  | RsModelParams;
 
 /** The validated plan. 1-3 steps, `execute_query` first. */
 export interface AgentPlan {
@@ -479,6 +528,12 @@ export interface AnswerValidation {
   numeric_grounding: "pass" | "fail" | "not_run";
   forbidden_terms: "pass" | "fail" | "not_run";
   evidence_refs: "pass" | "fail" | "not_run";
+  /**
+   * Provenance, NOT a fourth check. `attributed` records that the answer rests
+   * partly on a model observation, which nothing mechanical can validate. It
+   * never means the observation was verified.
+   */
+  visual_claims: "attributed" | "not_run";
 }
 
 /**
@@ -494,11 +549,35 @@ export interface AgentTrace {
 }
 
 /** One citable fact: a measurement, or qualifying text. */
+/**
+ * What a vision-language model said about one retrieved image.
+ *
+ * An ATTRIBUTED observation, never a verified fact - nothing mechanical can
+ * check "water is visible". Deliberately not a `Measurement`: even when the
+ * model states a number, that number lives inside `statement` and can never
+ * authorise a numeric claim.
+ */
+export interface VisualObservation {
+  statement: string;
+  provider: string;
+  model: string;
+  scene_id: string;
+}
+
 export interface EvidenceItem {
   id: string;
-  source: "execution" | "ndwi" | "temporal_ndwi" | "compatibility" | "model";
+  source:
+    | "execution"
+    | "ndvi"
+    | "ndwi"
+    | "ndbi"
+    | "temporal_ndwi"
+    | "compatibility"
+    | "model";
   measurement: Measurement | null;
   text: string | null;
+  /** Present only on model-sourced evidence. Never rendered as a measurement. */
+  visual: VisualObservation | null;
   produced_by: string | null;
 }
 
@@ -520,9 +599,69 @@ export type AgentStatus =
 
 export interface AgentQuestionRequest {
   question: string;
+  /**
+   * Which inference backend answers this run. Omitted uses the server's
+   * configured default. It selects an inference backend and nothing else -
+   * the deterministic pipeline, the grounding rules and the evidence shape
+   * are identical either way.
+   */
+  provider?: string | null;
+  /** Which model that provider should use for this run. */
+  model?: string | null;
+}
+
+/**
+ * The vision-language backends the server can be asked to use.
+ *
+ * Selection only - no key ever reaches the browser. The choice changes the
+ * inference backend and nothing else: the deterministic pipeline, grounding
+ * and evidence contract are identical either way.
+ */
+export type AiProvider = "gemini" | "nvidia";
+
+/** Which step a model would fill. */
+export type ModelRole = "visual" | "text";
+
+/**
+ * One catalogued model and this deployment's view of it.
+ *
+ * `configured` and `compatible` are separate questions and are reported
+ * separately: a model can exist, be incompatible with the step, or lack a
+ * credential. None of these means "reachable" - only a real request answers
+ * that, so the server never claims availability here.
+ */
+export interface ModelOption {
+  provider: string;
+  model_id: string;
+  display_name: string;
+  modality: string;
+  supports_image: boolean;
+  supports_text: boolean;
+  supports_video: boolean;
+  supports_tools: boolean;
+  supports_structured_output: boolean;
+  endpoint_type: string;
+  configured: boolean;
+  compatible: boolean;
+  status: string;
+}
+
+export interface ModelCatalogResponse {
+  role: string;
+  default_provider: string;
+  default_model: string;
+  models: ModelOption[];
+}
+
+export interface AgentFailure {
+  stage: "planning" | "synthesis";
+  code: string;
+  message: string;
+  retry_after_seconds: number | null;
 }
 
 export interface AgentResult {
+  failure?: AgentFailure | null;
   status: AgentStatus;
   answer: string | null;
   trace: AgentTrace;

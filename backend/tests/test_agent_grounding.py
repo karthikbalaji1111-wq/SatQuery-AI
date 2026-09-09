@@ -93,12 +93,10 @@ def make_execution(**overrides: Any) -> QueryExecutionResult:
     )
 
 
-def measurement_item(
-    item_id: str, name: str, value: float, unit: str
-) -> dict[str, Any]:
+def measurement_item(item_id: str, name: str, value: float, unit: str) -> dict[str, Any]:
     return {
         "id": item_id,
-        "source": "ndwi",
+        "source": item_id.split(".")[0],
         "measurement": {"name": name, "value": value, "unit": unit},
         "produced_by": "analysis.engines.compute_ndwi_measurements",
     }
@@ -185,7 +183,12 @@ def test_multiple_grounded_measurements_are_accepted() -> None:
 
 
 def test_thousands_separators_are_understood() -> None:
-    assert check("1,234,567 valid pixels were analysed.").numeric_grounding == "pass"
+    assert (
+        check(
+            "1,234,567 valid pixels were analysed.", refs=["ndwi.ndwi_valid_pixel_count"]
+        ).numeric_grounding
+        == "pass"
+    )
 
 
 def test_a_fabricated_number_among_grounded_ones_is_rejected() -> None:
@@ -313,16 +316,19 @@ def test_a_nonexistent_reference_fails() -> None:
     assert result.evidence_refs == "fail"
 
 
-def test_an_empty_reference_list_passes_vacuously() -> None:
-    assert check("No numbers here.", refs=[]).evidence_refs == "pass"
+def test_an_empty_reference_list_cannot_support_factual_prose() -> None:
+    assert check("Water is visible.", refs=[]).evidence_refs == "fail"
 
 
 def test_reference_checking_uses_the_evidence_id_set() -> None:
-    """Uniqueness is the contract's job; grounding only resolves."""
+    """An existing reference must also support the statement."""
 
     evidence = make_evidence()
     assert evidence.ids() == {"ndwi.ndwi_mean", "ndwi.ndwi_valid_pixel_count"}
-    assert validate_answer(draft("x", ["ndwi.ndwi_mean"]), evidence).evidence_refs == "pass"
+    assert (
+        validate_answer(draft("Mean NDWI 0.28", ["ndwi.ndwi_mean"]), evidence).evidence_refs
+        == "pass"
+    )
 
 
 # =========================================================================== #
@@ -413,7 +419,8 @@ def test_suppression_is_enforced_by_absence_not_by_a_special_rule() -> None:
 
     source = pathlib.Path(grounding_mod.__file__).read_text()
     assert "differences" not in source
-    assert "temporal_comparison" not in source
+    # Reading observation provenance is allowed; no suppressed value is derived.
+    assert "compare_ndwi_observations(" not in source
 
 
 # =========================================================================== #
@@ -428,6 +435,10 @@ def test_the_result_is_the_existing_answer_validation_contract() -> None:
         "numeric_grounding",
         "forbidden_terms",
         "evidence_refs",
+        # Phase 18.1, additive: provenance, not a fourth mechanical check.
+        # "attributed" records that a model observation is involved; it never
+        # means the observation was verified.
+        "visual_claims",
     }
 
 
@@ -445,7 +456,7 @@ def test_all_three_checks_are_always_reported() -> None:
 def test_checks_are_independent() -> None:
     """A forbidden phrase must not mask an otherwise-grounded number."""
 
-    result = check("Mean NDWI 0.2777 shows change detection.")
+    result = check("Mean NDWI 0.2777. This is change detection.")
     assert result.numeric_grounding == "pass"
     assert result.forbidden_terms == "fail"
 
@@ -564,15 +575,12 @@ def test_grounding_depends_on_no_service() -> None:
 # =========================================================================== #
 
 
-def test_qualitative_prose_without_numbers_is_not_challenged() -> None:
-    """A stated limit: unquantified claims pass the numeric check.
-
-    "the index rose" contains no number, so numeric grounding has nothing to
-    check. This is containment, not proof, and the module says so.
-    """
+def test_qualitative_prose_requires_support_even_without_numbers() -> None:
+    """No numeric claim does not imply a supported factual statement."""
 
     result = check("The index rose noticeably across the period.")
     assert result.numeric_grounding == "pass"
+    assert result.evidence_refs == "fail"
 
 
 def test_the_module_documents_containment_rather_than_proof() -> None:
@@ -735,16 +743,12 @@ def test_the_numeric_component_is_actually_extracted(
         ("Mean NDWI was 0.99x the baseline.", 0.99),
     ],
 )
-def test_a_supported_number_with_a_unit_is_accepted(
-    summary: str, value: float
-) -> None:
-    """The unit is irrelevant; only the number must be traceable."""
+def test_an_unrelated_number_with_a_unit_is_rejected(summary: str, value: float) -> None:
+    """A matching value cannot authorize a different quantity or unit."""
 
-    evidence = make_evidence(
-        items=[measurement_item("ndwi.v", "measured_value", value, "index")]
-    )
+    evidence = make_evidence(items=[measurement_item("ndwi.v", "measured_value", value, "index")])
     result = validate_answer(draft(summary, ["ndwi.v"]), evidence)
-    assert result.numeric_grounding == "pass"
+    assert result.numeric_grounding == "fail"
 
 
 def test_a_number_glued_to_a_word_is_still_checked() -> None:
@@ -807,7 +811,10 @@ def test_scientific_notation_still_extracts_whole(literal: str) -> None:
 
 
 def test_scientific_notation_grounding_is_unchanged() -> None:
-    assert check("1.234567e6 valid pixels.").numeric_grounding == "pass"
+    assert (
+        check("1.234567e6 valid pixels.", refs=["ndwi.ndwi_valid_pixel_count"]).numeric_grounding
+        == "pass"
+    )
     assert check("The value was 9.9e6.").numeric_grounding == "fail"
 
 
@@ -868,17 +875,12 @@ def test_the_exact_live_failure_is_grounded() -> None:
     """
 
     evidence = make_evidence(
+        execution=make_execution(location_query="Marina Beach, Chennai"),
         items=[
-            measurement_item(
-                "ndwi.ndwi_mean", "ndwi_mean", 0.1463908465206975, "index"
-            ),
-            measurement_item(
-                "ndwi.ndwi_min", "ndwi_min", -0.7808971620384498, "index"
-            ),
-            measurement_item(
-                "ndwi.ndwi_max", "ndwi_max", 0.9729119638826185, "index"
-            ),
-        ]
+            measurement_item("ndwi.ndwi_mean", "ndwi_mean", 0.1463908465206975, "index"),
+            measurement_item("ndwi.ndwi_min", "ndwi_min", -0.7808971620384498, "index"),
+            measurement_item("ndwi.ndwi_max", "ndwi_max", 0.9729119638826185, "index"),
+        ],
     )
     summary = (
         "In January 2024, the mean NDWI of Marina Beach, Chennai is "
@@ -887,7 +889,12 @@ def test_the_exact_live_failure_is_grounded() -> None:
         "index computed from raw Sentinel-2 digital numbers and are not a "
         "validated water or flood classification."
     )
-    assert validate_answer(draft(summary), evidence).numeric_grounding == "pass"
+    assert (
+        validate_answer(
+            draft(summary, [item.id for item in evidence.items]), evidence
+        ).numeric_grounding
+        == "pass"
+    )
 
 
 def test_the_production_ndwi_disclaimer_grounds_clean() -> None:
@@ -983,3 +990,196 @@ def test_grounded_values_still_pass_beside_a_platform_name() -> None:
         ).numeric_grounding
         == "pass"
     )
+
+
+# =========================================================================== #
+# H. A model may never authorise a number (Phase 18.1)
+# =========================================================================== #
+#
+# `_allowed_values` decides which numbers an answer may state. It reads
+# measurements from the evidence, and until Phase 18.1 every producer of
+# evidence was deterministic, so "in the evidence" and "established by the
+# system" meant the same thing.
+#
+# `source="model"` breaks that equivalence. A vision-language model can say
+# "water covers about 42 percent"; if such an item ever reached the allowed set,
+# the model would be citing itself and numeric grounding would become circular -
+# passing precisely the claims it exists to catch.
+#
+# The rule is therefore about the SOURCE, not about what model evidence happens
+# to carry today. Relying on "visual evidence has no Measurement right now"
+# would make the guarantee an accident of the current shape.
+
+DETERMINISTIC_SOURCES = ("execution", "ndwi", "temporal_ndwi", "compatibility")
+
+
+def model_visual_item(statement: str, item_id: str = "model.visual.SCENE") -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "source": "model",
+        "visual": {
+            "statement": statement,
+            "provider": "gemini",
+            "model": "gemini-3.6-flash",
+            "scene_id": "SCENE",
+        },
+        "produced_by": "gemini-3.6-flash",
+    }
+
+
+def test_a_deterministic_value_still_authorises_a_number() -> None:
+    """A. The existing behaviour is untouched."""
+
+    evidence = make_evidence(
+        items=[measurement_item("ndwi.ndwi_mean", "ndwi_mean", 42.0, "index")]
+    )
+    assert check("The mean was 42.", evidence=evidence).numeric_grounding == "pass"
+
+
+def test_a_model_statement_puts_no_value_in_the_allowed_set() -> None:
+    """B. Read the rule directly, not through an answer."""
+
+    evidence = AgentEvidence.model_validate(
+        {"items": [model_visual_item("Water covers approximately 42 percent.")]}
+    )
+    assert grounding_mod._allowed_values(evidence) == set()
+
+
+def test_a_model_generated_number_cannot_pass_grounding() -> None:
+    """C. The end-to-end consequence: the model cannot cite itself."""
+
+    evidence = AgentEvidence.model_validate(
+        {"items": [model_visual_item("Water covers approximately 42 percent.")]}
+    )
+    result = validate_answer(
+        DraftAnswer(
+            summary="Water covers 42 percent.", evidence_refs=["model.visual.SCENE"]
+        ),
+        evidence,
+    )
+    assert result.numeric_grounding == "fail"
+
+
+def test_model_evidence_cannot_smuggle_a_value_past_deterministic_evidence() -> None:
+    """Mixed evidence: only the deterministic value is authorised."""
+
+    evidence = AgentEvidence.model_validate(
+        {
+            "items": [
+                measurement_item("ndwi.ndwi_mean", "ndwi_mean", 0.2777, "index"),
+                model_visual_item("It looks like roughly 99 percent water."),
+            ]
+        }
+    )
+    assert grounding_mod._allowed_values(evidence) == {0.2777}
+    assert check("Coverage was 99 percent.", evidence=evidence).numeric_grounding == "fail"
+    assert check("The mean was 0.2777.", evidence=evidence).numeric_grounding == "pass"
+
+
+def test_the_rule_is_the_source_not_the_absence_of_a_measurement() -> None:
+    """A model item carrying a measurement must STILL contribute nothing.
+
+    Visual evidence has no measurement today. Pinning the rule on the source
+    means the guarantee survives a future model evidence shape that does.
+    """
+
+    evidence = AgentEvidence.model_validate(
+        {
+            "items": [
+                {
+                    "id": "model.hypothetical",
+                    "source": "model",
+                    "measurement": {"name": "guess", "value": 42.0, "unit": "%"},
+                    "produced_by": "some-model/1",
+                }
+            ]
+        }
+    )
+    assert grounding_mod._allowed_values(evidence) == set()
+
+
+@pytest.mark.parametrize("source", DETERMINISTIC_SOURCES)
+def test_every_deterministic_source_still_contributes(source: str) -> None:
+    evidence = AgentEvidence.model_validate(
+        {
+            "items": [
+                {
+                    "id": f"{source}.value",
+                    "source": source,
+                    "measurement": {"name": "v", "value": 7.5, "unit": "index"},
+                }
+            ]
+        }
+    )
+    assert grounding_mod._allowed_values(evidence) == {7.5}
+
+
+def test_a_qualitative_visual_claim_is_attributed_not_rejected() -> None:
+    """D. "Water is visible." states no number and must not be refused."""
+
+    evidence = AgentEvidence.model_validate(
+        {"items": [model_visual_item("Water is visible along the shoreline.")]}
+    )
+    result = validate_answer(
+        DraftAnswer(
+            summary="Water is visible along the shoreline.",
+            evidence_refs=["model.visual.SCENE"],
+        ),
+        evidence,
+    )
+
+    assert result.visual_claims == "attributed"
+    assert result.evidence_refs == "pass"
+    # Vacuously true - the sentence states no number - and NOT a claim that the
+    # observation itself was verified.
+    assert result.numeric_grounding == "pass"
+
+
+def test_visual_claims_stays_not_run_without_model_evidence() -> None:
+    assert check("The mean NDWI was 0.2777 index.").visual_claims == "not_run"
+
+
+# --------------------------------------------------------------------------- #
+# Every deterministic index is authoritative for its own numbers
+# --------------------------------------------------------------------------- #
+#
+# Adding a spectral index means touching three places: the engine, the
+# `EvidenceSource` literal, and `_NUMERIC_AUTHORITIES`. Forgetting the last one
+# fails SILENTLY and in the worst direction - a perfectly real, pixel-derived
+# measurement is treated as ungrounded, and a correct answer quoting it is
+# withheld. These tests make that omission loud.
+
+
+@pytest.mark.parametrize("source", ["ndvi", "ndwi", "ndbi", "temporal_ndwi"])
+def test_a_deterministic_index_can_authorise_its_own_number(source: str) -> None:
+    from app.services.agent.grounding import _NUMERIC_AUTHORITIES
+
+    assert source in _NUMERIC_AUTHORITIES
+
+
+def test_a_model_observation_still_cannot_authorise_a_number() -> None:
+    """The point of the allowlist, restated after widening it.
+
+    Adding index sources must not have turned the allowlist into a formality.
+    """
+
+    from app.services.agent.grounding import _NUMERIC_AUTHORITIES
+
+    assert "model" not in _NUMERIC_AUTHORITIES
+
+
+def test_every_evidence_source_that_carries_numbers_is_declared() -> None:
+    """The two literals cannot drift apart.
+
+    `_NUMERIC_AUTHORITIES` must be a subset of the declared evidence sources -
+    an authority naming a source nothing can emit is dead, and a source that
+    should be authoritative but is not listed withholds real answers.
+    """
+
+    from typing import get_args
+
+    from app.services.agent.grounding import _NUMERIC_AUTHORITIES
+    from app.services.agent.schemas import EvidenceSource
+
+    declared = set(get_args(EvidenceSource))
+    assert declared >= _NUMERIC_AUTHORITIES

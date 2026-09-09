@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from app.core.errors import AppError
 from app.services.agent.executor import AgentExecutor
-from app.services.agent.providers.gemini import (
-    GeminiAgentPlanner,
-    GeminiAnswerSynthesizer,
+from app.services.agent.providers.factory import (
+    get_agent_providers,
+    get_intent_parser,
 )
 from app.services.agent.schemas import AgentQuestionRequest, AgentResult
 from app.services.agent.service import AgentService
-from app.services.ai import AiService, GeminiIntentParser, ParsePromptRequest
+from app.services.ai import AiService, ParsePromptRequest
 from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService
 from app.services.query import (
     QueryExecutionRequest,
@@ -32,14 +33,18 @@ def get_query_service() -> QueryService:
 
 
 def get_ai_service() -> AiService:
-    """Production provider for :class:`AiService` - a Gemini-backed parser.
+    """Production provider for :class:`AiService` - a provider-resolved parser.
 
-    Overridden in tests to inject ``MockIntentParser`` or a fake parser. The
-    parser is created lazily, so this stays cheap and does not require
-    ``GEMINI_API_KEY`` to be set at import/startup time.
+    Overridden in tests to inject ``MockIntentParser`` or a fake parser.
+
+    The provider comes from the same factory the agent path uses, so
+    ``AI_PROVIDER`` governs this endpoint too - there is one selection
+    mechanism, not a second one here. A missing credential for the selected
+    provider raises at request time and is reported as an upstream failure; it
+    is never answered by the other provider.
     """
 
-    return AiService(parser=GeminiIntentParser())
+    return AiService(parser=get_intent_parser())
 
 
 def get_query_execution_service() -> QueryExecutionService:
@@ -63,24 +68,57 @@ def get_analysis_service() -> AnalysisService:
     return AnalysisService()
 
 
-def get_agent_service() -> AgentService:
+def build_agent_service(
+    provider: str | None = None, model: str | None = None
+) -> AgentService:
     """Provider for :class:`AgentService`; overridden in tests.
 
     Composition lives here rather than inside the service: this is the only
-    place that names a concrete provider, which is what keeps ``AgentService``
-    itself free of any SDK. The Gemini planner and synthesizer create their
-    clients lazily, so this stays cheap and needs no ``GEMINI_API_KEY`` at
-    import/startup time.
+    place that names concrete providers, which is what keeps ``AgentService``
+    itself free of any SDK.
+
+    All three AI roles come from ONE provider bundle, so selecting a provider
+    swaps the entire reasoning path - planning, seeing and describing - not one
+    step of it. The deterministic services below are constructed identically
+    whichever provider is chosen: discovery, retrieval, the raster path and the
+    analyses are shared, and provider selection cannot reach them.
     """
 
+    providers = get_agent_providers(provider=provider, model=model)
     return AgentService(
-        planner=GeminiAgentPlanner(),
+        planner=providers.planner,
         executor=AgentExecutor(
             query_execution_service=QueryExecutionService(),
             analysis_service=AnalysisService(),
+            # The visual analyst is the WITNESS - it observes the retrieved
+            # image. Injected here, beside the other roles, so the executor
+            # stays free of any SDK and never learns which provider answered.
+            visual_analyst=providers.visual_analyst,
         ),
-        synthesizer=GeminiAnswerSynthesizer(),
+        synthesizer=providers.synthesizer,
     )
+
+
+def get_agent_service() -> AgentService | None:
+    """Provider for :class:`AgentService`; overridden in tests.
+
+    Returns ``None`` instead of raising when the CONFIGURED DEFAULT provider
+    cannot be built. FastAPI resolves a dependency before the handler body
+    runs, so raising here decided the run before the request's own
+    ``provider`` had been read: a deployment holding only an NVIDIA key could
+    not use NVIDIA, because constructing the unconfigured Gemini default
+    failed first - and the error then named Gemini, a provider the caller had
+    not asked for.
+
+    The failure is not swallowed. The handler re-raises it, unchanged, when the
+    request does not name a provider of its own, so an unconfigured deployment
+    still gets the same actionable 502 naming the variable to set.
+    """
+
+    try:
+        return build_agent_service()
+    except AppError:
+        return None
 
 
 @router.post("/parse", response_model=SatQueryIntent)
@@ -166,6 +204,20 @@ async def answer_question(
 
     This endpoint is an HTTP adapter only. It performs no orchestration, no tool
     execution, no grounding and no model call of its own - ``AgentService`` owns
-    all of that."""
+    all of that.
 
+    A request may name a ``provider`` and a ``model`` to select the inference
+    backend for that run. They change nothing else: the same plan, the same
+    deterministic tools, the same grounding and the same evidence shape. A
+    model that cannot accept an image is refused before the request is made
+    rather than being asked to describe a picture it never received."""
+
+    if request.provider is not None or request.model is not None:
+        # The request names its own backend, so the configured default is
+        # irrelevant to this run - including whether it could be built at all.
+        service = build_agent_service(request.provider, request.model)
+    elif service is None:
+        # No override, and the default could not be built: surface that now,
+        # with the message naming the provider actually selected.
+        service = build_agent_service()
     return await service.answer(request)

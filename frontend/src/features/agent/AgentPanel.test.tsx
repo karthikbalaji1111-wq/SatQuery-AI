@@ -102,13 +102,15 @@ function askQuestion(question: string = QUESTION) {
   fireEvent.change(screen.getByLabelText(/question/i), {
     target: { value: question },
   });
-  fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+  fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
 }
 
 async function askAndWait(question: string = QUESTION) {
   askQuestion(question);
   await waitFor(() =>
-    expect(screen.getByRole("heading", { name: "Answer" })).toBeInTheDocument(),
+    expect(
+      screen.getByRole("heading", { name: "Pipeline" }).closest("section"),
+    ).not.toHaveTextContent(/No run yet/),
   );
 }
 
@@ -121,12 +123,12 @@ describe("AgentPanel - the Ask form", () => {
     render(<AgentPanel />);
 
     expect(screen.getByLabelText(/question/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^ask$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^run analysis$/i })).toBeInTheDocument();
   });
 
   it("disables Ask until a question is entered", () => {
     render(<AgentPanel />);
-    const button = screen.getByRole("button", { name: /^ask$/i });
+    const button = screen.getByRole("button", { name: /^run analysis$/i });
 
     expect(button).toBeDisabled();
 
@@ -144,7 +146,7 @@ describe("AgentPanel - the Ask form", () => {
       target: { value: "   " },
     });
 
-    expect(screen.getByRole("button", { name: /^ask$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^run analysis$/i })).toBeDisabled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -190,7 +192,7 @@ describe("AgentPanel - the Ask form", () => {
     askQuestion();
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /asking/i })).toBeDisabled(),
+      expect(screen.getByRole("button", { name: /running/i })).toBeDisabled(),
     );
     expect(screen.getByLabelText(/question/i)).toBeDisabled();
 
@@ -201,7 +203,7 @@ describe("AgentPanel - the Ask form", () => {
     } as Response);
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^ask$/i })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: /^run analysis$/i })).toBeEnabled(),
     );
   });
 });
@@ -211,7 +213,7 @@ describe("AgentPanel - the Ask form", () => {
 // ===========================================================================
 
 describe("AgentPanel - successful result", () => {
-  it("renders Plan, Tools selected, Execution, Evidence and Answer in order", async () => {
+  it("renders query, execution, answer and evidence in band order", async () => {
     stubAgent({ body: agentResult() });
     render(<AgentPanel />);
 
@@ -220,7 +222,15 @@ describe("AgentPanel - successful result", () => {
     const headings = screen
       .getAllByRole("heading")
       .map((node) => node.textContent);
-    const order = ["Plan", "Tools selected", "Execution", "Evidence", "Answer"];
+    // Direction B band order: the question, what ran, the answer, then the
+    // observation and evidence split. (This fixture carries no model
+    // observation; its heading is covered by the visual-observation suite.)
+    const order = [
+      "Natural-language query",
+      "Pipeline",
+      "Analysis result",
+      "Deterministic evidence",
+    ];
     const positions = order.map((label) => headings.indexOf(label));
 
     expect(positions.every((index) => index >= 0)).toBe(true);
@@ -244,13 +254,15 @@ describe("AgentPanel - successful result", () => {
 
     await askAndWait();
 
-    const tools = screen.getByRole("heading", { name: "Tools selected" })
-      .parentElement as HTMLElement;
-    expect(within(tools).getByText("Execute query")).toBeInTheDocument();
-    expect(within(tools).getByText("NDWI statistics")).toBeInTheDocument();
+    // Which tools ran is the execution stage list now; there is no separate
+    // "Tools selected" section in this composition.
+    const tools = screen.getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
+    expect(within(tools).getByText("stac_search")).toBeInTheDocument();
+    expect(within(tools).getByText("ndwi_compute")).toBeInTheDocument();
     // A tool the response does not contain must not appear.
     expect(
-      within(tools).queryByText("Temporal NDWI statistics"),
+      within(tools).queryByText("ndwi_temporal"),
     ).not.toBeInTheDocument();
   });
 
@@ -281,10 +293,12 @@ describe("AgentPanel - successful result", () => {
 
     await askAndWait();
 
-    const tools = screen.getByRole("heading", { name: "Tools selected" })
-      .parentElement as HTMLElement;
+    // Which tools ran is the execution stage list now; there is no separate
+    // "Tools selected" section in this composition.
+    const tools = screen.getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
     expect(
-      within(tools).getByText("Temporal NDWI statistics"),
+      within(tools).getByText("ndwi_temporal"),
     ).toBeInTheDocument();
     expect(within(tools).queryByText("NDWI statistics")).not.toBeInTheDocument();
   });
@@ -315,12 +329,20 @@ describe("AgentPanel - successful result", () => {
 
     await askAndWait();
 
-    const execution = screen.getByRole("heading", { name: "Execution" })
-      .parentElement as HTMLElement;
-    expect(within(execution).getByText(/failed/i)).toBeInTheDocument();
-    expect(within(execution).getByText(/skipped/i)).toBeInTheDocument();
+    const execution = screen.getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
+    expect(within(execution).getByText("stac_search")).toBeInTheDocument();
+    expect(within(execution).getByText("ndwi_compute")).toBeInTheDocument();
+    // The run state summarises the same outcome, separately from the rows.
+    expect(within(execution).getByText(/^Failed$/)).toBeInTheDocument();
+    // Visible text, not a `title`: on a non-focusable <li> a tooltip is a
+    // mouse-only channel, so the one diagnostic explaining a failed run was
+    // unreachable to keyboard and screen-reader users.
     expect(
-      within(execution).getByText(/The satellite catalog is unavailable./),
+      within(execution).getByText(/The satellite catalog is unavailable\./),
+    ).toBeInTheDocument();
+    expect(
+      within(execution).getByText(/nothing to analyse/),
     ).toBeInTheDocument();
   });
 
@@ -330,10 +352,15 @@ describe("AgentPanel - successful result", () => {
 
     await askAndWait();
 
-    const evidence = screen.getByRole("heading", { name: "Evidence" })
-      .parentElement as HTMLElement;
+    const evidence = screen.getByRole("heading", { name: "Deterministic evidence" })
+      .closest("section") as HTMLElement;
     expect(within(evidence).getByText("ndwi.ndwi_mean")).toBeInTheDocument();
-    expect(within(evidence).getByText(/0\.2777/)).toBeInTheDocument();
+    // Twice by design: the index readout headlines it, the citation row below
+    // carries the id and raw value that grounding resolves against.
+    expect(
+      within(evidence).getByText("ndwi_mean = 0.2777 index"),
+    ).toBeInTheDocument();
+    expect(within(evidence).getByText("+0.2777")).toBeInTheDocument();
     expect(
       within(evidence).getByText("Equal AOI coverage is NOT established."),
     ).toBeInTheDocument();
@@ -349,8 +376,8 @@ describe("AgentPanel - successful result", () => {
 
     await askAndWait();
 
-    const evidence = screen.getByRole("heading", { name: "Evidence" })
-      .parentElement as HTMLElement;
+    const evidence = screen.getByRole("heading", { name: "Deterministic evidence" })
+      .closest("section") as HTMLElement;
     expect(within(evidence).getByText(/no evidence/i)).toBeInTheDocument();
   });
 });
@@ -368,12 +395,12 @@ describe("AgentPanel - withheld and unavailable answers", () => {
 
     await askAndWait();
 
-    const answer = screen.getByRole("heading", { name: "Answer" })
-      .parentElement as HTMLElement;
+    const answer = screen.getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
     expect(
       within(answer).queryByText("The mean NDWI was 0.2777 index."),
     ).not.toBeInTheDocument();
-    expect(within(answer).getByText(/withheld/i)).toBeInTheDocument();
+    expect(within(answer).getByText(/An answer was generated but failed validation/i)).toBeInTheDocument();
   });
 
   it("preserves the evidence when the answer is withheld", async () => {
@@ -384,8 +411,8 @@ describe("AgentPanel - withheld and unavailable answers", () => {
 
     await askAndWait();
 
-    const evidence = screen.getByRole("heading", { name: "Evidence" })
-      .parentElement as HTMLElement;
+    const evidence = screen.getByRole("heading", { name: "Deterministic evidence" })
+      .closest("section") as HTMLElement;
     expect(within(evidence).getByText("ndwi.ndwi_mean")).toBeInTheDocument();
   });
 
@@ -397,12 +424,12 @@ describe("AgentPanel - withheld and unavailable answers", () => {
 
     await askAndWait();
 
-    const evidence = screen.getByRole("heading", { name: "Evidence" })
-      .parentElement as HTMLElement;
+    const evidence = screen.getByRole("heading", { name: "Deterministic evidence" })
+      .closest("section") as HTMLElement;
     expect(within(evidence).getByText("ndwi.ndwi_mean")).toBeInTheDocument();
-    const answer = screen.getByRole("heading", { name: "Answer" })
-      .parentElement as HTMLElement;
-    expect(within(answer).getByText(/could not be generated/i)).toBeInTheDocument();
+    const answer = screen.getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
+    expect(within(answer).getByText(/written summary is missing/i)).toBeInTheDocument();
   });
 
   it("renders planner_unavailable safely with nothing invented", async () => {
@@ -423,10 +450,17 @@ describe("AgentPanel - withheld and unavailable answers", () => {
 
     await askAndWait();
 
-    expect(screen.getByText(/could not be planned/i)).toBeInTheDocument();
-    const plan = screen.getByRole("heading", { name: "Plan" })
-      .parentElement as HTMLElement;
-    expect(within(plan).getByText(/no plan/i)).toBeInTheDocument();
+    expect(screen.getByText(/did not return a usable plan/i)).toBeInTheDocument();
+    // The Plan and Tools sections are gone: what the server was asked to do is
+    // now the context strip, and which tools ran is the execution stage list.
+    // With no plan, both must stay empty rather than echo the question back as
+    // though it had been understood.
+    const execution = screen.getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
+    expect(
+      within(execution).getByText(/no stages executed yet/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Location")).not.toBeInTheDocument();
   });
 
   it("never implies a withheld answer is trustworthy", async () => {
@@ -461,9 +495,12 @@ describe("AgentPanel - request failures", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent("provider down"),
     );
-    expect(
-      screen.queryByRole("heading", { name: "Answer" }),
-    ).not.toBeInTheDocument();
+    // The Answer band is part of the composition and always present; what must
+    // never happen is it presenting an answer when the request failed.
+    const answer = screen.getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
+    expect(within(answer).getByText(/Run an analysis to produce/i)).toBeInTheDocument();
+    expect(within(answer).queryByText(/provider down/)).not.toBeInTheDocument();
   });
 
   it("renders a network failure as an error", async () => {
@@ -473,7 +510,7 @@ describe("AgentPanel - request failures", () => {
     askQuestion();
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /^ask$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^run analysis$/i })).toBeEnabled();
   });
 });
 
@@ -511,5 +548,510 @@ describe("AgentPanel - what it must never show", () => {
     for (const banned of ["api_key", "apikey", "gemini", "system_instruction"]) {
       expect(rendered).not.toContain(banned);
     }
+  });
+});
+
+// =========================================================================== //
+// Phase 18.1 - the visual observation
+// =========================================================================== //
+//
+// A model observation is not a measurement and must never be dressed as one.
+// These tests pin the attribution: the model is named on screen, the block is
+// structurally distinct from the deterministic evidence list, and nothing about
+// it reads as "verified".
+
+const VISUAL_ITEM = {
+  id: "model.visual.S2B_44PMV_20250104_0_L2A",
+  source: "model",
+  measurement: null,
+  text: null,
+  visual: {
+    statement: "Water is visible along the eastern shoreline.",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
+    scene_id: "S2B_44PMV_20250104_0_L2A",
+  },
+  produced_by: "gemini-3.6-flash",
+};
+
+function visualResult(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "ok",
+    answer: "Water is visible along the eastern shoreline.",
+    trace: {
+      plan: {
+        steps: [
+          EXECUTE_STEP,
+          { tool: "rs_model_analysis", question: "Is there visible water?" },
+        ],
+      },
+      steps: [
+        { status: "ok", parameters: EXECUTE_STEP, rejection_reason: null, error_message: null },
+        {
+          status: "ok",
+          parameters: { tool: "rs_model_analysis", question: "Is there visible water?" },
+          rejection_reason: null,
+          error_message: null,
+        },
+      ],
+      evidence_refs: [VISUAL_ITEM.id],
+      answer_validation: {
+        numeric_grounding: "pass",
+        forbidden_terms: "pass",
+        evidence_refs: "pass",
+        visual_claims: "attributed",
+      },
+    },
+    evidence: { items: [VISUAL_ITEM], execution: null, analysis: null },
+    ...overrides,
+  };
+}
+
+async function askWith(body: unknown) {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    ok: true,
+    status: 200,
+    text: () => Promise.resolve(JSON.stringify(body)),
+  } as Response);
+  render(<AgentPanel />);
+  fireEvent.change(screen.getByLabelText("Question"), {
+    target: { value: "Is there visible water?" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("heading", { name: "Pipeline" }).closest("section"),
+    ).not.toHaveTextContent(/No run yet/),
+  );
+}
+
+describe("AgentPanel - visual observation", () => {
+  it("renders the model's statement", async () => {
+    await askWith(visualResult());
+    // Appears both as the observation and (here) as the synthesised answer -
+    // scope to the observation block rather than asserting global uniqueness.
+    const block = screen
+      .getByRole("heading", { name: "Visual observation" })
+      .closest("section") as HTMLElement;
+    expect(
+      within(block).getByText(/Water is visible along the eastern shoreline\./),
+    ).toBeInTheDocument();
+  });
+
+  it("attributes the observation to the named model", async () => {
+    await askWith(visualResult());
+    expect(screen.getByText(/^Model observation · /)).toBeInTheDocument();
+    expect(screen.getByText(/gemini-3\.6-flash/)).toBeInTheDocument();
+  });
+
+  it("splits the observation and the evidence, observation first", async () => {
+    await askWith(visualResult());
+    const headings = screen
+      .getAllByRole("heading")
+      .map((node) => node.textContent);
+    const answer = headings.indexOf("Analysis result");
+    const observation = headings.indexOf("Visual observation");
+    const evidence = headings.indexOf("Deterministic evidence");
+
+    // Direction B §1: the answer is band 3; the interpretation and the
+    // computed values split band 4 beneath it, never sharing a container.
+    expect(answer).toBeGreaterThanOrEqual(0);
+    expect(answer).toBeLessThan(observation);
+    expect(observation).toBeLessThan(evidence);
+  });
+
+  it("labels the visual tool readably in the plan", async () => {
+    await askWith(visualResult());
+    expect(screen.getAllByText(/Visual observation/i).length).toBeGreaterThan(0);
+  });
+
+  it("does not render a visual observation as a measurement", async () => {
+    await askWith(visualResult());
+    // A measurement renders as "name = value unit"; a visual claim must not.
+    expect(screen.queryByText(/=\s*null/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+  });
+
+  it("shows nothing visual when there is no model evidence", async () => {
+    await askWith({
+      ...visualResult(),
+      evidence: { items: [], execution: null, analysis: null },
+      trace: {
+        ...visualResult().trace,
+        evidence_refs: [],
+        answer_validation: {
+          numeric_grounding: "pass",
+          forbidden_terms: "pass",
+          evidence_refs: "pass",
+          visual_claims: "not_run",
+        },
+      },
+    });
+    expect(screen.queryByText(/Model observation/i)).not.toBeInTheDocument();
+  });
+});
+
+// --------------------------------------------------------------------------- #
+// The agent -> map handoff
+// --------------------------------------------------------------------------- #
+//
+// The agent plans `execute_query` with imagery, so a georeferenced scene comes
+// back inside the evidence. These tests pin that it reaches the map exactly the
+// way QueryPanel's does - passed upward, never re-fetched - and that a new
+// question clears the previous scene before the new one arrives.
+
+const AGENT_IMAGERY = {
+  scene_id: "S2A_44PMV_20240115_0_L2A",
+  media_type: "image/png",
+  image_base64: "iVBORw0KGgo=",
+  crs: "EPSG:32644",
+  width: 112,
+  height: 300,
+  corners_wgs84: [
+    [80.279621, 13.066132],
+    [80.289951, 13.06616],
+    [80.290029, 13.039034],
+    [80.2797, 13.039006],
+  ],
+};
+
+const NDWI_OVERLAY = {
+  scene_id: "S2A_44PMV_20240115_0_L2A",
+  window_label: "single",
+  media_type: "image/png",
+  image_base64: "TkRXSQ==",
+  corners_wgs84: AGENT_IMAGERY.corners_wgs84,
+};
+
+function withEvidence(execution: unknown, analysis: unknown) {
+  return agentResult({
+    evidence: { items: EVIDENCE.items, execution, analysis },
+  });
+}
+
+function executionWithImagery(imagery: unknown) {
+  return {
+    plan: { intent: INTENT, bbox: null },
+    executed_modalities: ["sentinel-2-optical"],
+    skipped_modalities: [],
+    windows: [
+      {
+        modality: "sentinel-2-optical",
+        label: "single",
+        time_range: INTENT.time_windows[0],
+        scene_count: 6,
+        scenes: [],
+        selected_scene_id: AGENT_IMAGERY.scene_id,
+        imagery,
+        imagery_error: null,
+      },
+    ],
+    catalog: "https://example.test/v1",
+  };
+}
+
+async function askWithHandlers(body: unknown, handlers: Record<string, unknown>) {
+  stubAgent({ body });
+  render(<AgentPanel {...handlers} />);
+  fireEvent.change(screen.getByLabelText(/question/i), {
+    target: { value: QUESTION },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+}
+
+describe("AgentPanel - map handoff", () => {
+  it("passes the executed window's imagery upward", async () => {
+    const onImagery = vi.fn();
+    await askWithHandlers(
+      withEvidence(executionWithImagery(AGENT_IMAGERY), null),
+      { onImagery },
+    );
+
+    await waitFor(() =>
+      expect(onImagery).toHaveBeenLastCalledWith(
+        expect.objectContaining({ scene_id: AGENT_IMAGERY.scene_id }),
+      ),
+    );
+  });
+
+  it("clears the previous scene before the new question is answered", async () => {
+    const onImagery = vi.fn();
+    await askWithHandlers(
+      withEvidence(executionWithImagery(AGENT_IMAGERY), null),
+      { onImagery },
+    );
+
+    // The very first call happens before the response lands.
+    expect(onImagery).toHaveBeenNthCalledWith(1, null);
+    await waitFor(() => expect(onImagery).toHaveBeenCalledTimes(2));
+  });
+
+  it("passes null when the execution retrieved no imagery", async () => {
+    const onImagery = vi.fn();
+    await askWithHandlers(withEvidence(executionWithImagery(null), null), {
+      onImagery,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis result" })),
+    );
+    expect(onImagery).toHaveBeenLastCalledWith(null);
+  });
+
+  it("passes an NDWI overlay produced by the agent's analysis", async () => {
+    const onNdwi = vi.fn();
+    await askWithHandlers(
+      withEvidence(executionWithImagery(AGENT_IMAGERY), {
+        status: "ok",
+        task: "visualize",
+        answer: "Analysed.",
+        windows_considered: [],
+        warnings: [],
+        measurements: [],
+        temporal_comparison: null,
+        ndwi_overlay: NDWI_OVERLAY,
+      }),
+      { onNdwi },
+    );
+
+    await waitFor(() =>
+      expect(onNdwi).toHaveBeenLastCalledWith(
+        expect.objectContaining({ scene_id: NDWI_OVERLAY.scene_id }),
+      ),
+    );
+  });
+
+  it("works with no handlers attached", async () => {
+    stubAgent({ body: withEvidence(executionWithImagery(AGENT_IMAGERY), null) });
+    render(<AgentPanel />);
+    fireEvent.change(screen.getByLabelText(/question/i), {
+      target: { value: QUESTION },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Analysis result" }),
+      ).toBeInTheDocument(),
+    );
+  });
+});
+
+// A run state must never contradict the run: planning failure means nothing
+// executed, so the panel cannot report a completed run over an empty trace.
+describe("AgentPanel - run state honesty", () => {
+  it("does not report COMPLETE when planning produced no steps", async () => {
+    await askWith({
+      status: "planner_unavailable",
+      answer: null,
+      trace: { plan: null, steps: [], evidence_refs: [], answer_validation: null },
+      evidence: { items: [], execution: null, analysis: null },
+    });
+
+    const execution = screen.getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
+    expect(within(execution).getByText(/^Not run$/)).toBeInTheDocument();
+    expect(within(execution).queryByText(/^Complete$/)).not.toBeInTheDocument();
+  });
+});
+
+// A window spanning a year boundary must keep both years: the abbreviation is
+// only ever the repeated year, never information the reader needs.
+describe("AgentPanel - window formatting", () => {
+  it("keeps both years when the window crosses a year boundary", async () => {
+    await askWith(
+      agentResult({
+        trace: {
+          plan: {
+            steps: [
+              {
+                ...EXECUTE_STEP,
+                intent: {
+                  ...INTENT,
+                  time_windows: [
+                    { start_date: "2024-12-01", end_date: "2025-01-31" },
+                  ],
+                },
+              },
+            ],
+          },
+          steps: [
+            {
+              status: "ok",
+              parameters: EXECUTE_STEP,
+              rejection_reason: null,
+              error_message: null,
+            },
+          ],
+          evidence_refs: [],
+          answer_validation: null,
+        },
+      }),
+    );
+    expect(screen.getByText("2024-12-01 → 2025-01-31")).toBeInTheDocument();
+  });
+});
+
+// --------------------------------------------------------------------------- #
+// The query hero is a real input
+// --------------------------------------------------------------------------- #
+//
+// Regression: the placeholder once carried a fully-formed Marina Beach question
+// styled like entered text, so the resting hero read as a hardcoded demo query.
+// The field must start empty, prompt without naming a place, and run only what
+// the user actually typed.
+
+describe("AgentPanel - the query hero is a real input", () => {
+  it("starts empty with a prompt that names no location", () => {
+    render(<AgentPanel />);
+    const input = screen.getByLabelText(/question/i) as HTMLTextAreaElement;
+
+    expect(input.value).toBe("");
+    const placeholder = input.placeholder;
+    expect(placeholder).not.toMatch(/marina|chennai|sentinel-2 image of/i);
+    expect(placeholder).toMatch(/ask about/i);
+  });
+
+  it("disables Run analysis until the user has typed something", () => {
+    render(<AgentPanel />);
+    const run = screen.getByRole("button", { name: /^run analysis$/i });
+    expect(run).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/question/i), {
+      target: { value: "Any water near Kochi?" },
+    });
+    expect(run).toBeEnabled();
+  });
+
+  it("sends the user's own text, not an example", async () => {
+    const fetchMock = stubAgent({ body: agentResult() });
+    render(<AgentPanel />);
+
+    const typed = "Any visible water near Kochi in March 2025?";
+    fireEvent.change(screen.getByLabelText(/question/i), {
+      target: { value: typed },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as { body: string }).body,
+    );
+    expect(body.question).toBe(typed);
+    // The submitted text stays in the hero after the run.
+    expect(
+      (screen.getByLabelText(/question/i) as HTMLTextAreaElement).value,
+    ).toBe(typed);
+  });
+
+  it("fills the input from an example without submitting it", () => {
+    const fetchMock = stubAgent({ body: agentResult() });
+    render(<AgentPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: /visible water/i }));
+
+    const input = screen.getByLabelText(/question/i) as HTMLTextAreaElement;
+    expect(input.value).toMatch(/Marina Beach, Chennai/);
+    // Clicking an example is not a submission.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentPanel - honest imagery degradation", () => {
+  // A window can discover and select a scene and still fail to retrieve its
+  // picture. That is the documented Sentinel-1 case: the catalog publishes the
+  // measurement asset on storage this deployment holds no credentials for.
+  // The agent path used to drop `imagery_error` entirely, so such a run looked
+  // identical to one that never asked for imagery.
+  const S1_ERROR =
+    "Asset 'vv' is published as s3:// which this deployment cannot read; " +
+    "only anonymous HTTPS assets are supported. Sentinel-1 GRD measurement " +
+    "assets are currently published this way, so bounded Sentinel-1 " +
+    "retrieval is not available - see the Sentinel-1 note in the README.";
+
+  function withImageryError(message: string) {
+    const base = executionWithImagery(null);
+    const execution = {
+      ...base,
+      windows: [{ ...base.windows[0], imagery_error: message }],
+    };
+    return agentResult({
+      evidence: { items: [], execution, analysis: null },
+    });
+  }
+
+  it("states that Sentinel-1 imagery was not retrieved, and why", async () => {
+    stubAgent({ body: withImageryError(S1_ERROR) });
+    render(<AgentPanel />);
+    await askAndWait();
+
+    const evidence = screen
+      .getByRole("heading", { name: "Deterministic evidence" })
+      .closest("section") as HTMLElement;
+
+    expect(
+      within(evidence).getByText(/Sentinel-1 imagery is not available/i),
+    ).toBeInTheDocument();
+    // Discovery still stands - the reader must not read this as a total failure.
+    expect(
+      within(evidence).getByText(/discovery and metadata are unaffected/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not put the server's operator-facing wording in the headline", async () => {
+    stubAgent({ body: withImageryError(S1_ERROR) });
+    render(<AgentPanel />);
+    await askAndWait();
+
+    const summary = screen.getByText(/Sentinel-1 imagery is not available/i);
+    // The README pointer and the URI scheme belong in the disclosure, not in
+    // the sentence a judge reads off the screen.
+    expect(summary.textContent).not.toMatch(/README/i);
+    expect(summary.textContent).not.toMatch(/s3:\/\//);
+  });
+
+  it("keeps the server's own cause available rather than hiding it", async () => {
+    stubAgent({ body: withImageryError(S1_ERROR) });
+    render(<AgentPanel />);
+    await askAndWait();
+
+    // Inspectable, just not shouted: a documented boundary should be checkable.
+    expect(screen.getByText(/Technical cause/i)).toBeInTheDocument();
+    expect(screen.getByText(/s3:\/\//)).toBeInTheDocument();
+  });
+
+  it("never implies a SAR measurement was produced", async () => {
+    stubAgent({ body: withImageryError(S1_ERROR) });
+    render(<AgentPanel />);
+    await askAndWait();
+
+    const body = document.body.textContent ?? "";
+    expect(body).not.toMatch(/backscatter/i);
+    expect(body).not.toMatch(/calibrat/i);
+    expect(body).not.toMatch(/VV\s*(value|measurement|index)/i);
+  });
+});
+
+
+describe("AgentPanel provider failures", () => {
+  it("shows the actual quota failure and provider retry hint", async () => {
+    await askWith(agentResult({
+      status: "planner_unavailable", answer: null,
+      trace: { plan: null, steps: [], evidence_refs: [], answer_validation: null },
+      evidence: { items: [], execution: null, analysis: null },
+      failure: { stage: "planning", code: "rate_limited", message: "Gemini returned HTTP 429.", retry_after_seconds: 44 },
+    }));
+    expect(screen.getByText(/Planning · rate_limited: Gemini returned HTTP 429/)).toBeInTheDocument();
+    expect(screen.getByText(/wait of 44 seconds before retrying/)).toBeInTheDocument();
+    expect(screen.queryByText(/Running the same question again may/)).not.toBeInTheDocument();
+  });
+
+  it("does not claim complete analysis when synthesis fails without measurements", async () => {
+    await askWith(agentResult({
+      status: "synthesis_unavailable", answer: null,
+      evidence: { items: [], execution: null, analysis: null },
+    }));
+    expect(screen.getByText(/written summary is missing/)).toBeInTheDocument();
+    expect(screen.queryByText(/analysis succeeded|complete and valid|answered from measured values alone/i)).not.toBeInTheDocument();
   });
 });

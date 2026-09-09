@@ -5,18 +5,16 @@
 **This is containment, not proof.** The validator can establish three narrow,
 checkable properties and nothing more:
 
-* every number the answer states is traceable to a value in the evidence, at
-  the precision the answer itself used;
-* the answer cites only evidence ids that exist;
+* every number is supported by a cited measurement with the same identity,
+  unit and available observation context, at the precision stated;
+* factual prose is a supported measurement statement or repeats cited evidence;
 * the answer uses none of the phrases that would mischaracterise the system's
   output.
 
-It explicitly does **not** establish qualitative correctness, causal
-attribution, or the semantic truth of prose. An answer saying "the index rose"
-states no number, so numeric grounding has nothing to check and it passes. An
-answer drawing a wrong conclusion from correctly-quoted figures passes too.
-Those limits are real and are not worked around here, because a validator that
-implied otherwise would be a worse lie than the one it prevents.
+It does not prove the truth of a model observation. Qualitative evidence may
+be repeated, not freely extrapolated or paraphrased: unmatched prose fails
+closed. Narrow, whole-sentence abstentions need no citation. This deliberately
+trades recall for containment without introducing a semantic model judge.
 
 The structural mitigation is elsewhere: the deterministic evidence is always
 returned alongside the prose, and a failed check withholds the *answer* while
@@ -35,7 +33,7 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.services.agent.schemas import AgentEvidence, AnswerValidation
+from app.services.agent.schemas import AgentEvidence, AnswerValidation, EvidenceItem
 from app.services.query.schemas import SatQueryIntent, TemporalComparison, TimeRange
 
 # --------------------------------------------------------------------------- #
@@ -81,8 +79,7 @@ _FLOAT_EPSILON = 5e-9
 #: it bought: "12km2", "500m" and "0.99x" produced no match at all, so the
 #: number was never checked and an unsupported claim passed as grounded. A
 #: skipped number is an unchecked claim, which is the one failure mode this
-#: validator exists to prevent. The unit is not interpreted - "500m" is
-#: grounded iff 500 is in the evidence.
+#: validator exists to prevent. Unit agreement is checked separately below.
 #:
 #: The remaining guards stop a partial match inside a longer number: a
 #: following digit, or a following ``.digit``. A sentence-final period is
@@ -91,7 +88,7 @@ _FLOAT_EPSILON = 5e-9
 #: Scientific notation is matched too, for the same reason: without it,
 #: "1.5e10" produced no match and went unchecked.
 _NUMBER = re.compile(
-    r"(?<![A-Za-z0-9_.])[-+]?\d[\d,]*(?:\.\d+)?(?:[eE][-+]?\d+)?"
+    r"(?<![A-Za-z0-9_.])[-+−]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?"
     r"(?!\d)(?!\.\d)"
 )
 
@@ -111,9 +108,7 @@ _IDENTIFIER = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b")
 #: can never blank out a multi-digit number: "Sentinel-12345" and "Sentinel-25"
 #: match nothing and keep their digits under scrutiny. Substitution is
 #: span-local, so a bare number elsewhere in the same sentence is still read.
-_PLATFORM_IDENTIFIER = re.compile(
-    r"\bsentinel-[12][A-Za-z]?(?:-[A-Za-z]+)*\b", re.IGNORECASE
-)
+_PLATFORM_IDENTIFIER = re.compile(r"\bsentinel-[12][A-Za-z]?(?:-[A-Za-z]+)*\b", re.IGNORECASE)
 
 _YEAR = re.compile(r"(?<![A-Za-z0-9_.])(\d{4})(?![A-Za-z0-9_.])")
 _MONTH_NAMES = (
@@ -130,9 +125,7 @@ _MONTH_NAMES = (
     "november",
     "december",
 )
-_MONTH_YEAR = re.compile(
-    r"\b(" + "|".join(_MONTH_NAMES) + r")\s+(\d{4})\b", re.IGNORECASE
-)
+_MONTH_YEAR = re.compile(r"\b(" + "|".join(_MONTH_NAMES) + r")\s+(\d{4})\b", re.IGNORECASE)
 
 #: The ``YYYY-MM-DD`` prefix of an ISO timestamp such as
 #: ``2024-01-15T05:00:00Z``.
@@ -169,13 +162,43 @@ class DraftAnswer(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+#: Evidence sources that may authorise a number, i.e. those produced by a
+#: deterministic engine over real pixels or real metadata. Declared as an
+#: allowlist rather than a denylist so a NEW source is untrusted by default: a
+#: future producer has to be named here to be believed.
+_NUMERIC_AUTHORITIES: frozenset[str] = frozenset(
+    # Every deterministic index computes its own numbers from pixels, so each
+    # is authoritative for the values it reports. Adding an index WITHOUT
+    # listing it here would withhold answers quoting perfectly real
+    # measurements, so the two must move together.
+    {
+        "execution",
+        "ndvi",
+        "ndwi",
+        "ndbi",
+        "temporal_ndwi",
+        "compatibility",
+    }
+)
+
+
 def _allowed_values(evidence: AgentEvidence) -> set[float]:
-    """Every numeric value the answer is permitted to state."""
+    """Raw deterministic values for inspection, NOT claim authorization.
+
+    Only DETERMINISTIC evidence counts. A model-sourced item contributes
+    nothing, whatever it carries: a vision-language model that says "about 42
+    percent" must not thereby make 42 citable, or numeric grounding becomes
+    circular and passes exactly the invented figures it exists to catch.
+
+    The filter is on the SOURCE, not on the absence of a measurement. Visual
+    evidence carries no measurement today, so keying on that would make the
+    guarantee an accident of the current shape rather than a rule.
+    """
 
     return {
         item.measurement.value
         for item in evidence.items
-        if item.measurement is not None
+        if item.measurement is not None and item.source in _NUMERIC_AUTHORITIES
     }
 
 
@@ -199,11 +222,15 @@ def _acquisition_dates(evidence: AgentEvidence) -> set[str]:
     system itself established is accepted, so an invented one still fails.
     """
 
-    if evidence.execution is None:
-        return set()
-
     dates: set[str] = set()
-    for window in evidence.execution.windows:
+    comparison = evidence.analysis.temporal_comparison if evidence.analysis else None
+    if comparison is not None:
+        dates.update(
+            o.acquired_at.isoformat()[:10]
+            for o in (comparison.first, comparison.second)
+            if o.acquired_at is not None
+        )
+    for window in evidence.execution.windows if evidence.execution else []:
         for scene in window.scenes:
             match = _ISO_DATE_PREFIX.match(scene.datetime or "")
             if match is not None:
@@ -222,9 +249,6 @@ def _allowed_dates(evidence: AgentEvidence) -> tuple[set[str], set[str], set[str
     intent and no acquisition, so nothing is allowlisted.
     """
 
-    if evidence.execution is None:
-        return set(), set(), set()
-
     iso: set[str] = set()
     month_years: set[str] = set()
     years: set[str] = set()
@@ -234,7 +258,7 @@ def _allowed_dates(evidence: AgentEvidence) -> tuple[set[str], set[str], set[str
         years.add(f"{year:04d}")
         month_years.add(f"{_MONTH_NAMES[month - 1]} {year:04d}")
 
-    for window in _windows(evidence.execution.plan.intent):
+    for window in _windows(evidence.execution.plan.intent) if evidence.execution else []:
         for moment in (window.start_date, window.end_date):
             allow(moment.year, moment.month, moment.isoformat())
 
@@ -253,11 +277,11 @@ def _scene_ids(evidence: AgentEvidence) -> set[str]:
     claim rather than waved through.
     """
 
-    if evidence.execution is None:
-        return set()
-
     ids: set[str] = set()
-    for window in evidence.execution.windows:
+    comparison = evidence.analysis.temporal_comparison if evidence.analysis else None
+    if comparison is not None:
+        ids.update((comparison.first.scene_id, comparison.second.scene_id))
+    for window in evidence.execution.windows if evidence.execution else []:
         if window.selected_scene_id is not None:
             ids.add(window.selected_scene_id)
         ids.update(scene.id for scene in window.scenes)
@@ -294,17 +318,24 @@ def _is_grounded(literal: str, allowed: Iterable[float]) -> bool:
     threshold that would let a materially different number through.
     """
 
+    literal = literal.replace("−", "-")
     cleaned = literal.replace(",", "").lstrip("+")
     try:
         stated = float(cleaned)
     except ValueError:  # pragma: no cover - the regex cannot produce this
         return False
 
+    # Malformed grouping and enormous exponents must not become a partial
+    # number, infinity, or an unbounded precision request.
+    if not re.fullmatch(
+        r"[-+]?(?:\d+|\d{1,3}(?:,\d{3})+|\.\d+)(?:\.\d+)?(?:[eE][-+]?\d{1,3})?",
+        literal,
+    ):
+        return False
     places = _decimals(cleaned)
-    return any(
-        abs(round(candidate, places) - stated) <= _FLOAT_EPSILON
-        for candidate in allowed
-    )
+    if not -308 <= places <= 308:
+        return False
+    return any(abs(round(candidate, places) - stated) <= _FLOAT_EPSILON for candidate in allowed)
 
 
 def _mask(text: str, literals: Iterable[str]) -> str:
@@ -313,12 +344,352 @@ def _mask(text: str, literals: Iterable[str]) -> str:
     masked = text
     for literal in sorted(literals, key=len, reverse=True):
         if literal:
-            masked = masked.replace(literal, " ")
+            masked = re.sub(
+                r"(?<![\w.])" + re.escape(literal) + r"(?!\w|\.\d)",
+                lambda match: " " * len(match.group()),
+                masked,
+            )
     return masked
 
 
-def _ungrounded_claims(summary: str, evidence: AgentEvidence) -> list[str]:
-    """Every literal in ``summary`` that the evidence cannot account for.
+_METRIC = re.compile(r"\b(?:ndvi|ndwi|ndbi)\b", re.IGNORECASE)
+_SENTENCES = re.compile(r"(?<=[.!?])\s+(?!\d)|\n+")
+_CLAUSES = re.compile(r";|\b(?:and|with|over|across|but|while)\b", re.IGNORECASE)
+_UNITS = {
+    "%": "%",
+    "percent": "%",
+    "percentage": "%",
+    "index": "index",
+    "pixels": "pixels",
+    "pixel": "pixels",
+    "scenes": "count",
+    "scene": "count",
+    "count": "count",
+    "m": "m",
+    "metres": "m",
+    "meters": "m",
+    "km2": "km2",
+    "km²": "km2",
+    "hectares": "ha",
+    "ha": "ha",
+    "x": "x",
+    "days": "days",
+    "day": "days",
+}
+_ABSTENTIONS = frozenset(
+    {
+        "insufficient evidence to answer the question",
+        "there is insufficient evidence to answer the question",
+        "the available evidence does not answer the question",
+        "i cannot determine this from the available evidence",
+    }
+)
+
+
+_MEASUREMENT_WORDS = frozenset(
+    [
+        "the",
+        "a",
+        "an",
+        "is",
+        "was",
+        "were",
+        "are",
+        "of",
+        "for",
+        "on",
+        "in",
+        "at",
+        "from",
+        "to",
+        "about",
+        "approximately",
+        "mean",
+        "average",
+        "averaged",
+        "minimum",
+        "min",
+        "maximum",
+        "max",
+        "ndvi",
+        "ndwi",
+        "ndbi",
+        "index",
+        "value",
+        "valid",
+        "paired",
+        "pixel",
+        "pixels",
+        "percent",
+        "percentage",
+        "%",
+        "imagery",
+        "gives",
+        "scene",
+        "scenes",
+        "count",
+        "difference",
+        "change",
+        "first",
+        "second",
+        "earlier",
+        "later",
+        "baseline",
+        "target",
+        "selected",
+        "measured",
+        "computed",
+        "reported",
+        "analysed",
+        "analyzed",
+    ]
+)
+
+
+def _words(text: str) -> str:
+    """Punctuation/case normalization only; never discard negation or qualifiers."""
+    return " ".join(re.findall(r"[\w%]+", text.lower()))
+
+
+def _is_date_year(text: str, match: re.Match[str]) -> bool:
+    """A known year is not an exemption for a measurement equal to that year."""
+    return bool(
+        re.search(r"\b(?:in|from|during|year|for)\s*$", text[: match.start()], re.IGNORECASE)
+        or re.match(r"\s+(?:acquisition|imagery|scene)\b", text[match.end() :], re.IGNORECASE)
+    )
+
+
+def _kind(text: str) -> str | None:
+    text = text.lower().replace("_", " ")
+    if re.search(r"percent|%", text):
+        return "percent"
+    if "pixel" in text:
+        return "paired_pixels" if "paired" in text else "pixels"
+    if re.search(r"scene\s+count|\bscenes\b", text):
+        return "scenes"
+    if "difference" in text:
+        return "difference"
+    stats = {
+        key
+        for key, pattern in (
+            ("min", r"\bmin(?:imum)?\b"),
+            ("max", r"\bmax(?:imum)?\b"),
+            ("mean", r"\bmean\b|\baveraged?\b"),
+        )
+        if re.search(pattern, text)
+    }
+    if len(stats) > 1:
+        return None
+    stat = next(iter(stats), None)
+    if "change" in text:
+        return f"change_{stat or 'mean'}"
+    return stat or ("mean" if _METRIC.search(text) else None)
+
+
+def _observations(item: EvidenceItem, evidence: AgentEvidence) -> list[tuple[str, str, str]]:
+    """Existing provenance only: (scene id, acquisition date, requested role)."""
+    comparison = evidence.analysis.temporal_comparison if evidence.analysis else None
+    if item.id.startswith("temporal_ndwi."):
+        if comparison is None:
+            return []
+        observations = [comparison.first, comparison.second]
+        if item.id.startswith("temporal_ndwi.first."):
+            observations = observations[:1]
+        elif item.id.startswith("temporal_ndwi.second."):
+            observations = observations[1:]
+        return [
+            (o.scene_id, o.acquired_at.isoformat()[:10] if o.acquired_at else "", o.window_label)
+            for o in observations
+        ]
+    execution = evidence.execution
+    if execution is None:
+        return []
+    windows = execution.windows
+    if item.source in {"ndvi", "ndwi", "ndbi"}:
+        windows = [
+            w for w in windows if w.modality == "sentinel-2-optical" and w.selected_scene_id
+        ][:1]
+    elif item.source == "execution":
+        windows = [w for w in windows if item.id == f"execution.{w.modality}.{w.label}.scene_count"]
+    else:
+        return []
+    return [
+        (s.id, (s.datetime or "")[:10], w.label)
+        for w in windows
+        for s in w.scenes
+        if s.id == w.selected_scene_id
+    ]
+
+
+def _scope_matches(item: EvidenceItem, clause: str, evidence: AgentEvidence) -> bool:
+    observations = _observations(item, evidence)
+    for platform in _PLATFORM_IDENTIFIER.finditer(clause):
+        sar = platform.group().lower().startswith("sentinel-1")
+        if sar and item.source in {"ndvi", "ndwi", "ndbi", "temporal_ndwi"}:
+            return False
+        if item.source == "execution":
+            modality = "sentinel-1-sar" if sar else "sentinel-2-optical"
+            if not item.id.startswith(f"execution.{modality}."):
+                return False
+    scenes = {
+        scene
+        for scene in _scene_ids(evidence)
+        if re.search(r"(?<!\w)" + re.escape(scene) + r"(?!\w)", clause)
+    }
+    dates = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", clause))
+    if scenes and not scenes <= {scene for scene, _, _ in observations}:
+        return False
+    if dates and not dates <= {date for _, date, _ in observations}:
+        return False
+    years = {m.group(1) for m in _YEAR.finditer(clause) if _is_date_year(clause, m)}
+    if years and not years <= {date[:4] for _, date, _ in observations}:
+        return False
+    for match in _MONTH_YEAR.finditer(clause):
+        prefix = f"{match.group(2)}-{_MONTH_NAMES.index(match.group(1).lower()) + 1:02d}"
+        if not any(date.startswith(prefix) for _, date, _ in observations):
+            return False
+    for role in ("first", "second", "earlier", "later", "baseline", "target"):
+        if not re.search(r"\b" + role + r"\b", clause, re.IGNORECASE):
+            continue
+        position = {"earlier": "first", "later": "second"}.get(role, role)
+        if position in {"first", "second"}:
+            if not item.id.startswith(f"temporal_ndwi.{position}."):
+                return False
+        elif role not in {label for _, _, label in observations}:
+            return False
+    return True
+
+
+def _supporting_measurements(
+    clause: str, sentence: str, literal: str, evidence: AgentEvidence
+) -> list[EvidenceItem]:
+    """Match identity BEFORE value. Ambiguous implicit identities fail closed."""
+    metrics = {m.group().lower() for m in _METRIC.finditer(clause)}
+    if not metrics:
+        metrics = {m.group().lower() for m in _METRIC.finditer(sentence)}
+    _, numeric_text = _numeric_text(clause, evidence)
+    remainder = _NUMBER.sub(" ", numeric_text)
+    if evidence.execution is not None:
+        remainder = re.sub(
+            re.escape(evidence.execution.plan.intent.location_query),
+            " ",
+            remainder,
+            flags=re.IGNORECASE,
+        )
+    if set(_words(remainder).split()) - _MEASUREMENT_WORDS:
+        return []
+    if len(list(_NUMBER.finditer(numeric_text))) != 1:
+        return []  # use separate clauses for separate measurements
+    _, after = clause.split(literal, 1)
+    kind = _kind(clause)
+    # Read an explicit unit adjacent to this number, including unsupported
+    # attached suffixes. An index value can never authorize metres or ratios.
+    suffix = re.match(r"(\s*)(%|[A-Za-z]+[²2]?)", after)
+    unit = None
+    if suffix:
+        token = suffix.group(2).lower()
+        unit = _UNITS.get(token)
+        if not suffix.group(1) and unit is None:
+            return []
+    if kind is None and re.search(r"\bvalid\s+pixels?\b", after, re.IGNORECASE):
+        kind = "pixels"
+    candidates = []
+    for item in evidence.items:
+        measurement = item.measurement
+        if (
+            measurement is None
+            or item.source not in _NUMERIC_AUTHORITIES
+            or not item.id.startswith(f"{item.source}.")
+        ):
+            continue
+        item_metrics = {
+            m.group().lower() for m in _METRIC.finditer(measurement.name.replace("_", " "))
+        }
+        if (
+            item_metrics
+            and item.source not in item_metrics
+            and not (item.source == "temporal_ndwi" and item_metrics == {"ndwi"})
+        ):
+            continue
+        if measurement.name == "paired_valid_pixel_count" and item.source == "temporal_ndwi":
+            item_metrics = {"ndwi"}
+        if metrics and metrics != item_metrics:
+            continue
+        if kind is None or kind != _kind(measurement.name):
+            continue
+        expected_unit = {
+            "percent": "%",
+            "pixels": "pixels",
+            "paired_pixels": "pixels",
+            "scenes": "count",
+        }.get(kind, "index")
+        if measurement.unit != expected_unit:
+            continue
+        if unit is not None and unit != measurement.unit:
+            continue
+        if not _scope_matches(item, clause, evidence):
+            continue
+        candidates.append(item)
+    # Flat references do not say which of two same-kind observations a bare
+    # "mean" refers to. Do not use the claimed value to guess its identity.
+    if len(candidates) != 1:
+        return []
+    item = candidates[0]
+    assert item.measurement is not None
+    return [item] if _is_grounded(literal, [item.measurement.value]) else []
+
+
+def _parts(text: str) -> Iterable[tuple[str, str]]:
+    for sentence in _SENTENCES.split(text):
+        for clause in _CLAUSES.split(sentence):
+            if clause.strip():
+                yield sentence, clause
+
+
+def _prose_supported(summary: str, evidence: AgentEvidence) -> bool:
+    """Closed descriptive vocabulary; qualitative claims must repeat a citation.
+
+    This check is reported through the existing evidence_refs outcome. It is
+    support checking, not a new AgentEvidence shape or a fourth API check.
+    """
+    quoted = {
+        _words(sentence)
+        for item in evidence.items
+        if item.source in _NUMERIC_AUTHORITIES | {"model"}
+        for sentence in _SENTENCES.split(item.visual.statement if item.visual else item.text or "")
+        if sentence.strip()
+    }
+    # Exact metadata statements are supported only by the cited item's own
+    # observation, never by some other candidate scene in the execution.
+    for item in evidence.items:
+        for scene, acquired, _ in _observations(item, evidence):
+            quoted.add(_words(f"Scene {scene} was selected."))
+            if acquired:
+                quoted.add(_words(f"The scene was acquired on {acquired}."))
+    for sentence in _SENTENCES.split(summary):
+        normalized = _words(sentence)
+        if not normalized:
+            continue
+        if normalized in quoted or normalized in _ABSTENTIONS:
+            continue
+        # Permit only this introduction to an otherwise exact cited sentence.
+        # Keep numeric validation independent; model numbers gain no authority.
+        introduced = re.match(r"^\s*yes,\s+(.+)$", sentence, re.IGNORECASE)
+        if introduced and _words(introduced.group(1)) in quoted:
+            continue
+        for _, clause in _parts(sentence):
+            _, numeric_text = _numeric_text(clause, evidence)
+            numbers = list(_NUMBER.finditer(numeric_text))
+            if not numbers or not all(
+                _supporting_measurements(clause, sentence, number.group(), evidence)
+                for number in numbers
+            ):
+                return False
+    return bool(summary.strip())
+
+
+def _numeric_text(summary: str, evidence: AgentEvidence) -> tuple[list[str], str]:
+    """Separate identifiers/date context from quantitative literals.
 
     Order of operations matters. Real scene identifiers and intent-derived
     dates are removed first, because both are legitimately full of digits that
@@ -335,29 +706,37 @@ def _ungrounded_claims(summary: str, evidence: AgentEvidence) -> list[str]:
     invented = [
         match.group(0)
         for match in _IDENTIFIER.finditer(text)
-        if any(c.isdigit() for c in match.group(0))
-        and any(c.isalpha() for c in match.group(0))
+        if any(c.isdigit() for c in match.group(0)) and any(c.isalpha() for c in match.group(0))
     ]
     text = _mask(text, invented)
 
     # Allowed date forms are removed; unrecognised ones are deliberately left
     # in place so their digits surface as unaccounted numbers.
     text = _mask(text, iso_dates)
-    text = _MONTH_YEAR.sub(
-        lambda m: " " if m.group(0).lower() in month_years else m.group(0), text
+    text = _MONTH_YEAR.sub(lambda m: " " if m.group(0).lower() in month_years else m.group(0), text)
+    text = _YEAR.sub(
+        lambda m: " " if m.group(1) in years and _is_date_year(text, m) else m.group(0), text
     )
-    text = _YEAR.sub(lambda m: " " if m.group(1) in years else m.group(0), text)
 
     # A platform name is not a measurement. This masks the identifier only, so
     # units, ordinary numbers and scientific notation beside it stay claims.
     text = _PLATFORM_IDENTIFIER.sub(" ", text)
 
-    allowed = _allowed_values(evidence)
-    return invented + [
-        match.group(0)
-        for match in _NUMBER.finditer(text)
-        if not _is_grounded(match.group(0), allowed)
-    ]
+    return invented, text
+
+
+def _ungrounded_claims(summary: str, evidence: AgentEvidence) -> list[str]:
+    """Unmatched numbers, checked against identity-bound evidence, not a pool."""
+    failures: list[str] = []
+    for sentence, clause in _parts(summary):
+        invented, text = _numeric_text(clause, evidence)
+        failures.extend(invented)
+        failures.extend(
+            match.group()
+            for match in _NUMBER.finditer(text)
+            if not _supporting_measurements(clause, sentence, match.group(), evidence)
+        )
+    return failures
 
 
 # --------------------------------------------------------------------------- #
@@ -382,24 +761,41 @@ def unresolved_references(draft: DraftAnswer, evidence: AgentEvidence) -> list[s
     return sorted(set(draft.evidence_refs) - evidence.ids())
 
 
-def validate_answer(
-    draft: DraftAnswer, evidence: AgentEvidence
-) -> AnswerValidation:
+def validate_answer(draft: DraftAnswer, evidence: AgentEvidence) -> AnswerValidation:
     """Run every mechanical check and report each outcome independently.
 
     The three checks do not short-circuit one another: a forbidden phrase does
     not hide an ungrounded number, and vice versa, so a caller sees everything
     that is wrong rather than only the first thing.
 
+    ``visual_claims`` is NOT a fourth check. It is a statement of provenance:
+    when the evidence includes a model observation, the answer rests partly on
+    something no mechanical rule can validate, and saying so is the honest
+    alternative to letting a reader infer verification from three passes. The
+    numeric guarantee is unaffected - a model still cannot authorise a number.
+
     Pure: no I/O, no clock, no randomness, and neither argument is mutated.
     """
 
-    numeric = "fail" if _ungrounded_claims(draft.summary, evidence) else "pass"
+    cited = evidence.model_copy(
+        update={"items": [item for item in evidence.items if item.id in set(draft.evidence_refs)]}
+    )
+    numeric = "fail" if _ungrounded_claims(draft.summary, cited) else "pass"
     forbidden = "fail" if find_forbidden_phrases(draft.summary) else "pass"
-    references = "fail" if unresolved_references(draft, evidence) else "pass"
+    references = (
+        "fail"
+        if unresolved_references(draft, evidence) or not _prose_supported(draft.summary, cited)
+        else "pass"
+    )
+    visual = (
+        "attributed"
+        if any(item.source == "model" and item.visual is not None for item in cited.items)
+        else "not_run"
+    )
 
     return AnswerValidation(
         numeric_grounding=numeric,
         forbidden_terms=forbidden,
         evidence_refs=references,
+        visual_claims=visual,
     )
