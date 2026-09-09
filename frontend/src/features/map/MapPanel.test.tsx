@@ -2,12 +2,14 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  CHANGE_LAYER_ID,
   CHANGE_SOURCE_ID,
+  FOOTPRINT_LAYER_ID,
+  FOOTPRINT_SOURCE_ID,
   NDWI_LAYER_ID,
   NDWI_SOURCE_ID,
   SATELLITE_LAYER_ID,
   SATELLITE_SOURCE_ID,
+CHANGE_LAYER_ID,
 } from "./footprint";
 import type { MapImagery, MapLike, MapNdwi } from "./footprint";
 import { MapPanel } from "./MapPanel";
@@ -26,7 +28,9 @@ class FakeMap implements MapLike {
   readonly layers = new Map<string, unknown>();
   readonly calls: string[] = [];
   readonly fitBoundsCalls: { bounds: number[][]; options?: unknown }[] = [];
+  readonly paint: { layer: string; name: string; value: unknown }[] = [];
   removed = false;
+  resizes = 0;
   private handlers: Record<string, (() => void)[]> = {};
 
   on(event: string, handler: () => void): void {
@@ -37,7 +41,23 @@ class FakeMap implements MapLike {
   }
   addSource(id: string, source: unknown): void {
     if (this.sources.has(id)) throw new Error(`duplicate source ${id}`);
-    this.sources.set(id, source);
+    // A real MapLibre GeoJSON source exposes setData, and the panel now uses
+    // it to UPDATE the footprint instead of replacing the source. A fake
+    // without it sends production code down the add-again path that real
+    // MapLibre would reject - the fixture has to model the thing it stands in
+    // for, or it tests a map that does not exist.
+    const stored =
+      source !== null &&
+      typeof source === "object" &&
+      (source as { type?: string }).type === "geojson"
+        ? Object.assign({}, source, {
+            setData: (data: unknown) => {
+              (this.sources.get(id) as { data?: unknown }).data = data;
+              this.calls.push(`setData:${id}`);
+            },
+          })
+        : source;
+    this.sources.set(id, stored);
     this.calls.push(`addSource:${id}`);
   }
   removeSource(id: string): void {
@@ -62,6 +82,13 @@ class FakeMap implements MapLike {
   fitBounds(bounds: number[][], options?: unknown): void {
     this.fitBoundsCalls.push({ bounds, options });
     this.calls.push("fitBounds");
+  }
+  setPaintProperty(layer: string, name: string, value: unknown): void {
+    this.paint.push({ layer, name, value });
+  }
+  resize(): void {
+    this.resizes += 1;
+    this.calls.push("resize");
   }
   remove(): void {
     this.removed = true;
@@ -102,12 +129,32 @@ function renderMap(props: { imagery?: MapImagery | null } = {}) {
   return { created, createMap, view };
 }
 
+/**
+ * The coordinates the footprint layer is currently drawing.
+ *
+ * The panel clears the outline by feeding the source an EMPTY ring rather than
+ * destroying it: a GeoJSON source reparses in a worker, and tearing it down on
+ * every update meant it never finished loading and the outline never drew at
+ * all. So "the outline is gone" is asserted as "nothing to draw", which is the
+ * observable contract, rather than as "the source object was destroyed", which
+ * was only ever the mechanism.
+ */
+function footprintRing(map: FakeMap): unknown[] {
+  const source = map.getSource(FOOTPRINT_SOURCE_ID) as
+    | { data?: { geometry?: { coordinates?: unknown[] } } }
+    | undefined;
+  return source?.data?.geometry?.coordinates ?? [];
+}
+
+
 describe("MapPanel", () => {
   // --- A. renders without imagery ---------------------------------------- #
 
   it("renders the panel with no imagery", () => {
     renderMap();
-    expect(screen.getByRole("heading", { name: /map/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /satellite scene/i }),
+    ).toBeInTheDocument();
   });
 
   it("adds no satellite source when there is no imagery", () => {
@@ -151,8 +198,9 @@ describe("MapPanel", () => {
     const { created } = renderMap({ imagery: imagery() });
     const map = created[0];
 
-    expect(map.sources.size).toBe(1);
-    expect(map.layers.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(2);
+    expect(map.layers.size).toBe(2);
     expect(map.getSource(SATELLITE_SOURCE_ID)).toBeDefined();
     expect(map.getLayer(SATELLITE_LAYER_ID)).toBeDefined();
   });
@@ -218,8 +266,9 @@ describe("MapPanel", () => {
 
     const map = created[0];
     // Still exactly one of each - resources did not accumulate.
-    expect(map.sources.size).toBe(1);
-    expect(map.layers.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(2);
+    expect(map.layers.size).toBe(2);
     // The layer was torn down before being re-added.
     expect(map.calls).toContain(`removeLayer:${SATELLITE_LAYER_ID}`);
     expect(map.calls).toContain(`removeSource:${SATELLITE_SOURCE_ID}`);
@@ -240,8 +289,12 @@ describe("MapPanel", () => {
     act(() => created.forEach((m) => m.emit("load")));
     rerender(<MapPanel imagery={null} createMap={createMap} />);
 
-    expect(created[0].sources.size).toBe(0);
-    expect(created[0].layers.size).toBe(0);
+    // The overlay itself is gone...
+    expect(created[0].getSource(SATELLITE_SOURCE_ID)).toBeUndefined();
+    expect(created[0].getLayer(SATELLITE_LAYER_ID)).toBeUndefined();
+    // ...and the footprint, which is kept and re-fed rather than destroyed,
+    // is drawing nothing.
+    expect(footprintRing(created[0])).toEqual([]);
   });
 
   // --- G. unmount ---------------------------------------------------------#
@@ -301,7 +354,8 @@ describe("MapPanel", () => {
         ],
       }),
     });
-    expect(created[0].sources.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(created[0].sources.size).toBe(2);
   });
 
   // --- I. no duplicate maps or layers ------------------------------------ #
@@ -320,8 +374,9 @@ describe("MapPanel", () => {
     rerender(<MapPanel imagery={props} createMap={createMap} />);
 
     expect(created).toHaveLength(1);
-    expect(created[0].sources.size).toBe(1);
-    expect(created[0].layers.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(created[0].sources.size).toBe(2);
+    expect(created[0].layers.size).toBe(2);
   });
 
   it("never calls the network itself", () => {
@@ -509,8 +564,9 @@ describe("MapPanel NDWI overlay", () => {
 
     expect(map.getSource(NDWI_SOURCE_ID)).toBeDefined();
     expect(map.getLayer(NDWI_LAYER_ID)).toBeDefined();
-    expect(map.sources.size).toBe(1);
-    expect(map.layers.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(2);
+    expect(map.layers.size).toBe(2);
   });
 
   it("passes the NDWI corners through unchanged", () => {
@@ -530,8 +586,9 @@ describe("MapPanel NDWI overlay", () => {
     const { created } = renderWith({ imagery: imagery(), ndwi: ndwi() });
     const map = created[0];
 
-    expect(map.sources.size).toBe(2);
-    expect(map.layers.size).toBe(2);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(3);
+    expect(map.layers.size).toBe(3);
     const rgb = map.getSource(SATELLITE_SOURCE_ID) as { coordinates: number[][] };
     const index = map.getSource(NDWI_SOURCE_ID) as { coordinates: number[][] };
     // Each is positioned by its OWN footprint.
@@ -553,7 +610,9 @@ describe("MapPanel NDWI overlay", () => {
     rerender(<MapPanel imagery={null} ndwi={null} createMap={createMap} />);
 
     expect(created[0].getSource(NDWI_SOURCE_ID)).toBeUndefined();
-    expect(created[0].sources.size).toBe(0);
+    // The footprint source is kept and re-fed rather than destroyed, so it
+    // remains - drawing nothing.
+    expect(footprintRing(created[0])).toEqual([]);
   });
 
   it("replaces a stale NDWI overlay rather than stacking one", () => {
@@ -576,7 +635,8 @@ describe("MapPanel NDWI overlay", () => {
     );
 
     const map = created[0];
-    expect(map.sources.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(2);
     expect(map.calls).toContain(`removeLayer:${NDWI_LAYER_ID}`);
     expect((map.getSource(NDWI_SOURCE_ID) as { url: string }).url).toBe(
       "data:image/png;base64,TkVX",
@@ -626,7 +686,7 @@ describe("MapPanel NDWI overlay", () => {
 
   it("names the NDWI scene in the status line", () => {
     renderWith({ ndwi: ndwi() });
-    expect(screen.getByText(/NDWI/i)).toBeInTheDocument();
+    expect(screen.getByText(/Showing the NDWI index/i)).toBeInTheDocument();
   });
 });
 
@@ -684,7 +744,8 @@ describe("MapPanel temporal change overlay", () => {
 
     expect(map.getSource(CHANGE_SOURCE_ID)).toBeDefined();
     expect(map.getLayer(CHANGE_LAYER_ID)).toBeDefined();
-    expect(map.sources.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(2);
   });
 
   it("passes the change corners through unchanged", () => {
@@ -714,7 +775,9 @@ describe("MapPanel temporal change overlay", () => {
     );
 
     expect(created[0].getSource(CHANGE_SOURCE_ID)).toBeUndefined();
-    expect(created[0].sources.size).toBe(0);
+    // The footprint source is kept and re-fed rather than destroyed, so it
+    // remains - drawing nothing.
+    expect(footprintRing(created[0])).toEqual([]);
   });
 
   it("replaces rather than stacks a change overlay", () => {
@@ -737,7 +800,8 @@ describe("MapPanel temporal change overlay", () => {
       />,
     );
 
-    expect(created[0].sources.size).toBe(1);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(created[0].sources.size).toBe(2);
     expect(created[0].calls).toContain(`removeLayer:${CHANGE_LAYER_ID}`);
     expect((created[0].getSource(CHANGE_SOURCE_ID) as { url: string }).url).toBe(
       "data:image/png;base64,TkVX",
@@ -748,7 +812,8 @@ describe("MapPanel temporal change overlay", () => {
     const { created } = renderAll({ imagery: imagery(), change: change() });
     const map = created[0];
 
-    expect(map.sources.size).toBe(2);
+    // +1 for the scene footprint outline drawn from the same corners.
+    expect(map.sources.size).toBe(3);
     expect(
       (map.getSource(SATELLITE_SOURCE_ID) as { coordinates: number[][] }).coordinates,
     ).toEqual(CORNERS);
@@ -788,5 +853,310 @@ describe("MapPanel temporal change overlay", () => {
     expect(
       (map.getSource(NDWI_SOURCE_ID) as { coordinates: number[][] }).coordinates,
     ).toEqual(NDWI_CORNERS);
+  });
+});
+
+describe("MapPanel container resizing", () => {
+  it("re-measures the map when its container changes size", () => {
+    // The scene spans the full grid width until an analysis appears beside it.
+    // MapLibre sizes its canvas once at creation, so without this the view
+    // shows a stretched, far wider extent than the one requested.
+    const created: FakeMap[] = [];
+    const observed: Element[] = [];
+    class FakeResizeObserver {
+      constructor(private readonly cb: () => void) {}
+      observe(el: Element) {
+        observed.push(el);
+        this.cb();
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(<MapPanel imagery={null} createMap={createMap} />);
+
+    expect(observed).toHaveLength(1);
+    expect(created[0].resizes).toBeGreaterThan(0);
+  });
+
+  it("still works where ResizeObserver is unavailable", () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    const createMap = vi.fn(() => new FakeMap());
+    expect(() =>
+      render(<MapPanel imagery={null} createMap={createMap} />),
+    ).not.toThrow();
+  });
+});
+
+// --------------------------------------------------------------------------- #
+// Scene footprint outline (Direction B §7)
+// --------------------------------------------------------------------------- #
+//
+// The outline is drawn from the SAME four corners that position the raster, so
+// it can never disagree with the picture it frames. These pin that identity —
+// a footprint derived some other way would be a second, unverified geometry.
+
+describe("MapPanel scene footprint", () => {
+  it("outlines the footprint using the imagery's own corners", () => {
+    const { created } = renderMap({ imagery: imagery() });
+    const source = created[0].getSource(FOOTPRINT_SOURCE_ID) as {
+      type: string;
+      data: { geometry: { type: string; coordinates: number[][] } };
+    };
+
+    expect(source.type).toBe("geojson");
+    expect(source.data.geometry.type).toBe("LineString");
+    // Four corners in the order received, closed back to the first.
+    expect(source.data.geometry.coordinates).toEqual([...CORNERS, CORNERS[0]]);
+    expect(created[0].getLayer(FOOTPRINT_LAYER_ID)).toBeDefined();
+  });
+
+  it("draws no outline when there is no imagery", () => {
+    const { created } = renderMap();
+    expect(created[0].getSource(FOOTPRINT_SOURCE_ID)).toBeUndefined();
+    expect(created[0].getLayer(FOOTPRINT_LAYER_ID)).toBeUndefined();
+  });
+
+  it("draws no outline for a footprint that failed validation", () => {
+    const { created } = renderMap({
+      imagery: imagery({ corners_wgs84: [[80, 13]] }),
+    });
+    expect(created[0].getSource(FOOTPRINT_SOURCE_ID)).toBeUndefined();
+  });
+
+  it("removes the outline when the imagery is cleared", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    const { rerender } = render(
+      <MapPanel imagery={imagery()} createMap={createMap} />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+    expect(created[0].getLayer(FOOTPRINT_LAYER_ID)).toBeDefined();
+
+    rerender(<MapPanel imagery={null} createMap={createMap} />);
+    expect(footprintRing(created[0])).toEqual([]);
+  });
+});
+
+// --------------------------------------------------------------------------- #
+// Area of interest without a raster
+// --------------------------------------------------------------------------- #
+//
+// A query can analyse a scene without requesting an imagery preview. That run
+// succeeded, so the viewport must show WHERE it happened and say why nothing is
+// drawn — never "no scene loaded" over a completed analysis.
+
+const AOI = { west: 80.28, south: 13.039, east: 80.29, north: 13.066 };
+
+describe("MapPanel area of interest", () => {
+  function renderAoi(aoi: unknown) {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(
+      <MapPanel
+        aoi={aoi as never}
+        imagery={null}
+        createMap={createMap}
+      />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+    return created;
+  }
+
+  it("frames the resolved extent when no raster came back", () => {
+    const created = renderAoi(AOI);
+    expect(created[0].fitBoundsCalls).toHaveLength(1);
+    expect(created[0].fitBoundsCalls[0].bounds).toEqual([
+      [AOI.west, AOI.south],
+      [AOI.east, AOI.north],
+    ]);
+  });
+
+  it("names the selected scene rather than claiming none was loaded", () => {
+    renderAoi({ ...AOI, scene_id: "S2B_44PMV_20250104_0_L2A" });
+    expect(screen.getByText(/No imagery on this map/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/S2B_44PMV_20250104_0_L2A was analysed/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No scene loaded/i)).not.toBeInTheDocument();
+  });
+
+  it("still says no scene loaded when nothing has run", () => {
+    renderAoi(null);
+    expect(screen.getByText(/No scene loaded/i)).toBeInTheDocument();
+  });
+
+  it("lifts the basemap when there is no raster and sinks it when there is", () => {
+    const created = renderAoi(AOI);
+    const lifted = created[0].paint.find(
+      (p) => p.name === "raster-brightness-max",
+    );
+    expect(lifted?.value).toBe(0.72);
+    // Sunk with a raster, lifted without: the ground never outshines the scene,
+    // and never disappears when it is the only geography present.
+    expect(lifted?.value).toBeGreaterThan(0.44);
+
+    const withRaster: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      withRaster.push(map);
+      return map;
+    });
+    render(<MapPanel imagery={imagery()} createMap={createMap} />);
+    act(() => withRaster.forEach((map) => map.emit("load")));
+    const sunk = withRaster[0].paint.find(
+      (p) => p.name === "raster-brightness-max",
+    );
+    expect(sunk?.value).toBe(0.44);
+  });
+});
+
+// The empty-state copy promises an outlined extent; it must actually be drawn.
+describe("MapPanel area outline without a raster", () => {
+  it("outlines the resolved extent when no raster came back", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(
+      <MapPanel aoi={AOI as never} imagery={null} createMap={createMap} />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+
+    const source = created[0].getSource(FOOTPRINT_SOURCE_ID) as {
+      data: { geometry: { coordinates: number[][] } };
+    };
+    expect(source).toBeDefined();
+    // Closed ring over the resolved bbox, NW first.
+    expect(source.data.geometry.coordinates).toEqual([
+      [AOI.west, AOI.north],
+      [AOI.east, AOI.north],
+      [AOI.east, AOI.south],
+      [AOI.west, AOI.south],
+      [AOI.west, AOI.north],
+    ]);
+  });
+});
+
+// The locator draws on a pale basemap, where the over-imagery cyan vanishes.
+describe("MapPanel locator footprint", () => {
+  function renderLocator() {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(
+      <MapPanel aoi={AOI as never} variant="locator" createMap={createMap} />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+    return created[0];
+  }
+
+  it("draws the extent in geospatial blue, heavier than over imagery", () => {
+    const map = renderLocator();
+    const outline = map.getLayer(FOOTPRINT_LAYER_ID) as {
+      paint: Record<string, unknown>;
+      type: string;
+    };
+    expect(outline.type).toBe("line");
+    expect(outline.paint["line-color"]).toBe("#0B6BCB");
+    expect(outline.paint["line-width"]).toBe(2.5);
+  });
+
+  it("uses a closed LineString, which is the geometry that renders", () => {
+    // A Polygon with a fill layer was tried here and drew nothing on a real
+    // MapLibre map; this pins the geometry that actually works.
+    const map = renderLocator();
+    const source = map.getSource(FOOTPRINT_SOURCE_ID) as {
+      data: { geometry: { type: string; coordinates: number[][] } };
+    };
+    expect(source.data.geometry.type).toBe("LineString");
+    const ring = source.data.geometry.coordinates;
+    expect(ring).toHaveLength(5);
+    expect(ring[0]).toEqual(ring[4]);
+  });
+
+  it("draws no raster, whatever it is handed", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(
+      <MapPanel
+        aoi={AOI as never}
+        imagery={imagery()}
+        variant="locator"
+        createMap={createMap}
+      />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+    expect(created[0].getLayer(SATELLITE_LAYER_ID)).toBeUndefined();
+  });
+
+  it("keeps the over-imagery outline cyan", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(<MapPanel imagery={imagery()} createMap={createMap} />);
+    act(() => created.forEach((map) => map.emit("load")));
+    const outline = created[0].getLayer(FOOTPRINT_LAYER_ID) as {
+      paint: Record<string, unknown>;
+    };
+    expect(outline.paint["line-color"]).toBe("#5FD3F3");
+    expect(outline.paint["line-width"]).toBe(1.25);
+  });
+});
+
+// A resolved area is real information: the frame must say so rather than
+// reporting an empty map over an outline it is actually drawing.
+describe("MapPanel resolved area without a scene", () => {
+  it("reports the area as resolved, not as nothing loaded", () => {
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(
+      <MapPanel aoi={AOI as never} imagery={null} createMap={createMap} />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+
+    expect(screen.getByText(/Area resolved/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No scene loaded/i)).not.toBeInTheDocument();
+    // And the extent it describes is actually drawn.
+    expect(created[0].getLayer(FOOTPRINT_LAYER_ID)).toBeDefined();
+  });
+});
+
+
+describe("MapPanel SAR provenance", () => {
+  it.each(["vv", "vh"])("labels the actual %s display without claiming amplitude or local calibration", (asset) => {
+    renderMap({ imagery: imagery({ asset, bands: [asset.toUpperCase()] }) });
+    expect(screen.getByText(`Sentinel-1 SAR · ${asset.toUpperCase()} display`)).toBeInTheDocument();
+    expect(screen.queryByText(/GRD|amplitude|true colour/)).not.toBeInTheDocument();
   });
 });

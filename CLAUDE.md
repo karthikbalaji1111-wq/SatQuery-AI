@@ -29,12 +29,31 @@ Core intended capabilities:
 7. Sentinel-1 SAR discovery + deterministic per-modality scene selection: each
    requested modality executes independently against every temporal window,
    through the existing SatelliteService (collection override).
-8. Sentinel-1 VV imagery retrieval for visualization: the existing
-   ImageryService / raster path now accepts a single-band Float32 VV asset,
-   applies a 2nd-98th percentile display clip -> min-max to 8-bit grayscale ->
-   3 identical bands -> PNG, and returns the existing ImageryResponse. Display
-   only, NOT calibrated. SAR scientific processing (speckle filtering,
-   calibration, terrain correction, fusion, analysis) remains out of scope.
+8. Sentinel-1 VV imagery retrieval for visualization - **IMPLEMENTED BUT NOT
+   REACHABLE against live Earth Search.** The ImageryService / raster path
+   accepts a single-band VV asset, applies a 2nd-98th percentile display clip
+   -> min-max to 8-bit grayscale -> 3 identical bands -> PNG, and returns the
+   existing ImageryResponse. Display only, NOT calibrated.
+
+   **Verified 2026-09 against the live catalog, this does not work on real
+   data**, for three reasons that are properties of the source, not defects
+   here: the `vv` measurement asset is published as an `s3://` URI on a
+   requester-pays bucket (this deployment holds no credentials and reads only
+   anonymous HTTPS); the GRD product is in radar geometry, so the COG has
+   `crs=None` and 210 GCPs instead of a map projection; and the pixels are
+   uncalibrated `uint16` DN amplitude (NOT Float32 backscatter - the
+   calibration LUTs are separate XML assets). `_require_readable_scheme` in
+   `satellite/imagery.py` refuses the request at the boundary with a message
+   naming the cause, rather than letting it reach GDAL and surface as an opaque
+   credentials error.
+
+   **Sentinel-1 is therefore discovery-only (step 7 works; step 8 does not).**
+   Closing this requires S3 access configuration, GCP-based georeferencing and
+   calibration-LUT interpolation - genuine future research work, deliberately
+   not faked. The display code path is retained and tested because it is
+   correct for a projected single-band asset. SAR scientific processing
+   (speckle filtering, calibration, terrain correction, fusion, analysis)
+   remains out of scope, and no SAR band is in `ANALYSIS_BAND_ASSETS`.
 
 9. Analysis boundary (contract only): `POST /api/v1/query/analyze` accepts an
    already-computed `QueryExecutionResult` and returns an `AnalysisResult`
@@ -81,7 +100,10 @@ Core intended capabilities:
    The model selects; it never computes. No image ever reaches a model, and no
    reasoning is requested, stored or displayed.
 
-Current HEAD represents the completed Agentic Orchestration phase.
+Current HEAD represents the completed Agentic Orchestration phase, plus a
+provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
+UI. Test baselines quoted in the historical sections below are superseded; the
+current figures are backend 1356 / frontend 210.
 
 ## Architecture Rules
 
@@ -262,7 +284,9 @@ NL query -> POST /api/v1/query/parse      -> AiService/GeminiIntentParser -> Sat
   `services/query` must never import `services/analysis`.
 - `MultimodalService`, `TemporalService`, `MapService` remain **unused stubs**
   and are the reserved future homes for fusion / change detection / map tiles.
-- `MapPanel` is a placeholder; there is no MapLibre dependency.
+- `MapPanel` renders real MapLibre GL basemaps and footprints (maplibre-gl
+  is a frontend dependency). The line that previously claimed it was a
+  placeholder with no MapLibre dependency was stale and is corrected here.
 
 ## 4. Test / regression baseline — VERIFIED
 
@@ -831,11 +855,20 @@ enumerate the package and require the importer list to be exactly
 **The tool allowlist is closed.** `execute_query`, `ndwi_statistics`,
 `temporal_ndwi_statistics` - and nothing else. `ToolCall` is a Pydantic
 discriminated union, so an unrecognised name fails validation before dispatch;
-the registry holds inert descriptors with no callables. `retrieve_imagery`,
-`compatibility_report` and `rs_model_analysis` are deliberately absent
-(imagery is a parameter, compatibility is an automatic byproduct, and the RS
-model does not exist). `limit` is NOT model-controlled: it is a server resource
-budget the executor injects.
+the registry holds inert descriptors with no callables. `retrieve_imagery` and
+`compatibility_report` are deliberately absent (imagery is a parameter and
+compatibility is an automatic byproduct). `limit` is NOT model-controlled: it
+is a server resource budget the executor injects.
+
+> **CORRECTION (post-Phase 15).** The paragraph above said `rs_model_analysis`
+> was also absent because "the RS model does not exist". That is no longer
+> true: the tool IS registered (`agent/registry.py`) and dispatches the visual
+> step to a provider VLM. The allowlist is therefore **four** tools, not three,
+> and it is still closed - `ToolCall` remains a discriminated union and an
+> unrecognised name still fails validation before dispatch. The tool observes
+> ONE already-retrieved Sentinel-2 PNG and its statement is recorded as a
+> model observation, never as a measurement: `source="model"` is excluded from
+> the grounding numeric authorities, so it cannot authorise a number.
 
 ### Gemini structured-output compatibility — the Commit 4 fix
 
@@ -935,3 +968,194 @@ analysis/query/satellite module.
 
 Every commit was written test-first: the tests were added, observed failing for
 the expected reason, and only then satisfied.
+
+---
+
+## 16. Pre-UI hardening sprint — IMPLEMENTED
+
+An audit-and-remediate pass across multitemporal correctness, the multimodal /
+SAR boundary, resource safety, API/error contracts, code quality and security.
+Every finding below was reproduced independently before it was changed, and
+every fix is pinned by a test that was mutation-checked - the mutation was
+applied, the test observed failing, and the mutation reverted.
+
+### Confirmed and fixed
+
+**Sentinel-1 display imagery was a false capability (P0).** Documented as
+working; non-functional against live Earth Search. See pipeline step 8 - now
+corrected to discovery-only, with `_require_readable_scheme` refusing the
+`s3://` asset at the boundary and naming the cause.
+
+**`NdwiTemporalChange` labelled its axes by requested role (P1).**
+`TemporalComparison` does not require `baseline` to precede `target`, and
+pairing orders by ACQUISITION time, so an inverted request reported the target
+scene as the baseline. Reproduced live: requesting baseline=December /
+target=June returned `baseline_scene_id` = the June scene, and the same
+`change_mean` as the non-inverted request. The arithmetic was right and the
+label was wrong, which is the harder kind to notice. Fixed by renaming the
+axes to `first_*` / `second_*` (earlier / later), matching the neutral
+vocabulary `ObservationPair` and `TemporalIndexComparison` already used for
+exactly this reason; the requested roles stay readable in `window_label`, and
+the frontend now reads "Earlier" / "Later".
+
+**`time_windows` was unbounded (P0, resource).** `SatQueryIntent` accepted
+50,000 windows. Execution runs one catalog search per (modality x window)
+sequentially, so one unauthenticated request produced unbounded outbound
+requests against a third-party catalog - measured at 1000 upstream searches
+for 500 windows x 2 modalities - plus unbounded memory when imagery was on.
+Bounded by `MAX_TIME_WINDOWS = 24` at the `SatQueryIntent` boundary, so every
+path that builds an intent inherits it.
+
+**An explicit `provider` could not override an unconfigured default (P1).**
+FastAPI resolves a dependency before the handler body runs, so building the
+configured default decided the run before the request's own `provider` was
+read: a deployment holding only an NVIDIA key could not use NVIDIA, and the
+502 named Gemini - a provider the caller never asked for. `get_agent_service`
+now defers that failure and the handler re-raises it only when the request
+names no provider of its own, so the actionable message naming the variable is
+preserved for the case it was written for.
+
+**Two different JSON shapes shared status 422 (P2).** Pydantic rendered
+`{"detail": [...]}` and `AppError` rendered `{"error": {...}}`; the frontend
+reads only the latter and silently discarded which field was wrong. A
+`RequestValidationError` handler now uses the one envelope, with a distinct
+`validation_error` code so a malformed body stays distinguishable from a
+semantically invalid one. The offending VALUE is never echoed.
+
+**An href's scheme was checked, the rest of it was not (P2, security).**
+Control characters passed: the scheme in `https://x/a.tif\x00.s3` is a
+perfectly good `https`. A NUL truncates the path for any C consumer (GDAL and
+curl are C) and CR/LF are the separators of an HTTP request, so either can make
+the request sent differ from the URL that was checked. Now refused before the
+scheme test.
+
+**The config rail did not mark unimplemented tasks (P2).** `ConfigSummary`
+rendered an active "Change detect" chip with no qualifier while the task
+selector correctly read "Change Detection (unavailable)" - letting a Temporal
+NDWI Statistics result be read as a change-detection result, the one confusion
+that layer exists to prevent. Both surfaces now say it, and a test pins both.
+
+### Verified correct, left unchanged
+
+- **Grid identity for paired-pixel change.** `_grids_are_comparable` refuses on
+  absent CRS, CRS mismatch, dimension mismatch and any affine inequality, with
+  no tolerance. Exercised across all eight branches; a sub-millimetre origin
+  shift is refused. Confirmed live: two same-tile scenes shared an identical
+  transform and produced a change whose `change_mean` equalled the
+  independently computed difference-of-means to six decimal places.
+- **The VLM numeric quarantine.** A number can never be authorised by
+  model-sourced evidence; `source="model"` is excluded from the numeric
+  authorities and the exclusion is keyed on source, not on the absence of a
+  measurement.
+- **Exactly one image reaches the visual model**, fetched once and encoded
+  once - measured, not inferred. The "double fetch" hypothesis was disproved.
+- **Provider isolation, now proven in BOTH directions** with vacuity checks on
+  each tripwire. Previously only NVIDIA-selected-never-reaches-Gemini was
+  tested.
+- **Secrets reach neither responses nor logs**, canary-tested through the full
+  HTTP stack and mutation-checked.
+- **STAC identifier validation** covers both URL-building paths; traversal,
+  query/fragment injection and overlong ids are all refused before any call.
+
+### Accepted trade-off, deliberately not changed
+
+`providers/gemini.py` catches `Exception` around its SDK calls where
+`providers/nvidia.py` catches only `httpx` errors, so a bug in the Gemini path
+is recoded as a 502 rather than surfacing as a 500. The asymmetry is
+defensible rather than arbitrary - the google-genai SDK is a large third-party
+exception surface and httpx is a narrow one - and narrowing it would route SDK
+exception text into `logger.exception`, trading a hidden bug for a possible
+credential in a log. **KNOWN LIMITATION**, recorded rather than silently
+traded away.
+
+### Baseline after the hardening sprint — VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **1360 passed** (1333 at sprint start) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **211 passed** |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 17. Multi-index spectral analysis — IMPLEMENTED
+
+NDVI and NDBI join the existing NDWI. All three are the same normalised
+difference over different Sentinel-2 band pairs, so they share one engine and
+therefore one set of numerical guarantees:
+
+    NDVI = (nir    - red) / (nir    + red)     10 m
+    NDWI = (green  - nir) / (green  + nir)     10 m   (unchanged)
+    NDBI = (swir16 - nir) / (swir16 + nir)     20 m limiting
+
+**NDWI was not rewritten.** `_ndwi_values`/`_ndwi_grid` became thin wrappers
+over the shared core, and a test pins that the generic path returns byte-equal
+statistics. Live check: `ndwi_mean` over the Marina Beach AOI is 0.075406,
+identical to the value recorded before the generalisation.
+
+**Raw DN still cancels.** The decision rests on both bands of a pair sharing
+one multiplicative scale. Verified live (2026-09): `red`, `green`, `nir`,
+`swir16` and `swir22` all advertise scale 0.0001 / offset -0.1, so every pair
+cancels. A test pins the assumption so a future index over a differently
+scaled band cannot silently invalidate the arithmetic.
+
+**The 10 m / 20 m problem, and why this one is tractable.** Read from the live
+COG headers: `nir` is 10980² at 10 m and `swir16` is 5490² at 20 m, both
+EPSG:32644 with the SAME origin (399960, 1500000), and 10980 = 2 x 5490. The
+grids are exactly 2:1 nested with no sub-pixel phase offset, so
+`coregister_to_finer_grid` assigns each fine pixel the value of the coarse cell
+containing its centre. That invents nothing - every number in the output
+already existed in the source - which is why this direction was chosen over
+averaging NIR down to 20 m, which would synthesise values never measured. It
+creates no detail: NDBI is sampled at 10 m and resolved at 20 m, and that is
+reported as a warning on every NDBI result. The mapping goes through both
+affine transforms rather than assuming a factor, so a non-nested pair produces
+out-of-bounds parents and is REFUSED. Different CRS, non-integer ratios and
+uncovered pixels are all refused or marked invalid rather than filled.
+
+**Agent integration is ONE tool, deliberately.** `spectral_indices` takes an
+`indices` list rather than shipping three sibling tools, because the plan
+budget is three steps: a tool per index would leave no room for discovery and a
+visual observation in the same run. It is the only analysis tool with a
+parameter, and the distinction holds - the model chooses WHICH index answers a
+question; the bands, the raw-DN decision and the co-registration rule stay
+engine constants. A test asserts the params carry nothing but `tool` and
+`indices`.
+
+**Evidence and grounding move together.** Each index attributes its own
+measurements (`ndvi.*`, `ndwi.*`, `ndbi.*`) rather than inheriting a single
+"ndwi" source, and `EvidenceSource` plus `_NUMERIC_AUTHORITIES` gained both new
+sources. Omitting the latter fails silently and in the worst direction - a real
+pixel-derived number read as ungrounded, withholding a correct answer - so a
+test now pins it and was mutation-checked.
+
+**Live end-to-end.** "What is the vegetation condition… Compute NDVI." →
+Gemini planned `execute_query, spectral_indices` → read exactly B08 and B04 →
+`accepted=True, numeric=pass, terms=pass, refs=pass`, 5 citations.
+
+**Band reads are shared**: three indices cost four reads, not six, because NIR
+is common to all three. Measured.
+
+## 18. Auditable evidence export — IMPLEMENTED
+
+`features/agent/evidenceReport.ts` builds the record entirely from state the
+browser already holds, so it asks the server for nothing and cannot disagree
+with what was displayed. It carries the answer, the validated plan, the
+grounding checks, the flattened evidence, the manual-path evidence, every
+warning, and - deliberately - the unflattering parts: a withheld answer, a
+failed check, a window whose imagery could not be retrieved. A report that
+recorded only successes would not be an audit.
+
+Filenames are derived from the geocoded place, which is untrusted for that
+purpose: anything outside `[a-z0-9]` becomes a separator, so traversal and
+separators cannot survive. A test proves `../../etc/passwd` cannot escape, and
+a mutation-checked test proves no credential-shaped material can reach the file.
+
+### Baseline
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **1386 passed** |
+| `npm run test` | **226 passed** |
+| ruff / eslint / tsc / build / `git diff --check` | clean |

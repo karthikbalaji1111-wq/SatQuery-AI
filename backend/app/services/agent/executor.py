@@ -42,6 +42,8 @@ than substituting an interpretation of its own.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass, field
 
 from app.core.errors import AppError, InvalidInputError
@@ -53,13 +55,17 @@ from app.services.agent.schemas import (
     AgentToolStep,
     EvidenceItem,
     ExecuteQueryParams,
+    RsModelParams,
+    SpectralIndicesParams,
     ToolCall,
+    VisualObservation,
 )
+from app.services.agent.visual import VisualAnalyst
 from app.services.analysis.schemas import AnalysisRequest, AnalysisResult, Measurement
 from app.services.analysis.service import AnalysisService
 from app.services.query.execution import QueryExecutionService
 from app.services.query.schemas import QueryExecutionRequest, QueryExecutionResult
-from app.services.satellite.schemas import DEFAULT_LIMIT
+from app.services.satellite.schemas import DEFAULT_LIMIT, ImageryResponse
 
 logger = get_logger("agent.executor")
 
@@ -130,7 +136,7 @@ def _execution_items(execution: QueryExecutionResult) -> list[EvidenceItem]:
     deterministic.
     """
 
-    return [
+    items = [
         EvidenceItem(
             id=f"execution.{window.modality}.{window.label}.scene_count",
             source="execution",
@@ -143,6 +149,32 @@ def _execution_items(execution: QueryExecutionResult) -> list[EvidenceItem]:
         )
         for window in execution.windows
     ]
+    for window in execution.windows:
+        if window.modality != "sentinel-1-sar" or window.imagery is None:
+            continue
+        image = window.imagery
+        selected = next((s for s in window.scenes if s.id == image.scene_id), None)
+        if selected is None or selected.collection != "sentinel-1-rtc":
+            continue
+        polarization = image.asset.upper()
+        items.append(EvidenceItem(
+            id=f"execution.{window.modality}.{window.label}.imagery",
+            source="execution",
+            text=f"Sentinel-1 RTC {polarization} imagery was retrieved. "
+                 "The provider supplies terrain-corrected gamma naught. "
+                 "SatQuery renders a grayscale display and does not perform SAR "
+                 "calibration or quantitative backscatter analysis.",
+            produced_by=_EXECUTION_PRODUCER,
+        ))
+    return items
+
+
+#: How each index describes its own provenance in the evidence trail.
+_INDEX_PRODUCERS = {
+    "ndvi": "deterministic NDVI over Sentinel-2 red and NIR",
+    "ndwi": _NDWI_PRODUCER,
+    "ndbi": "deterministic NDBI over Sentinel-2 SWIR and NIR",
+}
 
 
 def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
@@ -153,12 +185,39 @@ def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
     failure rather than a silently ambiguous reference.
     """
 
-    items = _measurement_items(
-        analysis.measurements,
-        prefix="ndwi",
-        source="ndwi",
-        produced_by=_NDWI_PRODUCER,
-    )
+    # Attribute each measurement to the index that produced it. A single
+    # "ndwi" prefix over the whole list would label an NDVI value as NDWI -
+    # wrong in exactly the trail the product exists to make trustworthy.
+    items: list[EvidenceItem] = []
+    for key in ("ndvi", "ndwi", "ndbi"):
+        owned = [
+            m for m in analysis.measurements if m.name.startswith(f"{key}_")
+        ]
+        if owned:
+            items.extend(
+                _measurement_items(
+                    owned,
+                    prefix=key,
+                    source=key,
+                    produced_by=_INDEX_PRODUCERS[key],
+                )
+            )
+    # Anything that named no index still reports, under the analysis source it
+    # already had, rather than being dropped.
+    unclaimed = [
+        m
+        for m in analysis.measurements
+        if not any(m.name.startswith(f"{k}_") for k in ("ndvi", "ndwi", "ndbi"))
+    ]
+    if unclaimed:
+        items.extend(
+            _measurement_items(
+                unclaimed,
+                prefix="ndwi",
+                source="ndwi",
+                produced_by=_NDWI_PRODUCER,
+            )
+        )
 
     items.extend(
         EvidenceItem(
@@ -198,6 +257,57 @@ def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
             produced_by=_TEMPORAL_PRODUCER,
         )
     )
+    # The paired-pixel change, when the two grids were verified identical.
+    #
+    # These are the numbers the interface actually shows for a temporal query,
+    # and without them here an answer quoting the mean change would be judged
+    # ungrounded and withheld - a real, pixel-derived measurement rejected
+    # because nothing had offered it as evidence.
+    change = comparison.change
+    if change is not None:
+        items.extend(
+            _measurement_items(
+                [
+                    Measurement(
+                        name="ndwi_change_mean",
+                        value=change.change_mean,
+                        unit="index",
+                    ),
+                    Measurement(
+                        name="ndwi_change_min",
+                        value=change.change_min,
+                        unit="index",
+                    ),
+                    Measurement(
+                        name="ndwi_change_max",
+                        value=change.change_max,
+                        unit="index",
+                    ),
+                    Measurement(
+                        name="paired_valid_pixel_count",
+                        value=float(change.paired_valid_pixel_count),
+                        unit="pixels",
+                    ),
+                ],
+                prefix="temporal_ndwi.change",
+                source="temporal_ndwi",
+                produced_by=_TEMPORAL_PRODUCER,
+            )
+        )
+        items.append(
+            EvidenceItem(
+                id="temporal_ndwi.change.pair",
+                source="temporal_ndwi",
+                text=(
+                    f"Paired-pixel NDWI change from {change.first_scene_id} "
+                    f"(earlier) to {change.second_scene_id} (later), computed "
+                    f"on one shared {change.crs} grid over "
+                    f"{change.paired_valid_pixel_count} pixels valid in both."
+                ),
+                produced_by=_TEMPORAL_PRODUCER,
+            )
+        )
+
     items.extend(
         EvidenceItem(
             id=f"temporal_ndwi.warning.{index}",
@@ -219,6 +329,58 @@ def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
     return items
 
 
+#: The single imagery artifact Phase 18.1 will show a model: the Sentinel-2
+#: true-colour product. Identified by the whole triple - optical modality, the
+#: ``visual`` asset, and RGB bands - not by any one of them, because "it is a
+#: PNG" or "it has three bands" would also admit the Sentinel-1 VV rendering.
+_VISUAL_MODALITY = "sentinel-2-optical"
+_VISUAL_ASSET = "visual"
+_VISUAL_BANDS = ("red", "green", "blue")
+
+
+def _visual_image(
+    execution: QueryExecutionResult | None,
+) -> tuple[ImageryResponse, bytes] | str:
+    """The S2 true-colour image to observe, or a sentence saying why not.
+
+    Server-authoritative and deliberately narrow. Sentinel-1 VV is a *display*
+    rendering - a per-scene 2nd-98th percentile stretch - so its brightness
+    carries no fixed meaning and a model asked about it would be inventing.
+    Only the optical true-colour product is admitted, and only when it actually
+    carries bytes.
+
+    The plan cannot influence this. Nothing here reads a tool parameter: the
+    image comes from the execution result the discovery step already produced.
+    """
+
+    if execution is None:
+        return (
+            "no execution result was produced, so there was no image to observe"
+        )
+
+    for window in execution.windows:
+        image = window.imagery
+        if image is None:
+            continue
+        if window.modality != _VISUAL_MODALITY:
+            continue
+        if image.asset != _VISUAL_ASSET or tuple(image.bands) != _VISUAL_BANDS:
+            continue
+        try:
+            raw = base64.b64decode(image.image_base64, validate=True)
+        except (ValueError, binascii.Error):
+            return "the retrieved image could not be decoded"
+        if not raw:
+            return "the retrieved image carried no bytes"
+        return image, raw
+
+    return (
+        "no Sentinel-2 true-colour image was available; this phase observes "
+        "only the optical 'visual' product, and Sentinel-1 SAR is a display "
+        "rendering rather than a picture a model may be asked to interpret"
+    )
+
+
 class AgentExecutor:
     """Runs a validated :class:`AgentPlan` against the deterministic services.
 
@@ -231,9 +393,13 @@ class AgentExecutor:
         *,
         query_execution_service: QueryExecutionService,
         analysis_service: AnalysisService,
+        visual_analyst: VisualAnalyst | None = None,
     ) -> None:
         self._query = query_execution_service
         self._analysis = analysis_service
+        # Optional so every existing construction site keeps working; the
+        # visual tool simply cannot run without one, which the step records.
+        self._visual = visual_analyst
 
     async def execute(self, plan: AgentPlan) -> ExecutionOutcome:
         """Execute ``plan`` and report every step.
@@ -254,7 +420,7 @@ class AgentExecutor:
         Neither path dispatches anything.
         """
 
-        discovery, analysis_steps = self._classify(plan)
+        discovery, analysis_steps, visual_steps = self._classify(plan)
 
         steps: dict[int, AgentToolStep] = {}
         execution: QueryExecutionResult | None = None
@@ -275,8 +441,19 @@ class AgentExecutor:
 
         analysis = None
         if analysis_steps:
+            # Explicit type check rather than a dynamic attribute lookup: the
+            # executor is deliberately free of reflection primitives, and the
+            # one tool that carries indices is known by name.
+            requested_indices: list[str] = []
+            for _, params, _ in analysis_steps:
+                if isinstance(params, SpectralIndicesParams):
+                    for key in params.indices:
+                        if key not in requested_indices:
+                            requested_indices.append(key)
             analysis, analysis_status, message = await self._run_analysis(
-                execution, [flag for _, _, flag in analysis_steps]
+                execution,
+                [flag for _, _, flag in analysis_steps if flag is not None],
+                requested_indices,
             )
             for index, params, _ in analysis_steps:
                 steps[index] = AgentToolStep(
@@ -291,7 +468,21 @@ class AgentExecutor:
                     ),
                 )
 
-        evidence = self._assemble_evidence(execution, analysis)
+        visual: EvidenceItem | None = None
+        if visual_steps:
+            visual, visual_step_state = await self._run_visual(
+                execution, visual_steps[0][1]
+            )
+            status, message, rejection = visual_step_state
+            for index, params in visual_steps:
+                steps[index] = AgentToolStep(
+                    status=status,
+                    parameters=params,
+                    error_message=message,
+                    rejection_reason=rejection,
+                )
+
+        evidence = self._assemble_evidence(execution, analysis, visual)
         ordered = [steps[index] for index in sorted(steps)]
 
         logger.info(
@@ -308,6 +499,7 @@ class AgentExecutor:
     ) -> tuple[
         tuple[int, ExecuteQueryParams] | None,
         list[tuple[int, ToolCall, AnalysisFlag]],
+        list[tuple[int, RsModelParams]],
     ]:
         """Split the plan into its discovery step and its analysis steps.
 
@@ -318,6 +510,7 @@ class AgentExecutor:
 
         discovery: tuple[int, ExecuteQueryParams] | None = None
         analysis: list[tuple[int, ToolCall, AnalysisFlag]] = []
+        visual: list[tuple[int, RsModelParams]] = []
 
         for index, params in enumerate(plan.steps):
             # ``resolve_tool`` raises for anything off the allowlist. Because
@@ -334,19 +527,26 @@ class AgentExecutor:
                 params, ExecuteQueryParams
             ):
                 discovery = (index, params)
-            elif spec.operation == "analysis" and spec.analysis_flag is not None:
+            elif spec.operation == "analysis":
+                # `spectral_indices` carries its own parameter instead of a
+                # flag, so it is collected the same way and read out below.
                 analysis.append((index, params, spec.analysis_flag))
+            elif spec.operation == "visual" and isinstance(params, RsModelParams):
+                visual.append((index, params))
             else:  # pragma: no cover - unreachable while the registry is closed
                 raise InvalidInputError(
                     f"Tool {params.tool!r} has no executable operation."
                 )
 
-        return discovery, analysis
+        return discovery, analysis, visual
 
     # -- analysis --------------------------------------------------------- #
 
     async def _run_analysis(
-        self, execution: QueryExecutionResult | None, flags: list[AnalysisFlag]
+        self,
+        execution: QueryExecutionResult | None,
+        flags: list[AnalysisFlag],
+        indices: list[str] | None = None,
     ) -> tuple[AnalysisResult | None, str, str | None]:
         """ONE analyze call carrying the union of the requested flags.
 
@@ -358,10 +558,12 @@ class AgentExecutor:
         if execution is None:
             return None, "skipped", None
 
+        indices = indices or []
         request = AnalysisRequest(
             execution=execution,
             include_ndwi="include_ndwi" in flags,
             include_temporal_ndwi="include_temporal_ndwi" in flags,
+            indices=indices,
         )
         try:
             result = await self._analysis.analyze(request)
@@ -370,12 +572,73 @@ class AgentExecutor:
             return None, "failed", exc.message
         return result, "ok", None
 
+    # -- visual observation ----------------------------------------------- #
+
+    async def _run_visual(
+        self, execution: QueryExecutionResult | None, params: RsModelParams
+    ) -> tuple[EvidenceItem | None, tuple[str, str | None, str | None]]:
+        """Ask the analyst one question about the image the server chose.
+
+        Every precondition is re-checked here rather than trusted to the
+        planner: a plan is model output, so it is an input to be validated, not
+        a security boundary. The image is selected from the execution result -
+        the plan cannot name one - and only the Sentinel-2 true-colour product
+        is admitted.
+
+        Returns the evidence item (or ``None``) and the step's observed state.
+        A refusal or a provider failure yields no evidence at all rather than a
+        placeholder: an observation nobody made must not appear as one.
+        """
+
+        if self._visual is None:
+            return None, (
+                "rejected",
+                None,
+                "no visual analyst is configured, so no model could observe the image",
+            )
+
+        selected = _visual_image(execution)
+        if isinstance(selected, str):
+            return None, ("rejected", None, selected)
+
+        image, raw = selected
+        try:
+            answer = await self._visual.observe(
+                question=params.question,
+                image=raw,
+                media_type=image.media_type,
+            )
+        except AppError as exc:
+            logger.info("Agent visual analysis failed [%s]: %s", exc.code, exc.message)
+            return None, ("failed", exc.message, None)
+
+        item = EvidenceItem(
+            # Namespaced by source and scene, so it cannot collide with
+            # execution / ndwi / temporal evidence and stays deterministic.
+            id=f"model.visual.{image.scene_id}",
+            source="model",
+            visual=VisualObservation(
+                statement=answer.answer,
+                provider=self._visual.provider_name,
+                model=self._visual.model_name,
+                scene_id=image.scene_id,
+            ),
+            produced_by=self._visual.model_name,
+        )
+        logger.info(
+            "Agent visual observation recorded (model=%s, scene=%s)",
+            self._visual.model_name,
+            image.scene_id,
+        )
+        return item, ("ok", None, None)
+
     # -- evidence --------------------------------------------------------- #
 
     def _assemble_evidence(
         self,
         execution: QueryExecutionResult | None,
         analysis: AnalysisResult | None,
+        visual: EvidenceItem | None = None,
     ) -> AgentEvidence:
         """Collect the deterministic outputs into the Commit 1 evidence shape.
 
@@ -389,5 +652,9 @@ class AgentExecutor:
             items.extend(_execution_items(execution))
         if analysis is not None:
             items.extend(_analysis_items(analysis))
+        if visual is not None:
+            # Last, and structurally distinct: it is the only item here that a
+            # model authored rather than an engine computed.
+            items.append(visual)
 
         return AgentEvidence(items=items, execution=execution, analysis=analysis)

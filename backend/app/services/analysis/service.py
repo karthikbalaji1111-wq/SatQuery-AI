@@ -35,11 +35,14 @@ from app.core.logging import get_logger
 from app.services.analysis.engines import (
     _grids_are_comparable,
     compare_ndwi_observations,
+    compute_index_measurements,
     compute_ndwi_measurements,
     compute_ndwi_temporal_change,
     compute_ndwi_threshold_measurement,
+    coregister_to_finer_grid,
     render_ndwi_overlay,
 )
+from app.services.analysis.indices import bands_for, resolve_index
 from app.services.analysis.schemas import (
     AnalysisRequest,
     AnalysisResult,
@@ -221,6 +224,90 @@ class AnalysisService(DomainService):
             "opt-in single-scene Sentinel-2 NDWI statistics, and opt-in "
             "Temporal NDWI Statistics for one Sentinel-2 observation pair."
         )
+
+    async def _index_measurements(
+        self, execution: QueryExecutionResult, keys: tuple[str, ...]
+    ) -> tuple[list[Measurement], list[str]]:
+        """Compute several spectral indices over one optical window.
+
+        Each distinct band is read ONCE and shared: NIR appears in all three
+        indices, so NDVI + NDWI + NDBI costs four reads rather than six. The
+        arithmetic is delegated to the pure engine; this method performs none.
+
+        A per-index failure degrades that index alone - the others still
+        report - because a missing SWIR asset is no reason to withhold a
+        perfectly good NDVI.
+        """
+
+        candidates = _ndwi_candidates(execution)
+        if not candidates:
+            return (
+                [],
+                [
+                    "Spectral indices were requested but no Sentinel-2 optical "
+                    "window with a selected scene was available; nothing was "
+                    "computed."
+                ],
+            )
+
+        window = candidates[0]
+        bbox = execution.plan.bbox
+        collection = _scene_collection(window)
+        warnings: list[str] = []
+        if len(candidates) > 1:
+            warnings.append(
+                "Spectral indices are single-scene in this phase: they were "
+                f"computed only for the {window.modality} window "
+                f"{window.label!r}; {len(candidates) - 1} other optical "
+                "window(s) were not analysed."
+            )
+
+        # One read per distinct band, keyed by asset.
+        bands: dict[str, BandWindow] = {}
+        for asset in bands_for(keys):
+            try:
+                bands[asset] = await run_in_threadpool(
+                    self._imagery.read_band,
+                    scene_id=window.selected_scene_id,
+                    bbox=bbox,
+                    asset=asset,
+                    collection=collection,
+                )
+            except AppError as exc:
+                warnings.append(
+                    f"The {asset} band could not be read, so any index needing "
+                    f"it was not computed: {exc.message}"
+                )
+
+        measurements: list[Measurement] = []
+        for key in keys:
+            index = resolve_index(key)
+            high = bands.get(index.high_band)
+            low = bands.get(index.low_band)
+            if high is None or low is None:
+                continue
+            try:
+                # Bands of different native resolution are placed on the finer
+                # grid by explicit whole-cell assignment, never implicitly.
+                if high.values.shape != low.values.shape:
+                    if (high.resolution or 0) > (low.resolution or 0):
+                        high = coregister_to_finer_grid(high, low)
+                    else:
+                        low = coregister_to_finer_grid(low, high)
+                measurements.extend(compute_index_measurements(index, high, low))
+            except AppError as exc:
+                warnings.append(
+                    f"{index.label} could not be computed: {exc.message}"
+                )
+                continue
+            if index.limiting_resolution_m > 10.0:
+                warnings.append(
+                    f"{index.label} uses a {index.limiting_resolution_m:.0f} m "
+                    f"band, so it is sampled on the 10 m grid but resolves "
+                    f"detail no finer than {index.limiting_resolution_m:.0f} m."
+                )
+
+        return measurements, warnings
 
     async def _ndwi_measurements(
         self, execution: QueryExecutionResult, *, with_overlay: bool = False
@@ -455,14 +542,14 @@ class AnalysisService(DomainService):
         incomparable = _grids_are_comparable(first_green, second_green)
         change = (
             compute_ndwi_temporal_change(
-                baseline_green=first_green,
-                baseline_nir=first_nir,
-                target_green=second_green,
-                target_nir=second_nir,
-                baseline_scene_id=first.scene_id,
-                target_scene_id=second.scene_id,
-                baseline_acquired_at=first.acquired_at,
-                target_acquired_at=second.acquired_at,
+                first_green=first_green,
+                first_nir=first_nir,
+                second_green=second_green,
+                second_nir=second_nir,
+                first_scene_id=first.scene_id,
+                second_scene_id=second.scene_id,
+                first_acquired_at=first.acquired_at,
+                second_acquired_at=second.acquired_at,
                 window_label=f"{first.window_label}\u2192{second.window_label}",
             )
             if incomparable is None
@@ -511,9 +598,18 @@ class AnalysisService(DomainService):
         measurements: list[Measurement] = []
         ndwi_overlay: NdwiOverlay | None = None
         spatial_measurement: SpatialMeasurement | None = None
+        # Multi-index runs share their band reads; NDWI keeps its own path
+        # because it alone also produces the overlay and threshold statistic.
+        if request.indices:
+            index_measurements, index_warnings = await self._index_measurements(
+                execution, tuple(request.indices)
+            )
+            warnings.extend(index_warnings)
+            measurements.extend(index_measurements)
+
         if request.include_ndwi:
             (
-                measurements,
+                ndwi_measurements,
                 ndwi_warnings,
                 ndwi_overlay,
                 spatial_measurement,
@@ -521,7 +617,13 @@ class AnalysisService(DomainService):
                 execution, with_overlay=request.include_ndwi_overlay
             )
             warnings.extend(ndwi_warnings)
-            if measurements:
+            # Names are unique per index, so a combined request reports both
+            # rather than one replacing the other.
+            existing = {m.name for m in measurements}
+            measurements.extend(
+                m for m in ndwi_measurements if m.name not in existing
+            )
+            if ndwi_measurements:
                 answer = (
                     f"{answer} NDWI index statistics were computed for one "
                     "Sentinel-2 scene at native 10 m resolution."
@@ -534,6 +636,14 @@ class AnalysisService(DomainService):
             )
             warnings.extend(temporal_warnings)
             if temporal_comparison is not None:
+                if task == "change_detection":
+                    status = "ok"
+                    answer = (
+                        "Temporal NDWI comparison completed."
+                        if temporal_comparison.change is not None
+                        else "Temporal NDWI aggregate comparison completed; "
+                        "a paired-pixel change map is unavailable."
+                    )
                 answer = (
                     f"{answer} Temporal NDWI statistics were computed for two "
                     "Sentinel-2 observations, each indexed independently at "

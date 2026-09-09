@@ -728,3 +728,77 @@ def test_lower_layers_do_not_import_the_agent_package() -> None:
             )
     for path in (backend / "app" / "core").rglob("*.py"):
         assert "services.agent" not in path.read_text()
+
+
+# --------------------------------------------------------------------------- #
+# The spectral-index tool
+# --------------------------------------------------------------------------- #
+
+
+def test_the_index_tool_refuses_an_unknown_index() -> None:
+    """An index the engine cannot compute must fail before dispatch."""
+
+    from app.services.agent.schemas import SpectralIndicesParams
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        SpectralIndicesParams(indices=["ndsi"])
+
+
+def test_the_index_tool_requires_at_least_one_index() -> None:
+    from app.services.agent.schemas import SpectralIndicesParams
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        SpectralIndicesParams(indices=[])
+
+
+def test_the_index_tool_refuses_duplicates() -> None:
+    from app.services.agent.schemas import SpectralIndicesParams
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="duplicates"):
+        SpectralIndicesParams(indices=["ndvi", "ndvi"])
+
+
+def test_the_index_tool_offers_exactly_the_engine_s_indices() -> None:
+    """The planner's choices and the engine's registry cannot drift apart.
+
+    If the engine gained an index the tool could not name, it would be
+    unreachable by natural language; if the tool named one the engine lacked,
+    a plan would be accepted and then fail at execution.
+    """
+
+    from typing import get_args
+
+    from app.services.agent.schemas import SpectralIndicesParams
+    from app.services.analysis.indices import SPECTRAL_INDICES
+
+    annotation = SpectralIndicesParams.model_fields["indices"].annotation
+    offered = set(get_args(get_args(annotation)[0]))
+    assert offered == set(SPECTRAL_INDICES)
+
+
+def test_the_index_tool_carries_no_scientific_knob() -> None:
+    """The model chooses WHICH index, never HOW it is computed.
+
+    Bands, the raw-DN decision, thresholds and the co-registration rule are
+    engine constants. A field for any of them here would hand a language model
+    a scientific parameter.
+    """
+
+    from app.services.agent.schemas import SpectralIndicesParams
+
+    assert set(SpectralIndicesParams.model_fields) == {"tool", "indices"}
+
+
+@pytest.mark.parametrize("tool", ["ndwi_statistics", "temporal_ndwi_statistics"])
+def test_index_plans_request_the_analyzed_scene_for_display(tool: str) -> None:
+    plan = AgentPlan.model_validate({"steps": [
+        {"tool": "execute_query", "intent": {
+            "location_query": "Marina Beach, Chennai", "temporal_mode": "single",
+            "time_windows": [{"start_date": "2025-01-01", "end_date": "2025-01-31"}],
+            "modalities": ["sentinel-2-optical"], "task": "visualize",
+        }, "include_imagery": False}, {"tool": tool},
+    ]})
+    assert plan.steps[0].include_imagery is True

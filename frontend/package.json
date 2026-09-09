@@ -14,9 +14,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@types/three": "^0.185.4",
     "maplibre-gl": "^6.7.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

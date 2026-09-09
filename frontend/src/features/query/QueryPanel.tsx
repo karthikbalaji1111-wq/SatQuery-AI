@@ -1,6 +1,8 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "../../api/client";
+import { shownScene, shownWindow } from "../agent/derive";
+import { ImageryErrorNotice } from "../agent/AgentPanel";
 import { resolveLocation } from "../../api/geospatial";
 import {
   analyzeQuery,
@@ -15,21 +17,26 @@ import type {
   ExecutedWindow,
   GeoResolveResponse,
   ImageryResponse,
+  Measurement,
   Modality,
   NdwiComparison,
   NdwiOverlay,
   NdwiTemporalChange,
-  SpatialMeasurement,
   QueryExecutionResult,
   QueryTask,
   ResolvedQueryPlan,
-  SatelliteScene,
   SatQueryIntent,
+  SatelliteScene,
   SceneSearchResponse,
+  SpatialMeasurement,
+  SpectralIndexKey,
   TemporalComparison,
   TemporalIndexComparison,
   TemporalMode,
 } from "../../api/types";
+import type { MapAoi } from "../map/footprint";
+import { ConfigSummary } from "./ConfigSummary";
+import type { RunContext } from "./ConfigSummary";
 
 type ResolveState =
   | { status: "idle" }
@@ -143,6 +150,8 @@ const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
  * No map, no AI/VLM image reasoning, no spectral controls.
  */
 interface QueryPanelProps {
+  /** Claim the workspace before a manual run replaces an agent run. */
+  onStart?: () => void;
   /**
    * Called when a scene preview is retrieved, so a parent can place it on the
    * map. Optional: the panel works exactly as before without it, and it never
@@ -160,12 +169,55 @@ interface QueryPanelProps {
    * when the grids were not comparable and nothing was subtracted.
    */
   onChange?: (overlay: NdwiOverlay | null) => void;
+  /**
+   * The area this panel resolved, so the footprint map can show where the
+   * request applies. Same contract as the others: a result already obtained
+   * here travelling upward, never a fetch of its own.
+   */
+  onAoi?: (aoi: MapAoi | null) => void;
+  /**
+   * The configuration an agent run actually used. When present it is what the
+   * rail reports, because it describes the run that produced what is on screen
+   * - the manual form's own fields describe a request not yet made.
+   */
+  runContext?: RunContext | null;
+  /**
+   * The scene and measurements this panel produced, so the evidence panel can
+   * report a manual run as fully as an agent run. Same contract as the others:
+   * results already obtained here travelling upward.
+   */
+  onEvidence?: (evidence: ManualEvidence | null) => void;
 }
 
+/** What the manual path can establish without any model call. */
+export interface ManualEvidence {
+  scene: SatelliteScene | null;
+  imagery: ImageryResponse | null;
+  measurements: Measurement[];
+}
+
+/**
+ * The indices offered, with what a HIGH value indicates.
+ *
+ * Worded as a spectral observation, never as a classification: a high NDBI is
+ * a built-up-like reflectance signature, not a building, and the interface
+ * must not promise a classifier the system does not have.
+ */
+const INDEX_CHOICES: { key: SpectralIndexKey; label: string; meaning: string }[] =
+  [
+    { key: "ndvi", label: "NDVI", meaning: "vegetation-like response" },
+    { key: "ndwi", label: "NDWI", meaning: "water-like response" },
+    { key: "ndbi", label: "NDBI", meaning: "built-up / bare response" },
+  ];
+
 export function QueryPanel({
+  onStart,
   onImagery,
   onNdwi,
   onChange,
+  onAoi,
+  runContext = null,
+  onEvidence,
 }: QueryPanelProps = {}) {
   const [place, setPlace] = useState("");
   const [resolveState, setResolveState] = useState<ResolveState>({
@@ -189,6 +241,9 @@ export function QueryPanel({
   const [planState, setPlanState] = useState<PlanState>({ status: "idle" });
   const [includeImagery, setIncludeImagery] = useState(false);
   const [includeNdwi, setIncludeNdwi] = useState(false);
+  // Which additional spectral indices to compute. Independent of the NDWI
+  // flag above, which is also what produces the georeferenced overlay.
+  const [indices, setIndices] = useState<SpectralIndexKey[]>([]);
   const [includeTemporalNdwi, setIncludeTemporalNdwi] = useState(false);
   const [executeState, setExecuteState] = useState<ExecuteState>({
     status: "idle",
@@ -276,11 +331,50 @@ export function QueryPanel({
     }
   }
 
+  // Guards the scene-preview race above: a monotonic ticket identifying the
+  // newest request, and the in-flight controller so the superseded one stops.
+  const previewTicketRef = useRef(0);
+  const previewAbortRef = useRef<AbortController | null>(null);
+  const runTicketRef = useRef(0);
+  useEffect(() => () => {
+    runTicketRef.current += 1;
+    previewTicketRef.current += 1;
+    previewAbortRef.current?.abort();
+  }, []);
+
+  function beginManualRun() {
+    const ticket = ++runTicketRef.current;
+    previewTicketRef.current += 1;
+    previewAbortRef.current?.abort();
+    onStart?.();
+    onEvidence?.(null);
+    onImagery?.(null);
+    onNdwi?.(null);
+    onChange?.(null);
+    onAoi?.(null);
+    return () => runTicketRef.current === ticket;
+  }
+
+  /**
+   * Drop a displayed analysis when the selection it described changes.
+   *
+   * The result on screen answers the options that were set when it ran. Change
+   * those options and it is answering a question nobody is asking any more -
+   * an NDWI mean sitting under a picker that now reads NDVI. Clearing is the
+   * honest response; re-running is the user's decision.
+   */
+  function invalidateAnalysis() {
+    setAnalyzeState({ status: "idle" });
+    onNdwi?.(null);
+    onChange?.(null);
+  }
+
   async function handleResolve(event: FormEvent) {
     event.preventDefault();
     const trimmed = place.trim();
     if (!trimmed) return;
 
+    const current = beginManualRun();
     setResolveState({ status: "loading" });
     setSearchState({ status: "idle" });
     setImageryState({ status: "idle" });
@@ -290,8 +384,12 @@ export function QueryPanel({
     onImagery?.(null);
     try {
       const result = await resolveLocation({ place: trimmed });
+      if (!current()) return;
       setResolveState({ status: "done", result });
+      // The resolved extent, exactly as the geospatial service returned it.
+      onAoi?.({ ...result.bbox, scene_id: null });
     } catch (error) {
+      if (!current()) return;
       setResolveState({ status: "error", message: errorMessage(error) });
     }
   }
@@ -331,6 +429,7 @@ export function QueryPanel({
   async function handleExecute() {
     if (!canExecute) return;
 
+    const current = beginManualRun();
     setExecuteState({ status: "loading" });
     // A new query invalidates whatever the map is showing, before any
     // new result exists to replace it.
@@ -344,8 +443,20 @@ export function QueryPanel({
         intent: currentIntent(),
         include_imagery: includeImagery,
       });
+      if (!current()) return;
       setExecuteState({ status: "done", result });
+      const window = shownWindow(result);
+      const imagery = window?.imagery ?? null;
+      onImagery?.(imagery);
+      onAoi?.({
+        ...result.plan.bbox,
+        scene_id: window?.selected_scene_id ?? null,
+        imagery_requested: includeImagery,
+        imagery_error: window?.imagery_error ?? null,
+      });
+      onEvidence?.({ scene: shownScene(window), imagery, measurements: [] });
     } catch (error) {
+      if (!current()) return;
       setExecuteState({ status: "error", message: errorMessage(error) });
       return;
     }
@@ -362,8 +473,19 @@ export function QueryPanel({
           ? { include_ndwi: true, include_ndwi_overlay: true }
           : {}),
         ...(includeTemporalNdwi ? { include_temporal_ndwi: true } : {}),
+        // Omitted when empty, so a request that asks for no extra index is
+        // byte-identical to the previous contract.
+        ...(indices.length > 0 ? { indices } : {}),
       });
+      if (!current()) return;
       setAnalyzeState({ status: "done", result: analysis });
+      // Measurements the analysis computed, reported alongside whatever scene
+      // is already on screen.
+      onEvidence?.({
+        scene: null,
+        imagery: null,
+        measurements: analysis.measurements,
+      });
       // null when the analysis produced no overlay, so the map never keeps one
       // from an earlier query.
       onNdwi?.(analysis.ndwi_overlay ?? null);
@@ -371,6 +493,7 @@ export function QueryPanel({
       // never outlive the comparison that produced it.
       onChange?.(analysis.temporal_comparison?.change?.overlay ?? null);
     } catch (error) {
+      if (!current()) return;
       setAnalyzeState({ status: "error", message: errorMessage(error) });
       onNdwi?.(null);
       onChange?.(null);
@@ -381,6 +504,8 @@ export function QueryPanel({
     event.preventDefault();
     if (!resolved || !canSearch) return;
 
+    const current = beginManualRun();
+    onAoi?.({ ...resolved.bbox, scene_id: null });
     const cloud = maxCloud.trim() === "" ? undefined : Number(maxCloud);
     setSearchState({ status: "loading" });
     setImageryState({ status: "idle" });
@@ -394,26 +519,50 @@ export function QueryPanel({
           ? { max_cloud_cover: cloud }
           : {}),
       });
+      if (!current()) return;
       setSearchState({ status: "done", result });
     } catch (error) {
+      if (!current()) return;
       setSearchState({ status: "error", message: errorMessage(error) });
     }
   }
 
   async function handlePreview(scene: SatelliteScene) {
     if (!resolved) return;
+
+    // Each candidate keeps its own button, so a reader can click scene B while
+    // scene A is still loading - which is reasonable, and used to be wrong.
+    // Both requests would run, and whichever RESPONSE arrived last won, so a
+    // slow first click could silently replace the scene the reader chose
+    // second. The ticket makes the last CLICK win instead: only the newest
+    // request may commit, and the previous one is aborted rather than left to
+    // finish into a result nobody is waiting for.
+    const activeRun = beginManualRun();
+    onAoi?.({ ...resolved.bbox, scene_id: scene.id, imagery_requested: true });
+    const ticket = ++previewTicketRef.current;
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+    const current = () => activeRun() && previewTicketRef.current === ticket;
+
     setImageryState({ status: "loading", sceneId: scene.id });
     // Drop the old overlay before the new one is in flight, so the map never
     // shows a scene the user has already replaced.
     onImagery?.(null);
     try {
-      const result = await fetchSceneImagery({
-        scene_id: scene.id,
-        bbox: resolved.bbox,
-      });
+      const result = await fetchSceneImagery(
+        { scene_id: scene.id, bbox: resolved.bbox },
+        controller.signal,
+      );
+      if (!current()) return;
       setImageryState({ status: "done", sceneId: scene.id, result });
       onImagery?.(result);
+      // The scene actually rendered, with its STAC record - everything the
+      // evidence panel needs from a manual retrieval.
+      onEvidence?.({ scene, imagery: result, measurements: [] });
     } catch (error) {
+      // An abort is this code superseding itself, not a failure to report.
+      if (!current() || controller.signal.aborted) return;
       setImageryState({
         status: "error",
         sceneId: scene.id,
@@ -423,48 +572,57 @@ export function QueryPanel({
     }
   }
 
+  // The configuration this panel currently describes. Read straight off its own
+  // controls - it reports what a run WOULD use, until a real run reports what
+  // it did use.
+  const manualContext: RunContext = {
+    location: resolved?.display_name ?? null,
+    centre: resolved?.center ?? null,
+    window:
+      temporalMode === "compare" && baselineStart && targetStart
+        ? `${baselineStart} → ${targetEnd || targetStart}`
+        : obsDate ||
+          (startDate && endDate ? `${startDate} → ${endDate}` : null),
+    cloudRule: maxCloud === "" ? null : `Cloud cover ≤ ${maxCloud}%`,
+    modalities: [
+      ...(opticalOn ? (["sentinel-2-optical"] as const) : []),
+      ...(sarOn ? (["sentinel-1-sar"] as const) : []),
+    ],
+    task,
+    ndwi: includeNdwi || includeTemporalNdwi,
+    scenes: searchState.status === "done" ? searchState.result.scenes : [],
+    selectedSceneId:
+      executeState.status === "done"
+        ? (executeState.result.windows.find(
+            (executed) => executed.selected_scene_id !== null,
+          )?.selected_scene_id ?? null)
+        : null,
+  };
+
   return (
     <section className="panel" aria-labelledby="query-heading">
-      <h2 id="query-heading">Ask</h2>
-      <p className="hint">
-        Describe a request in plain language, or fill the Query Plan form
-        directly. Parsing pre-fills the form for you to review before building.
-      </p>
+      <h2 id="query-heading">Query configuration</h2>
 
-      <form onSubmit={handleParse} className="query-form nl-form">
-        <label htmlFor="nl-input">Natural Language Request</label>
-        <textarea
-          id="nl-input"
-          name="nl_prompt"
-          rows={3}
-          value={nlText}
-          placeholder="e.g. Show optical imagery of Chennai this summer"
-          onChange={(event) => setNlText(event.target.value)}
-        />
-        <button
-          type="submit"
-          disabled={parseState.status === "loading" || nlText.trim() === ""}
-        >
-          {parseState.status === "loading" ? "Parsing…" : "Parse Request"}
-        </button>
-      </form>
+      <ConfigSummary context={runContext ?? manualContext} />
 
-      {parseState.status === "error" && (
-        <p className="result-error" role="alert">
-          {parseState.message}
-        </p>
-      )}
+      {/* The controls that produce that configuration. Below the read-out on
+          purpose: the workspace is an instrument first and a form second. */}
+      {/* The controls that produce the configuration above. Collapsed by
+          default: the read-out already states what a run will use, so the
+          form is the secondary path and should not repeat it at full
+          height. A native <details> keeps every control mounted and
+          keyboard-reachable rather than unmounting them. */}
+      <details className="config-form">
+        <summary>
+          <span>Configure</span>
+          <span className="config-form-hint">edit parameters</span>
+        </summary>
+        <div className="config-form-body">
 
-      {parseState.status === "done" && (
-        <p className="hint" role="status">
-          Parsed intent: {parseState.result.temporal_mode} ·{" "}
-          {parseState.result.modalities.join(", ")} · {parseState.result.task}.
-          The Query Plan form below is pre-filled — review or edit it, then click
-          Build Query Plan.
-          {parseState.result.temporal_mode === "timeseries" &&
-            " (Time-series windows collapsed to the first window in the manual form.)"}
-        </p>
-      )}
+      {/* Named bands, so the form reads as a configuration workspace rather
+          than one long column of inputs. Headings only - no markup was
+          restructured and no control moved. */}
+      <h3>Location</h3>
 
       <form onSubmit={handleResolve} className="query-form">
         <label htmlFor="place-input">Place name</label>
@@ -473,7 +631,7 @@ export function QueryPanel({
           name="place"
           value={place}
           autoComplete="off"
-          placeholder="e.g. Chennai"
+          placeholder="Any city, district, landmark or lat, lon"
           onChange={(event) => setPlace(event.target.value)}
         />
         <button
@@ -491,7 +649,7 @@ export function QueryPanel({
       )}
 
       <form onSubmit={handleBuildPlan} className="query-form plan-form">
-        <h3>Query plan</h3>
+        <h3>Date / time window</h3>
 
         <fieldset className="temporal-mode">
           <legend>Temporal mode</legend>
@@ -569,6 +727,8 @@ export function QueryPanel({
           </div>
         )}
 
+        <h3>Satellite / sensor</h3>
+
         <fieldset className="modalities">
           <legend>Modalities</legend>
           <label>
@@ -590,6 +750,8 @@ export function QueryPanel({
             Sentinel-1 SAR
           </label>
         </fieldset>
+        <h3>Analysis type</h3>
+
 
         <div>
           <label htmlFor="task-select">Task</label>
@@ -634,23 +796,91 @@ export function QueryPanel({
             type="checkbox"
             name="include_ndwi"
             checked={includeNdwi}
-            onChange={(event) => setIncludeNdwi(event.target.checked)}
+            onChange={(event) => {
+              setIncludeNdwi(event.target.checked);
+              invalidateAnalysis();
+            }}
           />
           Compute NDWI index statistics (Sentinel-2)
         </label>
+        <fieldset className="index-picker">
+          <legend>Spectral indices</legend>
+          {INDEX_CHOICES.map((choice) => (
+            <label key={choice.key}>
+              <input
+                type="checkbox"
+                name={`index_${choice.key}`}
+                checked={indices.includes(choice.key)}
+                onChange={(event) => {
+                  setIndices((current) =>
+                    event.target.checked
+                      ? [...current, choice.key]
+                      : current.filter((key) => key !== choice.key),
+                  );
+                  invalidateAnalysis();
+                }}
+              />
+              <span className="index-name">{choice.label}</span>
+              <span className="index-meaning">{choice.meaning}</span>
+            </label>
+          ))}
+        </fieldset>
         <label className="include-temporal-ndwi">
           <input
             type="checkbox"
             name="include_temporal_ndwi"
             checked={includeTemporalNdwi}
-            onChange={(event) => setIncludeTemporalNdwi(event.target.checked)}
+            onChange={(event) => {
+              setIncludeTemporalNdwi(event.target.checked);
+              invalidateAnalysis();
+            }}
           />
           Compute temporal NDWI statistics (two Sentinel-2 dates)
         </label>
+        <h3>Execution</h3>
         <button type="button" onClick={handleExecute} disabled={!canExecute}>
           {executeState.status === "loading" ? "Running…" : "Run full query"}
         </button>
       </form>
+
+      <h3>Parse from text</h3>
+      <p className="hint">
+        Optional. Parsing pre-fills the fields above for you to review.
+      </p>
+      <form onSubmit={handleParse} className="query-form nl-form">
+        <label htmlFor="nl-input">Natural Language Request</label>
+        <textarea
+          id="nl-input"
+          name="nl_prompt"
+          rows={3}
+          value={nlText}
+          placeholder="e.g. Show optical imagery of Lake Victoria this summer"
+          onChange={(event) => setNlText(event.target.value)}
+        />
+        <button
+          type="submit"
+          disabled={parseState.status === "loading" || nlText.trim() === ""}
+        >
+          {parseState.status === "loading" ? "Parsing…" : "Parse Request"}
+        </button>
+      </form>
+
+      {parseState.status === "error" && (
+        <p className="result-error" role="alert">
+          {parseState.message}
+        </p>
+      )}
+
+      {parseState.status === "done" && (
+        <p className="hint" role="status">
+          Parsed intent: {parseState.result.temporal_mode} ·{" "}
+          {parseState.result.modalities.join(", ")} · {parseState.result.task}.
+          The Query Plan form below is pre-filled — review or edit it, then click
+          Build Query Plan.
+          {parseState.result.temporal_mode === "timeseries" &&
+            " (Time-series windows collapsed to the first window in the manual form.)"}
+        </p>
+      )}
 
       {planState.status === "error" && (
         <p className="result-error" role="alert">
@@ -683,12 +913,6 @@ export function QueryPanel({
       {resolved && (
         <>
           <dl className="result">
-            {resolved.display_name && (
-              <div>
-                <dt>Match</dt>
-                <dd>{resolved.display_name}</dd>
-              </div>
-            )}
             <div>
               <dt>Center</dt>
               <dd>
@@ -765,6 +989,8 @@ export function QueryPanel({
           )}
         </>
       )}
+        </div>
+      </details>
     </section>
   );
 }
@@ -830,7 +1056,7 @@ function ExecutionView({ result }: { result: QueryExecutionResult }) {
         {result.catalog}
       </p>
       {result.skipped_modalities.map((skipped) => (
-        <p key={skipped.modality} className="hint">
+        <p key={skipped.modality} className="hint hint-limitation">
           Skipped {skipped.modality}: {skipped.reason}
         </p>
       ))}
@@ -874,11 +1100,7 @@ function ExecutionWindowView({ win }: { win: ExecutedWindow }) {
           <dd>{win.selected_scene_id ?? "— none —"}</dd>
         </div>
       </dl>
-      {win.imagery_error && (
-        <p className="result-error" role="alert">
-          {win.imagery_error}
-        </p>
-      )}
+            {win.imagery_error && <ImageryErrorNotice raw={win.imagery_error} />}
       {win.imagery && (
         <figure className="scene-image">
           <img
@@ -956,16 +1178,16 @@ function signed(value: number): string {
  * system has not classified water.
  */
 function TemporalChangeView({ change }: { change: NdwiTemporalChange }) {
-  const baseline = change.baseline_acquired_at?.slice(0, 10);
-  const target = change.target_acquired_at?.slice(0, 10);
+  const earlier = change.first_acquired_at?.slice(0, 10);
+  const later = change.second_acquired_at?.slice(0, 10);
   return (
     <div className="analysis-measurement">
-      <p className="measurement-headline">NDWI Change (target − baseline)</p>
+      <p className="measurement-headline">NDWI Change (later − earlier)</p>
       <p className="hint">
-        Baseline: {baseline ?? "date unknown"} · {change.baseline_scene_id}
+        Earlier: {earlier ?? "date unknown"} · {change.first_scene_id}
       </p>
       <p className="hint">
-        Target: {target ?? "date unknown"} · {change.target_scene_id}
+        Later: {later ?? "date unknown"} · {change.second_scene_id}
       </p>
       <p className="measurement-value">
         Mean change: {signed(change.change_mean)}
@@ -1029,7 +1251,7 @@ function AnalysisView({ result }: { result: AnalysisResult }) {
       )}
 
       {result.warnings.map((warning) => (
-        <p key={warning} className="hint">
+        <p key={warning} className="hint hint-limitation">
           Warning: {warning}
         </p>
       ))}
@@ -1113,7 +1335,7 @@ function TemporalComparisonView({
       </p>
 
       {[...warnings, ...compatibility.limitations].map((note) => (
-        <p key={note} className="hint">
+        <p key={note} className="hint hint-limitation">
           Note: {note}
         </p>
       ))}

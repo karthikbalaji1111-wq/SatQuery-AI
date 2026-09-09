@@ -275,7 +275,7 @@ def test_the_service_works_with_the_repository_mocks() -> None:
     service = AgentService(
         planner=MockAgentPlanner(plan=make_plan()),
         executor=RecordingExecutor(),  # type: ignore[arg-type]
-        synthesizer=MockAnswerSynthesizer(),
+        synthesizer=MockAnswerSynthesizer(answer=GROUNDED_ANSWER),
     )
     result = ask(service)
 
@@ -822,8 +822,12 @@ def test_an_unsupported_unit_attached_number_withholds_the_answer(
     assert result.evidence.items
 
 
-def test_a_supported_number_with_a_unit_is_still_answered() -> None:
-    """The fix must not withhold a legitimate answer."""
+@pytest.mark.parametrize("summary,status", [
+    ("500 valid pixels were analysed.", "ok"),
+    ("The shoreline spans 500m.", "answer_withheld"),
+])
+def test_units_are_bound_through_the_service(summary: str, status: str) -> None:
+    """Pixel counts remain usable, but cannot authorize a length."""
 
     evidence = AgentEvidence.model_validate(
         {
@@ -846,11 +850,32 @@ def test_a_supported_number_with_a_unit_is_still_answered() -> None:
             executor=RecordingExecutor(outcome=make_outcome(evidence)),
             synthesizer=RecordingSynthesizer(
                 answer=DraftAnswer(
-                    summary="The shoreline spans 500m.", evidence_refs=["ndwi.count"]
+                    summary=summary, evidence_refs=["ndwi.count"]
                 )
             ),
         )[0]
     )
 
-    assert result.status == "ok"
-    assert result.answer == "The shoreline spans 500m."
+    assert result.status == status
+    assert result.answer == (summary if status == "ok" else None)
+    assert result.evidence == evidence
+
+
+@pytest.mark.parametrize("summary,refs", [
+    ("Mean NDWI is .987.", ["ndwi.ndwi_mean"]),
+    ("NDVI is .28.", ["ndwi.ndwi_mean"]),
+    ("Mean NDWI is .28.", []),
+    ("Water is visible.", ["ndwi.ndwi_mean"]),
+    ("NDWI is .28. The area is flooded.", ["ndwi.ndwi_mean"]),
+])
+def test_unsupported_claims_withhold_prose_and_preserve_evidence(summary, refs) -> None:
+    outcome = make_outcome()
+    result = ask(build(
+        executor=RecordingExecutor(outcome=outcome),
+        synthesizer=RecordingSynthesizer(answer=DraftAnswer(
+            summary=summary, evidence_refs=refs)),
+    )[0])
+    assert result.status == "answer_withheld"
+    assert result.answer is None
+    assert result.evidence == outcome.evidence
+    assert result.trace.steps == outcome.steps

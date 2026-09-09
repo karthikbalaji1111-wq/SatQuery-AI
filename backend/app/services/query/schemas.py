@@ -77,12 +77,27 @@ class NdwiThreshold(BaseModel):
     value: float = Field(ge=-1.0, le=1.0)
 
 
+#: Upper bound on the number of temporal windows one query may span.
+#:
+#: This is a RESOURCE bound, not a scientific one. Execution runs one catalog
+#: search per (modality x window) sequentially, and with imagery each of those
+#: additionally performs a windowed COG read and a PNG encode whose base64 is
+#: held in the response. The endpoint is unauthenticated, so an unbounded list
+#: turns one request into an unbounded number of outbound requests against a
+#: third-party catalog, and into unbounded memory here. Twenty-four windows
+#: covers two years of monthly observations - well beyond anything the agent
+#: plans - while keeping the worst case finite.
+MAX_TIME_WINDOWS = 24
+
+
 class SatQueryIntent(BaseModel):
     """What the user asks for, before any location grounding."""
 
     location_query: str = Field(min_length=1, max_length=300)
     temporal_mode: TemporalMode
-    time_windows: TemporalComparison | list[TimeRange]
+    time_windows: TemporalComparison | list[TimeRange] = Field(
+        union_mode="left_to_right",
+    )
     modalities: list[Modality] = Field(min_length=1)
     task: QueryTask
     #: An explicit NDWI threshold, when the request stated one ("NDWI above
@@ -120,6 +135,11 @@ class SatQueryIntent(BaseModel):
         if self.temporal_mode == "timeseries" and (is_comparison or count < 2):
             raise ValueError(
                 "temporal_mode 'timeseries' requires at least two time ranges"
+            )
+        if count > MAX_TIME_WINDOWS:
+            raise ValueError(
+                f"a query may span at most {MAX_TIME_WINDOWS} time windows; "
+                f"{count} were requested"
             )
         return self
 

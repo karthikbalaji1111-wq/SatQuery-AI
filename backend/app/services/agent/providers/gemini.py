@@ -38,6 +38,10 @@ validation authority**, applied to the response immediately below.
 
 from __future__ import annotations
 
+import asyncio
+import re
+from typing import Any
+
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
@@ -48,12 +52,209 @@ from app.core.errors import IntentParsingError, UpstreamServiceError
 from app.core.logging import get_logger
 from app.services.agent.grounding import DraftAnswer
 from app.services.agent.planner import AgentPlanner
+from app.services.agent.prompts import (
+    _SYNTHESIS_INSTRUCTION,
+    _VISUAL_INSTRUCTION,
+    _render_evidence,
+    _system_instruction,
+)
 from app.services.agent.registry import TOOL_REGISTRY, ToolOperation
 from app.services.agent.schemas import AgentEvidence, AgentPlan
 from app.services.agent.synthesizer import AnswerSynthesizer
+from app.services.agent.visual import VisualAnalyst, VisualAnswer
+from app.services.analysis.indices import SPECTRAL_INDICES
 from app.services.query.schemas import SatQueryIntent
 
-logger = get_logger("agent.planner.gemini")
+logger = get_logger("agent.gemini")
+
+
+# --------------------------------------------------------------------------- #
+# Transient-failure handling
+#
+# Measured against the live endpoint (2026-09): the free tier allows 5 requests
+# per minute per model per project, and one agent run costs two or three calls
+# (plan, answer, and optionally a visual observation). Two runs inside a minute
+# therefore exhaust the quota, and the endpoint also returns 503/504 under load
+# - a trivial two-word prompt was observed taking 27 s and then failing.
+#
+# So a failure here is usually TEMPORARY, and the two temporary kinds need
+# different handling:
+#
+#   * 500/502/503/504 - overload. A second attempt moments later often works,
+#     so a short bounded retry is worth its latency.
+#   * 429 - quota. The server states exactly how long to wait, and it is
+#     typically tens of seconds. Sleeping that long inside a request would turn
+#     a fast honest failure into a hung one, so the delay is REPORTED rather
+#     than waited out.
+#
+# Nothing here fabricates a success, and nothing retries indefinitely: when the
+# budget is spent the real failure is raised, classified so the caller can say
+# which of the two it was.
+# --------------------------------------------------------------------------- #
+
+#: HTTP statuses worth attempting again. A 4xx other than 429 is the request's
+#: own fault and repeating it would only waste quota.
+_RETRYABLE_STATUS: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+
+#: Total attempts, retries included. Three is the point where a second
+#: independent overload becomes unlikely without materially extending latency.
+_MAX_ATTEMPTS = 3
+
+#: The most this provider will ever spend sleeping between attempts, across the
+#: whole call. A request that cannot be served inside this budget is reported,
+#: not waited on - the caller has its own deadline and a user is watching.
+_MAX_RETRY_WAIT_SECONDS = 8.0
+
+#: Backoff used when the server names no delay of its own.
+_BACKOFF_SECONDS = (0.5, 1.5)
+
+#: ``retryDelay`` as google.rpc.RetryInfo writes it, e.g. ``"36.36s"``.
+_RETRY_DELAY = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)s\s*$")
+
+
+def _retry_delay_seconds(exc: genai_errors.APIError) -> float | None:
+    """The delay the SERVER asked for, or ``None`` if it named none.
+
+    Only the number is taken. The upstream error body is never surfaced or
+    logged as text: it is third-party content echoing an unknown amount of the
+    request, and this repository's rule is that provider payloads do not reach
+    responses or logs. A duration is safe; the prose around it is not.
+    """
+
+    details: Any = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return None
+    error = details.get("error")
+    entries = error.get("details") if isinstance(error, dict) else None
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if not str(entry.get("@type", "")).endswith("RetryInfo"):
+            continue
+        match = _RETRY_DELAY.match(str(entry.get("retryDelay", "")))
+        if match is not None:
+            return float(match.group(1))
+    return None
+
+
+def _upstream_failure(exc: genai_errors.APIError) -> UpstreamServiceError:
+    """Translate a provider error into one this system is willing to show.
+
+    A rate limit is reported under its own ``rate_limited`` code rather than
+    the generic ``upstream_error``, because the two call for different actions:
+    a quota exhaustion clears on its own in a stated number of seconds, while
+    an outage does not. Collapsing them told every caller the same unhelpful
+    thing.
+
+    The message is written HERE, from the status code alone. No upstream text
+    is ever passed through.
+    """
+
+    code = getattr(exc, "code", None)
+    if code == 429:
+        delay = _retry_delay_seconds(exc)
+        wait = (
+            f" Please retry in about {delay:.0f} seconds."
+            if delay is not None
+            else " Please retry shortly."
+        )
+        error = UpstreamServiceError(
+            "The language-model service is rate limited (its request quota is "
+            "temporarily exhausted)." + wait,
+            code="rate_limited",
+        )
+        # An optional hint, read reflectively by the agent service so that no
+        # provider is REQUIRED to supply one. Absent means "unknown", never
+        # "zero".
+        error.retry_after_seconds = delay  # type: ignore[attr-defined]
+        return error
+    return UpstreamServiceError("The language-model service is unavailable.")
+
+
+async def _generate(
+    client: Any,
+    *,
+    model: str,
+    contents: Any,
+    config: types.GenerateContentConfig,
+    role: str,
+) -> Any:
+    """Issue one generation request, retrying only what is worth retrying.
+
+    Shared by all three roles so the retry policy, the failure classification
+    and the logging exist once. Three copies of this block drifted apart
+    before: a synthesis failure was logged under the planner's logger name,
+    which made a live incident read as the wrong stage failing.
+
+    ``role`` names the stage for the log only; it never reaches the request.
+    """
+
+    budget = _MAX_RETRY_WAIT_SECONDS
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            return await client.aio.models.generate_content(
+                model=model, contents=contents, config=config
+            )
+        except genai_errors.APIError as exc:
+            code = getattr(exc, "code", None)
+            # Status code only - the message may echo request data, and the key
+            # must never reach a log.
+            logger.warning(
+                "Gemini API error (role=%s, status=%s, attempt=%d/%d)",
+                role,
+                code,
+                attempt,
+                _MAX_ATTEMPTS,
+            )
+            if attempt == _MAX_ATTEMPTS or code not in _RETRYABLE_STATUS:
+                raise _upstream_failure(exc) from exc
+            delay = _retry_delay_seconds(exc)
+            if delay is None:
+                delay = _BACKOFF_SECONDS[min(attempt - 1, len(_BACKOFF_SECONDS) - 1)]
+            if delay > budget:
+                # The server wants longer than this request can honestly wait.
+                # Report the real failure now, with the delay it named, rather
+                # than holding the connection open or pretending to succeed.
+                raise _upstream_failure(exc) from exc
+            budget -= delay
+            await asyncio.sleep(delay)
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            logger.warning(
+                "Gemini transport error (role=%s, kind=%s, attempt=%d/%d)",
+                role,
+                type(exc).__name__,
+                attempt,
+                _MAX_ATTEMPTS,
+            )
+            if attempt == _MAX_ATTEMPTS:
+                raise UpstreamServiceError(
+                    "The language-model service timed out."
+                ) from exc
+            delay = _BACKOFF_SECONDS[min(attempt - 1, len(_BACKOFF_SECONDS) - 1)]
+            if delay > budget:
+                raise UpstreamServiceError(
+                    "The language-model service timed out."
+                ) from exc
+            budget -= delay
+            await asyncio.sleep(delay)
+        except Exception as exc:  # unknown SDK/transport failure - never leak details
+            # Deliberately NOT retried. An unrecognised failure is as likely to
+            # be a bug here as a blip there, and repeating it would multiply a
+            # side effect nobody has characterised.
+            logger.warning(
+                "Unexpected Gemini failure (role=%s, kind=%s)",
+                role,
+                type(exc).__name__,
+            )
+            raise UpstreamServiceError("The language-model service failed.") from exc
+
+    # Unreachable: the loop either returns or raises on its final attempt.
+    raise UpstreamServiceError(  # pragma: no cover
+        "The language-model service is unavailable."
+    )
 
 
 def _tool_names(operation: ToolOperation) -> list[str]:
@@ -90,13 +291,24 @@ def _intent_schema() -> types.Schema:
     )
 
 
+#: Derived from the contracts so the generation hint cannot drift from what
+#: the executor will accept.
+_INDEX_TOOL = "spectral_indices"
+_INDEX_KEYS = tuple(sorted(SPECTRAL_INDICES))
+
+
 def _plan_response_schema() -> types.Schema:
     """An SDK-compatible schema for the plan - generation hint only.
 
-    Expresses the tool union with ``any_of`` over two concrete branches instead
-    of Pydantic's ``discriminator``/``oneOf``, which this SDK rejects. Giving
-    the analysis branch no ``intent`` property is deliberate: the model is not
-    even offered a field that ``extra="forbid"`` would later reject.
+    Expresses the tool union with ``any_of`` over three concrete branches
+    instead of Pydantic's ``discriminator``/``oneOf``, which this SDK rejects.
+    Giving the analysis branch no ``intent`` property is deliberate: the model
+    is not even offered a field that ``extra="forbid"`` would later reject.
+
+    The visual branch offers ``question`` and nothing else - no scene, no asset,
+    no URL. The model is never shown a way to choose which image it looks at,
+    because it does not get to: the executor selects the image from the
+    validated execution result.
     """
 
     minimum, maximum = _step_bounds()
@@ -113,14 +325,48 @@ def _plan_response_schema() -> types.Schema:
         },
         required=["tool", "intent"],
     )
+    # The parameterless analysis tools. Offering no property but the name is
+    # deliberate: the model is not shown a field the contract would reject.
     analysis_branch = types.Schema(
         type=types.Type.OBJECT,
         properties={
             "tool": types.Schema(
-                type=types.Type.STRING, enum=_tool_names("analysis")
+                type=types.Type.STRING,
+                enum=[
+                    name
+                    for name in _tool_names("analysis")
+                    if name != _INDEX_TOOL
+                ],
             )
         },
         required=["tool"],
+    )
+    # The one analysis tool that takes a parameter. WHICH index answers a
+    # question is a planning decision; how each index is computed is not, so
+    # the branch offers the index names and nothing else - no band, no
+    # threshold, no scene.
+    index_branch = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "tool": types.Schema(type=types.Type.STRING, enum=[_INDEX_TOOL]),
+            "indices": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(
+                    type=types.Type.STRING, enum=list(_INDEX_KEYS)
+                ),
+                min_items=1,
+                max_items=len(_INDEX_KEYS),
+            ),
+        },
+        required=["tool", "indices"],
+    )
+    visual_branch = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "tool": types.Schema(type=types.Type.STRING, enum=_tool_names("visual")),
+            "question": types.Schema(type=types.Type.STRING),
+        },
+        required=["tool", "question"],
     )
 
     return types.Schema(
@@ -128,87 +374,20 @@ def _plan_response_schema() -> types.Schema:
         properties={
             "steps": types.Schema(
                 type=types.Type.ARRAY,
-                items=types.Schema(any_of=[execute_branch, analysis_branch]),
+                items=types.Schema(
+                    any_of=[
+                        execute_branch,
+                        index_branch,
+                        analysis_branch,
+                        visual_branch,
+                    ]
+                ),
                 min_items=minimum,
                 max_items=maximum,
             )
         },
         required=["steps"],
     )
-
-
-def _tool_catalogue() -> str:
-    """Describe the permitted tools, straight from the allowlist.
-
-    Generated from :data:`TOOL_REGISTRY` rather than written out by hand, so the
-    model can never be told about a capability the executor would refuse - or
-    left ignorant of one it would accept.
-    """
-
-    return "\n".join(
-        f"- {spec.name}: {spec.description}" for spec in TOOL_REGISTRY.values()
-    )
-
-
-def _system_instruction() -> str:
-    """The planning instruction. Deliberately asks for a plan and nothing else.
-
-    It requests no explanation, no justification and no account of how the plan
-    was arrived at, because none of that has anywhere to go: ``AgentPlan`` has
-    no field for it, and the trace shown to a user records decisions and
-    outcomes only.
-
-    It also describes only what a planner needs - the tools and the shape of a
-    plan - not the repository's architecture.
-    """
-
-    return f"""\
-You select which remote-sensing analyses to run for a user's question, and
-return ONLY a JSON object matching the provided response schema. No prose, no
-explanation, no commentary.
-
-AVAILABLE TOOLS
-
-{_tool_catalogue()}
-
-PLAN RULES
-
-- A plan has 1 to 3 steps.
-- The first step MUST be "execute_query"; it appears exactly once. The analysis
-  tools interpret its result, so nothing can run before it.
-- Do not repeat a tool.
-- Choose an analysis tool only when the question calls for it. A request merely
-  to find or view imagery needs "execute_query" alone.
-- "temporal_ndwi_statistics" compares two Sentinel-2 acquisitions, so use it
-  only with a "compare" temporal mode carrying a baseline and a target window.
-- "ndwi_statistics" is optical-only; it needs "sentinel-2-optical" among the
-  modalities.
-
-EXECUTE_QUERY PARAMETERS
-
-- intent.location_query: the place named by the user, verbatim. NEVER invent or
-  output coordinates.
-- intent.temporal_mode: "single" (one window), "compare" (a baseline and a
-  target window), or "timeseries" (three or more windows).
-- intent.time_windows: for "single" a list of exactly one
-  {{"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}; for "timeseries" a
-  list of two or more; for "compare" an object with "baseline" and "target".
-  Resolve unambiguous relative expressions into explicit ISO ranges.
-- intent.modalities: a non-empty list from "sentinel-2-optical" and
-  "sentinel-1-sar", with no duplicates. Default to ["sentinel-2-optical"] when
-  the user names no sensor.
-- intent.task: "visualize", "change_detection" or "object_identification".
-- include_imagery: true only when the user asks to see the imagery.
-- max_cloud_cover: 0-100, only when the user asks for cloud-free imagery.
-
-RULES
-
-- Use only the tools listed above. Never invent a tool name.
-- Emit only the fields described here; extra fields are rejected.
-- Extract only what the user's question supports. Never invent a location, a
-  date range, a scene, or a measurement.
-- You are planning only. You do not run the tools and you never report results.
-"""
 
 
 class GeminiAgentPlanner(AgentPlanner):
@@ -259,29 +438,13 @@ class GeminiAgentPlanner(AgentPlanner):
 
         client = self._get_client()
 
-        try:
-            response = await client.aio.models.generate_content(
-                model=self._settings.gemini_model,
-                contents=question,
-                config=self._build_config(),
-            )
-        except genai_errors.APIError as exc:
-            # Status code only - the message may echo request data, and the key
-            # must never reach a log.
-            logger.warning("Gemini API error (status=%s)", getattr(exc, "code", "?"))
-            raise UpstreamServiceError(
-                "The language-model service is unavailable."
-            ) from exc
-        except (TimeoutError, ConnectionError, OSError) as exc:
-            logger.warning("Gemini transport error: %s", type(exc).__name__)
-            raise UpstreamServiceError(
-                "The language-model service timed out."
-            ) from exc
-        except Exception as exc:  # unknown SDK/transport failure - never leak details
-            logger.warning("Unexpected Gemini failure: %s", type(exc).__name__)
-            raise UpstreamServiceError(
-                "The language-model service failed."
-            ) from exc
+        response = await _generate(
+            client,
+            model=self._settings.gemini_model,
+            contents=question,
+            config=self._build_config(),
+            role="planning",
+        )
 
         raw = getattr(response, "text", None)
         # ``.text`` is documented as ``str | None``, but a malformed or proxied
@@ -326,28 +489,6 @@ class GeminiAgentPlanner(AgentPlanner):
 # A test asserts that anyway.
 # =========================================================================== #
 
-_SYNTHESIS_INSTRUCTION = """\
-You write one short, factual answer to the user's question using ONLY the
-evidence supplied below, and return it as JSON matching the response schema.
-No prose outside the schema, no commentary.
-
-RULES
-
-- Use only the supplied evidence. Never introduce an observation, a place, a
-  date, a scene or a measurement that does not appear in it.
-- State no number that is not present in the evidence. Quote a value as given,
-  or round it; never estimate, extrapolate or infer one.
-- Cite the evidence you used in "evidence_refs", using the exact ids shown.
-  Cite nothing by returning an empty list - never omit the field.
-- When the evidence carries limitations or warnings, say so plainly rather than
-  presenting a result as more certain than it is.
-- Describe what was measured. Do not claim detection, classification,
-  co-registration, alignment, or comparison between individual pixels.
-- If the evidence does not answer the question, say that instead of guessing.
-- Return only "summary" and "evidence_refs". No other field is accepted.
-"""
-
-
 def _answer_response_schema() -> types.Schema:
     """SDK-compatible schema for a :class:`DraftAnswer`.
 
@@ -359,32 +500,6 @@ def _answer_response_schema() -> types.Schema:
     return types.Schema.from_json_schema(
         json_schema=types.JSONSchema(**DraftAnswer.model_json_schema())
     )
-
-
-def _render_evidence(evidence: AgentEvidence) -> str:
-    """Present the evidence as citable lines: ``id | source | content``.
-
-    Only the flattened, citable ``items`` are shown - each with the id the
-    answer must cite. The full execution and analysis results are deliberately
-    not dumped in: everything a sentence may legitimately quote is already an
-    item, and a smaller prompt is a smaller surface for the model to wander off
-    into.
-    """
-
-    if not evidence.items:
-        return "(no evidence was collected)"
-
-    lines = []
-    for item in evidence.items:
-        if item.measurement is not None:
-            content = (
-                f"{item.measurement.name} = {item.measurement.value} "
-                f"{item.measurement.unit}"
-            )
-        else:
-            content = item.text or ""
-        lines.append(f"- {item.id} | {item.source} | {content}")
-    return "\n".join(lines)
 
 
 class GeminiAnswerSynthesizer(AnswerSynthesizer):
@@ -441,27 +556,13 @@ class GeminiAnswerSynthesizer(AnswerSynthesizer):
             f"EVIDENCE (cite by id)\n{_render_evidence(evidence)}\n"
         )
 
-        try:
-            response = await client.aio.models.generate_content(
-                model=self._settings.gemini_model,
-                contents=prompt,
-                config=self._build_config(),
-            )
-        except genai_errors.APIError as exc:
-            logger.warning("Gemini API error (status=%s)", getattr(exc, "code", "?"))
-            raise UpstreamServiceError(
-                "The language-model service is unavailable."
-            ) from exc
-        except (TimeoutError, ConnectionError, OSError) as exc:
-            logger.warning("Gemini transport error: %s", type(exc).__name__)
-            raise UpstreamServiceError(
-                "The language-model service timed out."
-            ) from exc
-        except Exception as exc:  # unknown SDK/transport failure - never leak details
-            logger.warning("Unexpected Gemini failure: %s", type(exc).__name__)
-            raise UpstreamServiceError(
-                "The language-model service failed."
-            ) from exc
+        response = await _generate(
+            client,
+            model=self._settings.gemini_model,
+            contents=prompt,
+            config=self._build_config(),
+            role="synthesis",
+        )
 
         raw = getattr(response, "text", None)
         if not isinstance(raw, str) or not raw.strip():
@@ -486,5 +587,128 @@ class GeminiAnswerSynthesizer(AnswerSynthesizer):
             "Gemini synthesised an answer (model=%s, %d citation(s))",
             self._settings.gemini_model,
             len(answer.evidence_refs),
+        )
+        return answer
+
+
+# --------------------------------------------------------------------------- #
+# Phase 18.1 - visual analyst
+# --------------------------------------------------------------------------- #
+
+#: What the model is asked to do with the picture, and what it must not do.
+#:
+#: The prompt is not the control - nothing downstream trusts it. The real
+#: guarantees are structural: the answer is parsed through ``VisualAnswer``, it
+#: becomes ``source="model"`` evidence, and ``grounding._allowed_values``
+#: refuses to let that evidence authorise any number. The instruction exists to
+#: make the honest answer the easy one, not to enforce anything.
+def _visual_response_schema() -> types.Schema:
+    """SDK-compatible schema for a :class:`VisualAnswer`.
+
+    Converted from the contract with the SDK's public ``Schema.from_json_schema``
+    - the same conversion the answer path uses - so the model is offered exactly
+    the shape the parser accepts, and no field that could masquerade as a
+    measurement.
+    """
+
+    return types.Schema.from_json_schema(
+        json_schema=types.JSONSchema(**VisualAnswer.model_json_schema())
+    )
+
+
+class GeminiVisualAnalyst(VisualAnalyst):
+    """Real :class:`VisualAnalyst` backed by Gemini's multimodal input.
+
+    Sends exactly two parts: the PNG bytes the query pipeline already retrieved,
+    and the question. It sends **no** georeferencing and **no** measurements -
+    no CRS, no affine, no corners, no scene id, no NDWI statistics, no bbox. A
+    model told "the mean NDWI is 0.146" would answer from that number rather
+    than from the picture, and the point of this tool is an observation that is
+    independent of the deterministic evidence, so the two can be read against
+    each other.
+
+    It cannot fetch anything. The bytes arrive as an argument; there is no URL,
+    path or catalog handle in this class.
+    """
+
+    provider_name = "gemini"
+
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        client: object | None = None,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self._client = client
+
+    @property
+    def model_name(self) -> str:
+        """The configured model, so a claim is attributable to a version."""
+
+        return self._settings.gemini_model
+
+    def _get_client(self) -> object:
+        if self._client is not None:
+            return self._client
+        if not self._settings.gemini_api_key:
+            raise UpstreamServiceError(
+                "GEMINI_API_KEY is not configured; visual analysis is unavailable."
+            )
+        self._client = genai.Client(
+            api_key=self._settings.gemini_api_key,
+            http_options=types.HttpOptions(
+                timeout=int(self._settings.gemini_timeout_seconds * 1000)
+            ),
+        )
+        return self._client
+
+    def _build_config(self) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            system_instruction=_VISUAL_INSTRUCTION,
+            response_mime_type="application/json",
+            response_schema=_visual_response_schema(),
+            temperature=0.0,
+            candidate_count=1,
+        )
+
+    async def observe(
+        self, *, question: str, image: bytes, media_type: str
+    ) -> VisualAnswer:
+        """Send the image and the question; parse what comes back."""
+
+        client = self._get_client()
+        # Exactly one image part, from the bytes handed in. Never re-encoded,
+        # never re-fetched, and never logged.
+        parts = [
+            types.Part.from_bytes(data=image, mime_type=media_type),
+            types.Part.from_text(text=f"QUESTION\n{question}"),
+        ]
+
+        response = await _generate(
+            client,
+            model=self._settings.gemini_model,
+            contents=[types.Content(role="user", parts=parts)],
+            config=self._build_config(),
+            role="visual",
+        )
+
+        raw = getattr(response, "text", None)
+        if not isinstance(raw, str) or not raw.strip():
+            raise IntentParsingError(
+                "The language model returned an empty or unusable observation."
+            )
+        try:
+            answer = VisualAnswer.model_validate_json(raw)
+        except ValidationError as exc:
+            raise IntentParsingError(
+                "The language model returned an observation that did not match "
+                "the expected shape."
+            ) from exc
+
+        logger.info(
+            "Gemini visual observation (model=%s, %d image byte(s) sent)",
+            self._settings.gemini_model,
+            len(image),
         )
         return answer

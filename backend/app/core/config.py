@@ -7,6 +7,9 @@ from functools import lru_cache
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+#: The vision-language providers this build knows how to construct.
+SUPPORTED_AI_PROVIDERS: frozenset[str] = frozenset({"gemini", "nvidia"})
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables / ``.env``.
@@ -41,8 +44,9 @@ class Settings(BaseSettings):
     # Satellite scene discovery via the Earth Search STAC API.
     stac_base_url: str = "https://earth-search.aws.element84.com/v1"
     stac_collection: str = "sentinel-2-l2a"
-    # Sentinel-1 GRD discovery uses the same catalog, a different collection.
-    stac_s1_collection: str = "sentinel-1-grd"
+    # Sentinel-1 RTC uses the fixed public Planetary Computer catalog.
+    # Explicit sentinel-1-grd configuration retains Earth Search discovery.
+    stac_s1_collection: str = "sentinel-1-rtc"
 
     # Bounded Sentinel-2 imagery retrieval (windowed COG reads).
     imagery_max_dimension: int = 1024
@@ -62,6 +66,52 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GEMINI_MODEL"),
     )
     gemini_timeout_seconds: float = 30.0
+
+    # Which vision-language provider backs the agent's visual-analysis path.
+    # Both providers run through the SAME agent orchestration, grounding and
+    # evidence path - only the inference backend differs. There is deliberately
+    # no fallback between them: silently answering with a provider the operator
+    # did not select would make a demo or an experiment unattributable.
+    ai_provider: str = Field(
+        default="gemini",
+        validation_alias=AliasChoices("AI_PROVIDER"),
+    )
+
+    # NVIDIA's hosted NIM endpoints, which speak the OpenAI chat-completions
+    # dialect. The model must accept image input - a text-only model cannot
+    # serve the visual-analysis path. Never commit a real key.
+    nvidia_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("NVIDIA_API_KEY"),
+    )
+    nvidia_base_url: str = Field(
+        default="https://integrate.api.nvidia.com/v1",
+        validation_alias=AliasChoices("NVIDIA_BASE_URL"),
+    )
+    nvidia_model: str = Field(
+        default="nvidia/nemotron-nano-12b-v2-vl",
+        validation_alias=AliasChoices("NVIDIA_MODEL"),
+    )
+    nvidia_timeout_seconds: float = 60.0
+
+    @field_validator("ai_provider", mode="before")
+    @classmethod
+    def _known_provider(cls, value: object) -> object:
+        """Reject an unknown provider at configuration time, not at run time.
+
+        A typo here would otherwise surface as a missing-key error much later,
+        pointing at the wrong cause.
+        """
+
+        if isinstance(value, str):
+            normalised = value.strip().lower()
+            if normalised not in SUPPORTED_AI_PROVIDERS:
+                supported = ", ".join(sorted(SUPPORTED_AI_PROVIDERS))
+                raise ValueError(
+                    f"AI_PROVIDER must be one of: {supported}. Got {value!r}."
+                )
+            return normalised
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod

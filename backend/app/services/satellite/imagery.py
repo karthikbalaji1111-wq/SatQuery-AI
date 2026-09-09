@@ -32,6 +32,7 @@ from app.services.satellite.raster import (
     read_band_window,
     read_rgb_window,
 )
+from app.services.satellite.rtc import RTC_COLLECTION, catalog_for, sign_rtc_asset
 from app.services.satellite.schemas import (
     ANALYSIS_BAND_ASSETS,
     SUPPORTED_IMAGERY_ASSETS,
@@ -121,6 +122,49 @@ def _image_corners(window: RgbWindow) -> list[list[float]] | None:
         return None
 
 
+#: Schemes this service will open. The raster layer is configured for
+#: anonymous HTTPS range reads and holds no credentials, so anything else -
+#: most importantly ``s3://`` - cannot be read and must be refused here rather
+#: than handed to GDAL, which fails with an opaque credentials error.
+#:
+#: This is also the URL boundary: an href arrives from an EXTERNAL catalog, so
+#: restricting the scheme keeps a catalog entry from steering the server at a
+#: protocol it was never meant to speak.
+_READABLE_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+
+
+def _require_readable_scheme(asset_key: str, href: str) -> None:
+    """Refuse an asset this deployment provably cannot read.
+
+    Earth Search publishes Sentinel-1 GRD measurement assets as ``s3://``
+    URIs on a requester-pays bucket. Without this check the href reaches
+    rasterio, which reports a credentials failure - a message that describes
+    the symptom and hides the cause.
+    """
+
+    # A control character has no place in a URL and is how one string becomes
+    # two: a NUL truncates the path for any C consumer (GDAL and curl are C),
+    # and CR/LF are the separators of an HTTP request, so either can make the
+    # request sent differ from the URL that was checked. Refuse before the
+    # scheme test, so nothing downstream ever sees a href this layer only
+    # partly validated.
+    if any(character in href for character in "\x00\r\n\t"):
+        raise InvalidInputError(
+            f"Asset {asset_key!r} has a href containing a control character, "
+            "which cannot be part of a valid URL."
+        )
+
+    scheme = href.split("://", 1)[0].lower() if "://" in href else ""
+    if scheme not in _READABLE_SCHEMES:
+        raise InvalidInputError(
+            f"Asset {asset_key!r} is published as {scheme or 'an unknown'}:// "
+            "which this deployment cannot read; only anonymous HTTPS assets "
+            "are supported. Sentinel-1 GRD measurement assets are currently "
+            "published this way, so bounded Sentinel-1 retrieval is not "
+            "available - see the Sentinel-1 note in the README."
+        )
+
+
 class ImageryService(DomainService):
     """Windowed RGB reads for an already-selected Sentinel-2 scene."""
 
@@ -148,7 +192,7 @@ class ImageryService(DomainService):
 
     def _default_fetch_item(self, scene_id: str, collection: str) -> dict[str, Any]:
         url = (
-            f"{self._settings.stac_base_url}/collections/"
+            f"{catalog_for(collection, self._settings)}/collections/"
             f"{collection}/items/{scene_id}"
         )
         try:
@@ -199,6 +243,7 @@ class ImageryService(DomainService):
                 f"Asset {asset_key!r} ({media_type or 'unknown type'}) is not a "
                 "windowed-readable GeoTIFF; bounded retrieval is not supported."
             )
+        _require_readable_scheme(asset_key, href)
         return href
 
     def retrieve(self, request: ImageryRequest) -> ImageryResponse:
@@ -217,6 +262,8 @@ class ImageryService(DomainService):
         collection = _validate_stac_identifier(
             request.collection or self._settings.stac_collection, "collection"
         )
+        if request.asset == "vh" and collection != RTC_COLLECTION:
+            raise InvalidInputError("VH display is supported only for Sentinel-1 RTC assets.")
         scene_id = _validate_stac_identifier(request.scene_id, "scene_id")
         item = self._fetch_item(scene_id, collection)
         scene_bbox = item.get("bbox")
@@ -232,8 +279,12 @@ class ImageryService(DomainService):
             self._settings.imagery_hard_max_dimension,
         )
 
+        read_href = (
+            sign_rtc_asset(href, settings=self._settings, transport=self._transport)
+            if collection == RTC_COLLECTION else href
+        )
         window = self._read_window(
-            href,
+            read_href,
             request.bbox,
             max_dimension=max_dimension,
             max_window_pixels=self._settings.imagery_max_window_pixels,
@@ -257,10 +308,15 @@ class ImageryService(DomainService):
             height=window.height,
             format="png",
             media_type="image/png",
-            bands=window.bands,
+            bands=[request.asset] * 3 if request.asset in {"vv", "vh"} else window.bands,
             crs=window.crs,
             resolution=window.resolution,
-            normalization=window.normalization,
+            normalization=(
+                "Provider RTC gamma naught; "
+                + window.normalization.replace("display only, not calibrated", "display only")
+                + "; no local calibration, dB conversion, or speckle filtering"
+                if collection == RTC_COLLECTION else window.normalization
+            ),
             window=WindowInfo(**window.window),
             source_shape=window.source_shape,
             # Passed through, never recomputed: this is the affine of the

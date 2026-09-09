@@ -1,4 +1,4 @@
-"""Map layer and tile preparation for the interactive frontend."""
+"""Reserved home for server-side map preparation. NOT IMPLEMENTED."""
 
 from __future__ import annotations
 
@@ -6,15 +6,24 @@ from app.services.base import DomainService
 
 
 class MapService(DomainService):
-    """Map layer and tile preparation for the interactive frontend.
+    """Reserved package for server-side map preparation. **Nothing is
+    implemented.**
 
-    Foundation stub - see :class:`DomainService`. No logic implemented yet.
+    No tiles are generated or served. The frontend renders an external raster
+    basemap directly and positions imagery from the four WGS 84 corners the
+    imagery response already carries, so no server-side map layer is needed
+    today.
+
+    Kept as an explicit extension point should tile serving ever be required.
     """
 
     name = "map"
 
     def describe(self) -> str:
-        return "Map layer and tile preparation for the interactive frontend."
+        return (
+            "Reserved for server-side map preparation. Not implemented: "
+            "no tiles are generated or served."
+        )
 
 
 __all__ = ["MapService"]

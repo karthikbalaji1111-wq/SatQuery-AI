@@ -30,16 +30,23 @@ from app.services.agent.registry import (
 )
 from app.services.agent.schemas import ToolName
 
-APPROVED = {"execute_query", "ndwi_statistics", "temporal_ndwi_statistics"}
+APPROVED = {
+    "spectral_indices",
+    "execute_query",
+    "ndwi_statistics",
+    "temporal_ndwi_statistics",
+    # Phase 18.1: registered deliberately. It was reserved through Phase 15-17
+    # and appeared in DELIBERATELY_UNREGISTERED until the capability existed.
+    "rs_model_analysis",
+}
 
 #: Capabilities that exist in the system but are deliberately NOT model-callable.
-#: ``retrieve_imagery`` is a parameter on execute_query (the model never sees
+#: ``retrieve_imagery`` is a parameter on execute_query (the model never chooses
 #: the image); ``compatibility_report`` is an automatic byproduct of the
-#: temporal tool; ``rs_model_analysis`` is a reserved future capability.
+#: temporal tool.
 DELIBERATELY_UNREGISTERED = {
     "retrieve_imagery",
     "compatibility_report",
-    "rs_model_analysis",
 }
 
 
@@ -48,7 +55,7 @@ DELIBERATELY_UNREGISTERED = {
 # =========================================================================== #
 
 
-def test_registry_exposes_exactly_the_three_approved_tools() -> None:
+def test_registry_exposes_exactly_the_approved_tools() -> None:
     assert set(TOOL_REGISTRY) == APPROVED
     assert frozenset(APPROVED) == REGISTERED_TOOLS
 
@@ -65,7 +72,7 @@ def test_each_approved_tool_resolves_to_a_known_operation(name: str) -> None:
 
     assert isinstance(spec, ToolSpec)
     assert spec.name == name
-    assert spec.operation in {"discovery", "analysis"}
+    assert spec.operation in {"discovery", "analysis", "visual"}
     assert spec.description
 
 

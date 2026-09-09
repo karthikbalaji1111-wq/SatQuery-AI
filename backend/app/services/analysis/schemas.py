@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.query.compatibility import CompatibilityReport
 from app.services.query.schemas import (
@@ -194,8 +194,16 @@ class NdwiTemporalChange(BaseModel):
     identical - same size, same CRS, same affine - so every difference in it is
     between two measurements of the same ground.
 
-    ``change = target_NDWI - baseline_NDWI``. Positive means the index rose,
-    negative that it fell. It is an INDEX change, not water gained or lost:
+    ``change = second_NDWI - first_NDWI``, where *first* is the EARLIER
+    acquisition and *second* the later one. Positive therefore means the index
+    rose over time, negative that it fell.
+
+    The sides are named by acquisition order, never by the requested roles:
+    ``TemporalComparison`` does not require the baseline window to precede the
+    target, so an inverted request would otherwise label the earlier scene
+    "target". The requested roles stay readable in ``window_label``.
+
+    It is an INDEX change, not water gained or lost:
     nothing here classifies water, and the statistics are computed only over
     pixels valid in BOTH observations.
 
@@ -207,10 +215,10 @@ class NdwiTemporalChange(BaseModel):
     ``.second`` and are not copied here.
     """
 
-    baseline_scene_id: str
-    target_scene_id: str
-    baseline_acquired_at: datetime | None = None
-    target_acquired_at: datetime | None = None
+    first_scene_id: str
+    second_scene_id: str
+    first_acquired_at: datetime | None = None
+    second_acquired_at: datetime | None = None
     window_label: str
 
     #: Pixels valid in BOTH observations - the denominator for every statistic
@@ -283,6 +291,29 @@ class AnalysisRequest(BaseModel):
     #: pixels, so it is never produced without the statistics.
     include_ndwi_overlay: bool = False
     include_temporal_ndwi: bool = False
+    #: Additional spectral indices to compute over the same optical window,
+    #: by key ("ndvi", "ndwi", "ndbi").
+    #:
+    #: Additive and independent of ``include_ndwi``, which keeps its exact
+    #: previous behaviour including the overlay and the threshold statistic.
+    #: Asking for "ndwi" here as well is harmless - the measurement names are
+    #: the same and the flat list is de-duplicated by name downstream - but the
+    #: flag remains the path that produces an overlay.
+    indices: list[str] = Field(default_factory=list)
+
+    @field_validator("indices")
+    @classmethod
+    def _known_indices(cls, value: list[str]) -> list[str]:
+        """Refuse an unknown index rather than silently computing a different one."""
+
+        from app.services.analysis.indices import resolve_index
+
+        seen: list[str] = []
+        for key in value:
+            resolved = resolve_index(key).key
+            if resolved not in seen:
+                seen.append(resolved)
+        return seen
 
 
 class AnalysisResult(BaseModel):

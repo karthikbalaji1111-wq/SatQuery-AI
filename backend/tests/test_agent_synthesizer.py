@@ -658,3 +658,56 @@ def test_the_frontend_talks_only_to_the_agent_endpoint() -> None:
         "gemini",
     ):
         assert banned not in source, f"the frontend client references {banned}"
+
+
+def test_a_visual_observation_is_rendered_for_the_synthesiser() -> None:
+    """A model observation must reach the narrator, labelled as an observation.
+
+    It carries neither a measurement nor text, so the original renderer emitted
+    an empty line and the synthesiser answered "the evidence does not contain
+    information" while the observation sat right there. Reproduced live before
+    this was fixed.
+    """
+
+    from app.services.agent.providers.gemini import _render_evidence
+
+    evidence = AgentEvidence.model_validate(
+        {
+            "items": [
+                {
+                    "id": "model.visual.SCENE",
+                    "source": "model",
+                    "visual": {
+                        "statement": "Water is clearly visible.",
+                        "provider": "gemini",
+                        "model": "gemini-3.6-flash",
+                        "scene_id": "SCENE",
+                    },
+                    "produced_by": "gemini-3.6-flash",
+                }
+            ]
+        }
+    )
+    rendered = _render_evidence(evidence)
+
+    assert "Water is clearly visible." in rendered
+    # Labelled as an observation of a named model, never as a measurement.
+    assert "observed by gemini-3.6-flash" in rendered
+    assert "=" not in rendered.split("|")[-1]
+
+
+def test_the_synthesiser_never_receives_an_image() -> None:
+    """The witness looks; the narrator does not.
+
+    The evidence rendering is text. If an image ever reached the synthesiser it
+    would be inspecting the scene itself, and the observation it is supposed to
+    be reporting would become unattributable.
+    """
+
+    import inspect
+
+    from app.services.agent.providers import gemini as gemini_mod
+
+    source = inspect.getsource(gemini_mod.GeminiAnswerSynthesizer)
+    assert "from_bytes" not in source
+    assert "image" not in source.lower() or "Part.from_bytes" not in source
