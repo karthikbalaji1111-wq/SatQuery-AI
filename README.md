@@ -3,7 +3,7 @@
 Ask a question about satellite imagery in plain language and get an answer that
 is traceable to the pixels it came from.
 
-Built for **Smart India Hackathon 2026, Problem Statement 26167**.
+
 
 ---
 
