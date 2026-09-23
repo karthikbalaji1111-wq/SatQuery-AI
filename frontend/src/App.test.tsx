@@ -22,6 +22,30 @@ function mapPanelNow(): HTMLElement {
 }
 
 describe("App", () => {
+  it("is map-first: the map region is there before any query, the intro layered over it", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve("{}"),
+    } as Response));
+
+    render(<App />);
+
+    // Exactly one satellite-scene region, and it is the map's - not an intro
+    // standing in for it.
+    const headings = screen.getAllByRole("heading", { name: "Satellite scene" });
+    expect(headings).toHaveLength(1);
+    expect(headings[0].closest("section")).not.toHaveClass("workspace-intro");
+    // The intro is an aside on top of the map, before anything has run.
+    expect(
+      screen.getByRole("complementary", { name: "How SatQuery works" }),
+    ).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.queryByText(/Checking backend/i)).not.toBeInTheDocument(),
+    );
+  });
+
   it("renders the title and panels", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,

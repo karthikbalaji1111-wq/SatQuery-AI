@@ -86,9 +86,8 @@ export function App() {
     model: string;
   } | null>(null);
 
-  // A basemap is context for a result. With nothing to place, mounting one
-  // would print a default location the user never asked about, so the frames
-  // stay empty until something real can go in them.
+  // Whether a run has resolved anything to place. The map is always mounted
+  // (map-first); this only decides whether the intro still sits over it.
   const hasGeography = Boolean(imagery || aoi || ndwi || change);
 
   function mergeManual(next: ManualEvidence | null) {
@@ -231,17 +230,18 @@ export function App() {
           <AgentQueryCard run={run} />
           <AgentPipeline run={run} />
           <div className="imagery-cell">
-            {hasGeography ? (
-              <MapPanel
-                aoi={aoi}
-                imagery={imagery}
-                ndwi={ndwi}
-                change={change}
-                busy={run.busy}
-              />
-            ) : (
-              <WorkspaceIntro busy={run.busy} />
-            )}
+            {/* Map-first: the real MapLibre map is the workspace from the first
+                paint, opening on a neutral world view rather than on a place
+                nobody asked about. Until a query resolves geography, the intro
+                is layered over it - never in place of it. */}
+            <MapPanel
+              aoi={aoi}
+              imagery={imagery}
+              ndwi={ndwi}
+              change={change}
+              busy={run.busy}
+            />
+            {!hasGeography && <WorkspaceIntro busy={run.busy} overlay />}
           </div>
           <AgentEvidencePanel
             evidence={run.result?.evidence ?? null}

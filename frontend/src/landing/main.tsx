@@ -3,8 +3,8 @@
  *
  * A distinct Vite entry rather than a route inside the app: the workspace is
  * frozen, and this way nothing in it is touched - not its bundle, not its
- * state, not its stylesheet. "Try SatQuery" is a plain link to `/`, which is
- * the real application.
+ * state, not its stylesheet. The landing is the front door at `/`; "Try
+ * SatQuery" is a plain link to `/app`, which is the real application.
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
