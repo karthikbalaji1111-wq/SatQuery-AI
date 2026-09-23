@@ -1,0 +1,84 @@
+# SatQuery backend on Render - a Blueprint for the EXISTING production image.
+#
+# Render builds backend/Dockerfile.prod exactly as docker-compose.prod.yml
+# does: lockfile-frozen dependencies, non-root user, one uvicorn worker on
+# 0.0.0.0:8000, no --reload. Nothing here replaces that image or its settings;
+# the values below are the production profile's, restated for Render.
+#
+# SECRETS ARE NEVER WRITTEN HERE. Every provider key is `sync: false`: Render
+# asks for it in the dashboard when the Blueprint is created, stores it there,
+# and it never reaches the repository. Leaving a key blank is a valid state -
+# the service starts, /health answers, and /ready reports which capability is
+# missing (it never contacts a paid provider to decide that).
+
+services:
+  - type: web
+    name: satquery-ai-api
+    runtime: docker
+    plan: free
+    # Closest Render region to the Indian user base; fixed once created.
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile.prod
+    dockerContext: ./backend
+    # Liveness only. /ready is deliberately NOT the health check: "the AI
+    # provider is not configured" must not make Render kill a process that is
+    # running correctly (see backend/Dockerfile.prod).
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # Only backend changes rebuild the backend.
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+    envVars:
+      # The image binds 8000; Render's default PORT is 10000. Setting PORT
+      # routes Render to the port the validated image already listens on.
+      - key: PORT
+        value: "8000"
+      - key: SATQUERY_ENVIRONMENT
+        value: production
+      - key: SATQUERY_LOG_LEVEL
+        value: INFO
+
+      # Browser origins this API accepts. Production REFUSES to start without
+      # an explicit public HTTPS origin, and the frontend's domain does not
+      # exist yet, so this starts as the API's own origin - which grants no
+      # other site anything. Add the Vercel origin here (comma-separated) once
+      # the frontend is deployed.
+      - key: SATQUERY_CORS_ORIGINS
+        value: https://satquery-ai-api.onrender.com
+
+      # Which catalogs' rasters this server may open (production requires an
+      # explicit list). Identical to docker-compose.prod.yml.
+      - key: SATQUERY_TRUSTED_ASSET_HOSTS
+        value: >-
+          sentinel-cogs.s3.us-west-2.amazonaws.com,.blob.core.windows.net,earth-search.aws.element84.com,planetarycomputer.microsoft.com
+
+      # Admission control - PER PROCESS, and the image runs one worker.
+      # Identical to docker-compose.prod.yml.
+      - key: SATQUERY_RATE_LIMIT_REQUESTS
+        value: "120"
+      - key: SATQUERY_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+      - key: SATQUERY_MAX_CONCURRENT_WORKFLOWS
+        value: "4"
+      - key: SATQUERY_MAX_CONCURRENT_RASTER_READS
+        value: "2"
+      - key: SATQUERY_MAX_REQUEST_BYTES
+        value: "1000000"
+      - key: SATQUERY_WORKFLOW_BUDGET_SECONDS
+        value: "900"
+      # OpenStreetMap's usage policy: one geocoder request per second.
+      - key: SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS
+        value: "1"
+
+      # The deterministic pipeline needs no AI provider. The natural-language
+      # agent does: set the key for the selected provider, or leave all blank.
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
