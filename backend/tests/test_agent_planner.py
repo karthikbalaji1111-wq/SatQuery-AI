@@ -755,8 +755,12 @@ def test_the_generation_schema_expresses_the_union_as_any_of() -> None:
         "max_cloud_cover",
     }
     # The parameterless analysis branch offers ONLY the tool name - no field
-    # the contract would refuse.
-    assert by_tool[("ndwi_statistics", "temporal_ndwi_statistics")] == {"tool"}
+    # the contract would refuse. Sentinel-1 backscatter joins it: which
+    # polarizations to measure is not a planner choice, because the engine
+    # reads whichever of vv/vh the scene actually publishes.
+    assert by_tool[
+        ("sar_backscatter_statistics", "ndwi_statistics", "temporal_ndwi_statistics")
+    ] == {"tool"}
     # The index branch offers WHICH indices to compute and nothing else: no
     # band, no threshold, no scene. Choosing an index is a planning decision;
     # how it is computed is not.

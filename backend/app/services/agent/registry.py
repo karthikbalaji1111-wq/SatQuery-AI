@@ -44,7 +44,7 @@ ToolOperation = Literal["discovery", "analysis", "visual"]
 
 #: The ``AnalysisRequest`` flag an analysis tool maps to. Declared here so the
 #: executor reads the mapping rather than hardcoding a second copy of it.
-AnalysisFlag = Literal["include_ndwi", "include_temporal_ndwi"]
+AnalysisFlag = Literal["include_ndwi", "include_temporal_ndwi", "include_sar_backscatter"]
 
 
 @dataclass(frozen=True)
@@ -88,6 +88,16 @@ _SPECS: tuple[ToolSpec, ...] = (
             "difference on raw digital numbers. Index statistics only - none of "
             "them is a validated land-cover classification. NDBI uses a 20 m "
             "band, so it resolves no finer than 20 m."
+        ),
+    ),
+    ToolSpec(
+        name="sar_backscatter_statistics",
+        operation="analysis",
+        analysis_flag="include_sar_backscatter",
+        description=(
+            "Sentinel-1 RTC VV and VH gamma-naught backscatter statistics in dB "
+            "over positive valid native pixels, with a paired VV-minus-VH difference "
+            "when both grids agree. Provider-calibrated data, no land-cover classification."
         ),
     ),
     ToolSpec(

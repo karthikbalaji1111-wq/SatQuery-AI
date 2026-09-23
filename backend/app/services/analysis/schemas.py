@@ -19,11 +19,19 @@ still surface through the existing error handlers.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.services.query.compatibility import CompatibilityReport
+from app.services.query.integrity import validate_execution_integrity
 from app.services.query.schemas import (
     Modality,
     NdwiComparison,
@@ -31,12 +39,51 @@ from app.services.query.schemas import (
     QueryTask,
     TimeRange,
 )
+from app.services.satellite.radiometry import RadiometricState
 
 #: ``ok``              - the requested analysis ran and produced an answer.
 #: ``not_implemented`` - the task is recognised but no engine exists for it yet.
 #: Only values this phase can actually produce are listed; more are added when
 #: an engine can emit them.
 AnalysisStatus = Literal["ok", "not_implemented"]
+
+#: What became of ONE requested analysis.
+#:
+#: ``completed``   - it ran and produced measurements.
+#: ``unavailable`` - it was asked for and could not be produced; ``reason`` says
+#:                   why, in the service's own words.
+AnalysisOutcomeStatus = Literal["completed", "unavailable"]
+
+
+class AnalysisOutcome(BaseModel):
+    """Whether one requested analysis actually happened.
+
+    **The defect this closes.** ``status`` answered a different question from
+    the one readers were asking it. It is derived from the TASK - ``visualize``
+    is implemented, so ``status`` is ``"ok"`` - and says nothing about whether
+    the analysis the request asked for was produced. An NDWI request over an
+    execution with no optical window therefore returned ``status: "ok"`` with an
+    empty ``measurements`` list and a warning, and every consumer that keyed on
+    the status read that as a successful analysis that happened to find nothing.
+
+    Three different questions were collapsed into one field:
+
+        transport success   - the HTTP request succeeded
+        execution success   - the windows were retrieved (QueryExecutionResult)
+        analysis completeness - the requested analysis was produced (HERE)
+
+    ``status`` keeps its exact previous meaning and values, so existing clients
+    are unaffected; this is the field that answers the third question.
+    """
+
+    #: The analysis asked for: an index key ("ndvi"/"ndwi"/"ndbi"),
+    #: "temporal_ndwi", or "sar_backscatter".
+    name: str
+    status: AnalysisOutcomeStatus
+    #: Present only when ``unavailable``. Carried verbatim from the warning the
+    #: service produced, so the reason a reader sees is the reason the service
+    #: gave - never a second, prettier explanation invented here.
+    reason: str | None = None
 
 
 class Measurement(BaseModel):
@@ -50,6 +97,91 @@ class Measurement(BaseModel):
     name: str
     value: float
     unit: str
+
+
+QualityCategory = Literal[
+    "nodata",
+    "saturated_or_defective",
+    "cloud",
+    "cloud_shadow",
+    "snow",
+    "unknown_class",
+    "other_masked",
+]
+
+
+class PixelQuality(BaseModel):
+    """Which pixels of ONE optical index grid were usable, and why the rest were not.
+
+    Stage 3 of the scientific pipeline. A catalog-valid scene (Stage 2) can
+    still be clouded, shadowed or snow-covered pixel by pixel; this record
+    MEASURES that, from the Sentinel-2 Scene Classification Layer placed on the
+    final analysis grid, before any statistic is computed. It does not judge
+    whether the result is acceptable - no threshold is applied here.
+
+    Every pixel of the grid is counted in exactly one category, by the fixed
+    precedence in :data:`QUALITY_PRECEDENCE` (``analysis.pixel_quality``):
+
+        valid + nodata + saturated_or_defective + cloud + cloud_shadow
+              + snow + unknown_class + other_masked == total
+
+    ``contamination_fraction`` is ``masked / total`` - it includes nodata,
+    because a pixel with no data is as absent from the statistic as a clouded
+    one. Both fractions are ``None`` when the grid has no pixels: no
+    denominator, no fraction. None of this is an uncertainty estimate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The index this grid was assessed for ("ndvi", "ndwi", "ndbi"): each
+    #: index reads its own bands, so its band-nodata can differ.
+    index: str
+    scene_id: str
+    window_label: str
+    mask_source: Literal["sentinel-2-scl"] = "sentinel-2-scl"
+    #: SCL classes counted as usable surface observations.
+    usable_scl_classes: list[int]
+    #: ``known`` when the SCL asset's encoding was confirmed from the catalog
+    #: item (Stage 2); ``unknown`` when the item published no raster metadata
+    #: for it; ``not_validated`` when no catalog validation ran.
+    scl_metadata_status: Literal["known", "unknown", "not_validated"]
+    grid_width: int
+    grid_height: int
+    grid_crs: str | None = None
+    grid_resolution: float | None = None
+    total_pixels: int
+    valid_pixels: int
+    masked_pixels: int
+    nodata_pixels: int
+    saturated_or_defective_pixels: int
+    cloud_pixels: int
+    cloud_shadow_pixels: int
+    snow_pixels: int
+    unknown_class_pixels: int
+    other_masked_pixels: int
+    valid_fraction: float | None = None
+    contamination_fraction: float | None = None
+    #: SCL value -> pixels on the analysis grid carrying it (where the SCL has a
+    #: value). String keys, so the record survives JSON unchanged.
+    scl_class_counts: dict[str, int] = Field(default_factory=dict)
+    #: SCL values present that are not documented classes. Always excluded.
+    unknown_scl_values: list[int] = Field(default_factory=list)
+    quality_notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _accounts_for_every_pixel(self) -> Self:
+        categories = (
+            self.nodata_pixels + self.saturated_or_defective_pixels
+            + self.cloud_pixels + self.cloud_shadow_pixels + self.snow_pixels
+            + self.unknown_class_pixels + self.other_masked_pixels
+        )
+        if categories != self.masked_pixels:
+            raise ValueError("masked_pixels must equal the sum of its categories")
+        if self.valid_pixels + self.masked_pixels != self.total_pixels:
+            raise ValueError("valid + masked must equal total")
+        if self.total_pixels != self.grid_width * self.grid_height:
+            raise ValueError("total_pixels must equal the grid's pixel count")
+        return self
 
 
 class AnalysisWindowRef(BaseModel):
@@ -73,8 +205,9 @@ class ObservationIndexResult(BaseModel):
     separate summaries - they are not a spatial comparison and nothing here is
     resampled onto a shared grid.
 
-    ``cloud_cover`` is carried straight from ``Scene`` as context: the index is
-    NOT cloud-masked, so a reader needs it to judge the statistics.
+    ``cloud_cover`` is carried straight from ``Scene`` as scene-level context.
+    The index itself is computed only over pixels the Scene Classification
+    Layer marks as clear surface; ``pixel_quality`` says how many that was.
     """
 
     window_label: str
@@ -103,6 +236,10 @@ class ObservationIndexResult(BaseModel):
     transform: list[float] | None = Field(
         default=None, min_length=6, max_length=6
     )
+    #: This observation's own pixel quality - never shared with the other side.
+    pixel_quality: PixelQuality | None = None
+    #: The radiometric representation its values were validated as (Stage 4).
+    radiometry: RadiometricState | None = None
 
 
 class SpatialMeasurement(BaseModel):
@@ -263,6 +400,98 @@ class TemporalIndexComparison(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# =========================================================================== #
+# Sentinel-1 RTC backscatter
+#
+# The first QUANTITATIVE SAR result in SatQuery. Everything below is in
+# DECIBELS of provider terrain-corrected gamma naught, and the unit string is
+# always "dB" - never "index", which belongs to the normalised-difference
+# engines and means something else entirely.
+#
+# The measurement names carry the polarization ("vv_mean_db", "vh_mean_db")
+# rather than a shared name plus an attribute. That is deliberate: a claim is
+# bound to evidence by metric identity, so distinct names are what makes
+# "mean VV is -8 dB" fail structurally when only VH evidence supports -8 dB.
+# =========================================================================== #
+
+SarPolarization = Literal["vv", "vh"]
+
+
+class SarPolarizationStatistics(BaseModel):
+    """Gamma-naught statistics for ONE polarization, on its own pixels.
+
+    ``measurements`` carry the decibel values; the pixel-count fields carry the
+    provenance that makes them readable. ``valid_pixel_count`` counts the
+    samples the statistics were actually computed from - finite, not nodata and
+    strictly positive - out of ``window_pixel_count``, the pixels the AOI window
+    covers. A sample the logarithm is undefined on is EXCLUDED and counted in
+    ``nonpositive_pixel_count``; it is never clamped to a floor or replaced.
+    """
+
+    polarization: SarPolarization
+    #: ``<pol>_valid_pixel_count`` plus, when that count is non-zero,
+    #: ``<pol>_mean_db``, ``<pol>_min_db`` and ``<pol>_max_db``.
+    measurements: list[Measurement] = Field(default_factory=list)
+    valid_pixel_count: int = Field(ge=0)
+    nonpositive_pixel_count: int = Field(ge=0)
+    window_pixel_count: int = Field(ge=0)
+    #: Evidence from the read itself, exactly as for an optical observation.
+    crs: str | None = None
+    resolution: float | None = None
+    transform: list[float] | None = Field(default=None, min_length=6, max_length=6)
+
+
+class SarPolarizationDifference(BaseModel):
+    """VV minus VH, in decibels, over the pixels valid in BOTH polarizations.
+
+    Both polarizations come from one acquisition and one grid - a requirement
+    verified before this model is built, exactly as the temporal path verifies
+    two observations - so this is a co-polarized/cross-polarized ratio over the
+    same ground, expressed as a difference of decibels.
+
+    It is a RATIO OF BACKSCATTER, not a classification. A large VV-VH is not
+    "bare soil" and a small one is not "vegetation": no threshold is applied
+    here and no land-cover label is derived from it.
+
+    The two means are recomputed over the paired pixel set, so the difference
+    is exactly ``vv_mean_db - vh_mean_db`` for the numbers reported in this
+    model. They equal the per-polarization means whenever both polarizations
+    were valid on the same pixels, which is the normal case.
+    """
+
+    vv_mean_db: float
+    vh_mean_db: float
+    vv_minus_vh_mean_db: float
+    paired_valid_pixel_count: int = Field(gt=0)
+    crs: str | None = None
+    transform: list[float] | None = Field(default=None, min_length=6, max_length=6)
+
+
+class SarBackscatterResult(BaseModel):
+    """Sentinel-1 RTC gamma-naught statistics for ONE scene, in decibels.
+
+    ``measurements`` is the flat list of every value in this result, so a
+    caller citing a number never has to reach into the nested structure. Names
+    are unique across polarizations, so nothing is overwritten.
+
+    ``warnings`` carry this result's own qualifications - the averaging
+    convention, the absence of any quality mask, excluded samples. Orchestration
+    outcomes (no SAR window, a band that could not be read) stay on
+    :attr:`AnalysisResult.warnings`.
+    """
+
+    scene_id: str
+    window_label: str
+    acquired_at: datetime | None = None
+    collection: str | None = None
+    polarizations: list[SarPolarizationStatistics] = Field(default_factory=list)
+    #: Present only when both polarizations were read AND verified to sit on an
+    #: identical grid. ``None`` otherwise, with the reason in ``warnings``.
+    difference: SarPolarizationDifference | None = None
+    measurements: list[Measurement] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class AnalysisRequest(BaseModel):
     """Input to the analysis boundary.
 
@@ -276,6 +505,12 @@ class AnalysisRequest(BaseModel):
     task value would have to propagate into ``SatQueryIntent``, the intent
     parser's instructions and the frontend task list. Defaulting to ``False``
     keeps every existing request byte-identical in behaviour.
+
+    ``include_sar_backscatter`` opts in to quantitative Sentinel-1 RTC
+    gamma-naught statistics in decibels for one SAR window. It is independent of
+    every optical flag - SAR and optical are different measurements of different
+    physics - and defaults to ``False``, so no polarization is ever read unless
+    it is asked for.
 
     ``include_temporal_ndwi`` opts in to Temporal NDWI Statistics: ONE
     deterministic same-modality Sentinel-2 pair, each observation indexed
@@ -291,6 +526,8 @@ class AnalysisRequest(BaseModel):
     #: pixels, so it is never produced without the statistics.
     include_ndwi_overlay: bool = False
     include_temporal_ndwi: bool = False
+    #: Quantitative Sentinel-1 RTC backscatter (VV and VH) for one SAR window.
+    include_sar_backscatter: bool = False
     #: Additional spectral indices to compute over the same optical window,
     #: by key ("ndvi", "ndwi", "ndbi").
     #:
@@ -315,6 +552,21 @@ class AnalysisRequest(BaseModel):
                 seen.append(resolved)
         return seen
 
+    @model_validator(mode="after")
+    def _execution_is_internally_consistent(self) -> Self:
+        """Structural validity is not provenance integrity.
+
+        This is the boundary where a CLIENT supplies an execution result, so it
+        is the boundary where the relations between its parts are checked -
+        that the selected scene is among the scenes returned, that the windows
+        belong to the intent they claim to answer, that counts match their
+        lists. Parsing proves none of that, and everything downstream treats
+        this object as established fact.
+        """
+
+        validate_execution_integrity(self.execution)
+        return self
+
 
 class AnalysisResult(BaseModel):
     """Structured, deterministic interpretation of a query execution."""
@@ -325,6 +577,9 @@ class AnalysisResult(BaseModel):
     windows_considered: list[AnalysisWindowRef]
     warnings: list[str] = Field(default_factory=list)
     measurements: list[Measurement] = Field(default_factory=list)
+    #: One entry per analysis this request asked for. Empty when it asked for
+    #: none, which is a different thing from asking and getting nothing.
+    analysis_outcomes: list[AnalysisOutcome] = Field(default_factory=list)
     #: Temporal NDWI Statistics for one observation pair. ``None`` whenever the
     #: feature was not requested, or was requested but could not produce a valid
     #: comparison - the reason is then on :attr:`warnings`.
@@ -337,3 +592,36 @@ class AnalysisResult(BaseModel):
     #: otherwise - never a fabricated 0%.
     spatial_measurement: SpatialMeasurement | None = None
     temporal_comparison: TemporalIndexComparison | None = None
+    #: Sentinel-1 RTC backscatter statistics in decibels, when requested and a
+    #: SAR window with a selected scene was available. ``None`` otherwise - the
+    #: reason is then on :attr:`warnings`.
+    sar_backscatter: SarBackscatterResult | None = None
+    #: Pixel quality for each single-scene optical index grid that was
+    #: assessed, in the order computed. Temporal observations carry their own on
+    #: :attr:`TemporalIndexComparison.first` / ``second``.
+    pixel_quality: list[PixelQuality] = Field(default_factory=list)
+    #: Stage 4: the radiometric state of every single-scene analysis assessed,
+    #: REFUSED ones included, so a missing number can be traced to its reason.
+    #: Temporal observations carry theirs on the comparison.
+    radiometry: list[RadiometricState] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def completeness(self) -> Literal["complete", "partial", "none", "not_requested"]:
+        """Whether the analyses this request asked for were produced.
+
+        Derived from :attr:`analysis_outcomes`, never stored, so it cannot
+        disagree with them. ``not_requested`` is deliberately distinct from
+        ``none``: asking for nothing and getting nothing is a complete answer to
+        the question that was asked, while asking for NDWI and getting nothing
+        is not.
+        """
+
+        if not self.analysis_outcomes:
+            return "not_requested"
+        produced = sum(
+            1 for outcome in self.analysis_outcomes if outcome.status == "completed"
+        )
+        if produced == len(self.analysis_outcomes):
+            return "complete"
+        return "none" if produced == 0 else "partial"

@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import { asAgentResult } from "./validate";
 import type { AgentQuestionRequest, AgentResult, AiProvider } from "./types";
 
 /**
@@ -12,7 +13,7 @@ import type { AgentQuestionRequest, AgentResult, AiProvider } from "./types";
  * `synthesis_unavailable` and `answer_withheld`, which carry the deterministic
  * evidence with no answer. Only transport and genuine faults reject.
  */
-export function askAgent(
+export async function askAgent(
   question: string,
   options: {
     provider?: AiProvider | null;
@@ -29,9 +30,14 @@ export function askAgent(
   if (provider !== null) body.provider = provider;
   if (model !== null) body.model = model;
 
-  return apiRequest<AgentResult>("/api/v1/query/agent", {
-    method: "POST",
-    body,
-    signal,
-  });
+  // Every panel reads `trace.steps` and `evidence.items` directly, so a
+  // response that lacks them is refused here rather than failing later inside a
+  // component with no idea where the bad value came from.
+  return asAgentResult(
+    await apiRequest<unknown>("/api/v1/query/agent", {
+      method: "POST",
+      body,
+      signal,
+    }),
+  );
 }

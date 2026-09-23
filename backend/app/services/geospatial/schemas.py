@@ -66,3 +66,9 @@ class ResolveResponse(BaseModel):
     center: Coordinate
     bbox: BoundingBox
     source: Literal["nominatim", "input"]
+    #: The geocoder's own classification of what it matched, verbatim. Not a
+    #: confidence measure - none is invented here - but it is the difference
+    #: between having matched a coastline and having matched a shop of the same
+    #: name, which a display name alone does not reveal.
+    place_class: str | None = None
+    place_type: str | None = None

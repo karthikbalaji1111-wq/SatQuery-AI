@@ -33,8 +33,40 @@ SUPPORTED_IMAGERY_ASSETS = (DEFAULT_IMAGERY_ASSET, SAR_IMAGERY_ASSET, "vh")
 #: NDBI needs it, and mixing resolutions is safe here ONLY through the explicit
 #: whole-cell co-registration in ``analysis.engines.coregister_to_finer_grid``,
 #: which is guarded and refuses anything it cannot relate exactly. Nothing
-#: resamples implicitly. ``scl`` stays out: cloud masking is not implemented.
+#: resamples implicitly.
 ANALYSIS_BAND_ASSETS = ("green", "nir", "red", "swir16")
+
+#: Sentinel-2 assets read for PIXEL QUALITY, not measured. ``scl`` is the L2A
+#: Scene Classification Layer: 20 m, ``uint8``, nodata 0, CATEGORICAL (read
+#: from the live Earth Search item, 2026-09-23). Its own allowlist so a class
+#: label can never be read as if it were a reflectance band, and it is placed
+#: on the analysis grid only by whole-cell assignment - a class label is never
+#: averaged or interpolated (``analysis.pixel_quality``).
+QUALITY_BAND_ASSETS = ("scl",)
+
+# Sentinel-1 assets readable QUANTITATIVELY. Deliberately a THIRD allowlist:
+# these are not Sentinel-2 spectral bands and they are not display assets, and
+# collapsing any two of the three lists would let a SAR asset be read as an
+# optical band (or vice versa) without anyone noticing.
+#
+# WHAT THESE PIXELS ARE - established from the live catalog and the pixels
+# themselves (collection ``sentinel-1-rtc``, Microsoft Planetary Computer):
+#   * ``raster:bands`` declares ``float32``, ``nodata = -32768``, 10 m, and
+#     carries NO ``scale``, NO ``offset`` and NO ``unit``; the COG's own GDAL
+#     scale/offset are 1.0/0.0 and its band description reads "Sentinel-1
+#     Calibrated and Terrain Corrected VV"/"... VH".
+#   * The stored values are LINEAR GAMMA-NAUGHT POWER - not decibels and not
+#     amplitude. Over an 844,296 px Chennai window every valid sample was
+#     strictly positive (VV median 0.0272, VH median 0.0083), which rules out
+#     decibels outright, and the provider's own rendering expression takes a
+#     logarithm of the values, which nobody does to data already in dB.
+#
+# The conversion to decibels therefore belongs to the analysis engine and is
+# exactly ``10 * log10(power)``; this layer returns the provider's numbers
+# untouched. Only the ``sentinel-1-rtc`` collection publishes these assets -
+# Earth Search's Sentinel-1 GRD measurement assets are uncalibrated DN on a
+# requester-pays ``s3://`` bucket and remain unreadable here.
+SAR_ANALYSIS_BAND_ASSETS = ("vv", "vh")
 
 
 class SceneSearchRequest(BaseModel):
@@ -105,6 +137,14 @@ class SceneSearchResponse(BaseModel):
     scene_count: int
     scenes: list[Scene]
     catalog: str
+    #: How many scenes the query matched IN THE CATALOG, when it reported that.
+    #:
+    #: ``scene_count`` is how many are carried here - one bounded page, capped
+    #: by ``limit``. Deterministic selection then picks from THIS page, so a
+    #: result is the best of what was returned, not the best of what exists.
+    #: Reporting only ``scene_count`` made those two indistinguishable.
+    #: ``None`` when the catalog does not say: unknown is not "all of them".
+    scenes_matched: int | None = None
 
 
 class ImageryRequest(BaseModel):

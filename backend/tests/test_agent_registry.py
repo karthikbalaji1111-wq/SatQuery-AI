@@ -31,6 +31,7 @@ from app.services.agent.registry import (
 from app.services.agent.schemas import ToolName
 
 APPROVED = {
+    "sar_backscatter_statistics",
     "spectral_indices",
     "execute_query",
     "ndwi_statistics",
@@ -104,7 +105,7 @@ def test_analysis_flags_are_distinct() -> None:
         for spec in TOOL_REGISTRY.values()
         if spec.analysis_flag is not None
     ]
-    assert len(flags) == len(set(flags)) == 2
+    assert len(flags) == len(set(flags)) == 3
 
 
 # =========================================================================== #

@@ -23,6 +23,7 @@ import type {
   MapNdwi,
 } from "./footprint";
 import { isGeoJsonSource } from "./footprint";
+import { configureMapLibreWorker } from "./maplibreWorker";
 
 /**
  * Put one image overlay on the map, or take it off.
@@ -158,6 +159,10 @@ const INITIAL_CENTER: [number, number] = [80.27, 13.08];
 const INITIAL_ZOOM = 9;
 
 const createMapLibreMap: MapFactory = ({ container }) => {
+  // Before the first map exists: MapLibre resolves its worker relative to its
+  // own module URL, which in a production bundle points at an asset that was
+  // never emitted. See `maplibreWorker.ts`.
+  configureMapLibreWorker();
   const map = new MapLibreMap({
     container,
     style: {
@@ -474,7 +479,13 @@ function ImageryCaption({
           : "Sentinel-2 L2A · true colour";
   const detail = [
     scene,
-    imagery?.bands?.join(" "),
+    // A SAR display PNG carries one measured band replicated into three, so a
+    // raw join renders "vv vv vv", which reads as a bug rather than as one
+    // grayscale band. Collapse repeats; a genuine multi-band composite (the
+    // Sentinel-2 "red green blue" true-colour case) still lists every band.
+    imagery?.bands?.length
+      ? [...new Set(imagery.bands)].join(" ")
+      : null,
     imagery?.resolution ? `${imagery.resolution} m` : null,
     imagery?.crs,
   ]

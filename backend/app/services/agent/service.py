@@ -52,8 +52,10 @@ from __future__ import annotations
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.observability import stage
 from app.services.agent.executor import AgentExecutor
 from app.services.agent.grounding import validate_answer
+from app.services.agent.plan_completion import complete_plan
 from app.services.agent.planner import AgentPlanner
 from app.services.agent.schemas import (
     AgentEvidence,
@@ -148,7 +150,8 @@ class AgentService(DomainService):
         # --- 1. Plan. A failure here means nothing has run, so nothing is
         # claimed: no plan, no steps, no evidence, no validation.
         try:
-            plan = await self._planner.plan(request.question)
+            with stage("planning"):
+                plan = await self._planner.plan(request.question)
         except AppError as exc:
             logger.info("Agent planning failed [%s]: %s", exc.code, exc.message)
             return AgentResult(
@@ -161,14 +164,25 @@ class AgentService(DomainService):
 
         # --- 2. Execute. The executor reports per-step outcomes and handles
         # its own tool failures; whatever it returns is what actually happened.
-        outcome = await self._executor.execute(plan)
+        #
+        # An index the question names outright is always computed, and a
+        # question asking what is visible always gets the observation - even
+        # when the planner left that step out (observed live). The trace keeps
+        # the plan as the planner returned it; an added step appears in
+        # ``trace.steps`` because it ran.
+        executed_plan = complete_plan(request.question, plan)
+        if executed_plan is not plan:
+            logger.info("Plan completed with an explicitly requested step")
+        with stage("execution", steps=len(executed_plan.steps)):
+            outcome = await self._executor.execute(executed_plan)
 
         # --- 3. Synthesise. A failure here loses the prose, never the
         # evidence that was already established.
         try:
-            draft = await self._synthesizer.synthesize(
-                request.question, outcome.evidence
-            )
+            with stage("synthesis", evidence=len(outcome.evidence.items)):
+                draft = await self._synthesizer.synthesize(
+                    request.question, outcome.evidence
+                )
         except AppError as exc:
             logger.info("Agent synthesis failed [%s]: %s", exc.code, exc.message)
             return AgentResult(
@@ -185,7 +199,8 @@ class AgentService(DomainService):
         # --- 4. Validate, using the Commit 3 validator unchanged. This service
         # performs no check of its own and knows nothing about how any of them
         # work; it only reads the three outcomes.
-        validation = validate_answer(draft, outcome.evidence)
+        with stage("grounding"):
+            validation = validate_answer(draft, outcome.evidence)
         accepted = _passed(validation)
 
         # Only references the evidence can actually resolve are recorded. A

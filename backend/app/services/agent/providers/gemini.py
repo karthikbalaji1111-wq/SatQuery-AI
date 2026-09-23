@@ -155,9 +155,14 @@ def _upstream_failure(exc: genai_errors.APIError) -> UpstreamServiceError:
     code = getattr(exc, "code", None)
     if code == 429:
         delay = _retry_delay_seconds(exc)
+        # A delay under a second is real but not worth quoting: rendering it
+        # with ":.0f" produced "Please retry in about 0 seconds", which reads as
+        # a bug rather than as guidance. Observed live - Gemini does return
+        # "0s". Anything below a second is therefore reported as "shortly",
+        # which is what a sub-second wait actually means to a reader.
         wait = (
             f" Please retry in about {delay:.0f} seconds."
-            if delay is not None
+            if delay is not None and delay >= 1.0
             else " Please retry shortly."
         )
         error = UpstreamServiceError(
@@ -213,6 +218,17 @@ async def _generate(
                 raise _upstream_failure(exc) from exc
             delay = _retry_delay_seconds(exc)
             if delay is None:
+                if code == 429:
+                    # Quota, and the server named no delay. The short backoff
+                    # below is calibrated for OVERLOAD (500/502/503/504), where
+                    # a moment later often works. A quota window is seconds to
+                    # minutes, so retrying inside two seconds cannot clear it -
+                    # it only spends two more of the very units that ran out.
+                    # Measured: three attempts in 2.01s, tripling the cost of a
+                    # request that was always going to fail. Report it instead,
+                    # with the same rate-limited classification the caller
+                    # already distinguishes from an outage.
+                    raise _upstream_failure(exc) from exc
                 delay = _BACKOFF_SECONDS[min(attempt - 1, len(_BACKOFF_SECONDS) - 1)]
             if delay > budget:
                 # The server wants longer than this request can honestly wait.

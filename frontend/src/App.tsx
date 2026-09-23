@@ -78,6 +78,13 @@ export function App() {
     provider: string;
     model: string;
   } | null>(null);
+  // What the server said its default is. Used ONLY to attribute a finished
+  // run; the request body still omits an untouched default so the server
+  // remains the authority on what that default is.
+  const [inferenceDefaults, setInferenceDefaults] = useState<{
+    provider: string;
+    model: string;
+  } | null>(null);
 
   // A basemap is context for a result. With nothing to place, mounting one
   // would print a default location the user never asked about, so the frames
@@ -91,9 +98,18 @@ export function App() {
         : {
             scene: next.scene ?? current.scene,
             imagery: next.imagery ?? current.imagery,
+            sar_backscatter: next.sar_backscatter ?? current.sar_backscatter,
             measurements: next.measurements.length
               ? next.measurements
               : current.measurements,
+            // Provenance accumulates the same way the visible evidence does:
+            // the intent and execution arrive with the run, the analysis with
+            // its result, and the export needs all three. Listed explicitly
+            // because this merge builds a new object - a field omitted here is
+            // a field silently dropped from the record.
+            intent: next.intent ?? current.intent,
+            execution: next.execution ?? current.execution,
+            analysis: next.analysis ?? current.analysis,
           },
     );
   }
@@ -106,11 +122,33 @@ export function App() {
     },
     provider: (inference?.provider ?? null) as AiProvider | null,
     model: inference?.model ?? null,
+    // What to ATTRIBUTE the result to when the request named nothing: the
+    // deployment default the server itself reported. Never sent.
+    defaultProvider: inferenceDefaults?.provider ?? null,
+    defaultModel: inferenceDefaults?.model ?? null,
     onImagery: setImagery,
     onNdwi: setNdwi,
     onChange: setChange,
     onAoi: setAoi,
   });
+
+  /**
+   * A completed result is on screen - from EITHER workflow.
+   *
+   * Export and the answer panel were gated on `run.result`, the agent's own
+   * outcome, so a successful manual analysis left the rail saying "Run an
+   * analysis" with its export disabled while its measurements sat in the panel
+   * beside it. The two workflows stay separate; what they share is that both
+   * can finish, and the presentation of a finished result should not depend on
+   * which one did.
+   */
+  const manualComplete = Boolean(
+    manual &&
+      (manual.measurements.length > 0 ||
+        manual.scene !== null ||
+        manual.sar_backscatter),
+  );
+  const hasCompletedResult = run.result !== null || manualComplete;
 
   /**
    * Hand the reader an auditable record of the run.
@@ -122,7 +160,15 @@ export function App() {
    * records successes is not an audit.
    */
   function exportEvidence() {
-    const report = buildEvidenceReport(run.result, manual, run.question);
+    // `run.asked`, never `run.question`: the box stays editable after a run,
+    // and the report must describe the question that produced these
+    // measurements. Falls back to the draft only when nothing has run yet,
+    // where the two are necessarily the same.
+    const report = buildEvidenceReport(
+      run.result,
+      manual,
+      run.asked?.question ?? run.question,
+    );
     const blob = new Blob([JSON.stringify(report, null, 2)], {
       type: "application/json",
     });
@@ -159,6 +205,7 @@ export function App() {
         <ModelSelector
           value={inference?.model ?? null}
           onChange={setInference}
+          onDefaults={setInferenceDefaults}
         />
         <BackendStatus />
       </header>
@@ -219,12 +266,17 @@ export function App() {
             </div>
           </section>
 
-          <AgentAnswerPanel result={run.result} busy={run.busy} />
+          <AgentAnswerPanel
+            result={run.result}
+            asked={run.asked}
+            manualComplete={manualComplete}
+            busy={run.busy}
+          />
           <AgentObservationPanel
             evidence={run.result?.evidence ?? null}
             result={run.result}
             busy={run.busy}
-            onExport={run.result === null ? undefined : exportEvidence}
+            onExport={hasCompletedResult ? exportEvidence : undefined}
           />
         </div>
       </main>

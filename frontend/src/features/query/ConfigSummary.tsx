@@ -22,6 +22,12 @@ export interface RunContext {
   window: string | null;
   /** A stated cloud-cover limit, when the request carried one. */
   cloudRule: string | null;
+  /**
+   * An explicit index threshold the request stated ("NDWI > 0.3"), already
+   * formatted. Optional: a run that stated none omits it, and the rail then
+   * says nothing about thresholds rather than implying a default.
+   */
+  threshold?: string | null;
   modalities: Modality[];
   task: QueryTask;
   /** Whether an NDWI computation was requested. */
@@ -56,6 +62,13 @@ const SENSORS: { modality: Modality; name: string; detail: string }[] = [
  * result be read as a change-detection result, which is the one confusion
  * this whole layer exists to prevent.
  *
+ * The qualifier has to be precise in BOTH directions. Temporal NDWI difference
+ * IS implemented - including a paired-pixel difference and a georeferenced
+ * overlay when the two reads share an identical grid - so saying "change
+ * detection is unavailable" without qualification contradicts a capability the
+ * product ships. What is not implemented is the general task: deciding WHAT
+ * changed. Hence "general change detection".
+ *
  * These say "not implemented", NOT merely "unavailable". The distinction is
  * the point: this capability does not exist in the system, and no query, no
  * retry and no configuration will produce it. That is a different fact from an
@@ -64,7 +77,7 @@ const SENSORS: { modality: Modality; name: string; detail: string }[] = [
  */
 const TASKS: { task: QueryTask; label: string; available: boolean }[] = [
   { task: "visualize", label: "Visualize", available: true },
-  { task: "change_detection", label: "Change detect", available: false },
+  { task: "change_detection", label: "General change detect", available: false },
   { task: "object_identification", label: "Object ID", available: false },
 ];
 
@@ -110,6 +123,7 @@ export function ConfigSummary({ context }: { context: RunContext }) {
     centre,
     window: acquisitionWindow,
     cloudRule,
+    threshold = null,
     modalities,
     task,
     ndwi,
@@ -147,6 +161,9 @@ export function ConfigSummary({ context }: { context: RunContext }) {
           <>
             <p className="config-mono">{acquisitionWindow}</p>
             {cloudRule !== null && <p className="config-note">{cloudRule}</p>}
+            {threshold !== null && (
+              <p className="config-note">Threshold: {threshold}</p>
+            )}
           </>
         )}
       </section>
@@ -213,10 +230,15 @@ export function ConfigSummary({ context }: { context: RunContext }) {
             );
           })}
         </div>
+        {/* "Run", not "question": this summary also describes the manual
+            configuration path, where there is no question - and saying an
+            index "was not needed for this question" there asserted a reason
+            that did not exist. Every index named here is implemented; the
+            statement is only about what this run computed. */}
         <p className="config-note">
           {computed.length === 0
-            ? "No spectral index was computed for this query. All three are available."
-            : "Indices not highlighted are supported, but were not needed for this question."}
+            ? "No spectral index was computed for this run. All three are available."
+            : `${computed.map((key) => key.toUpperCase()).join(", ")} computed for this run. Indices not highlighted are supported but were not requested.`}
         </p>
       </section>
 

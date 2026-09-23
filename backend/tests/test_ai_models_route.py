@@ -51,8 +51,18 @@ def test_unconfigured_provider_is_reported_as_not_configured() -> None:
     assert nvidia
     for model in nvidia:
         assert model["configured"] is False
-        if model["supports_image"]:
+        if not model["available"]:
+            # Retirement outranks configuration: supplying a key would not make
+            # a model the provider no longer serves usable, so "Not configured"
+            # would send the reader to fix the wrong thing.
+            assert model["status"] == "Retired by provider"
+        elif model["supports_image"]:
             assert model["status"] == "Not configured"
+
+    # Both branches must actually be exercised, or this test could pass while
+    # the catalog silently lost one of the two states.
+    assert any(not m["available"] for m in nvidia)
+    assert any(m["available"] and m["supports_image"] for m in nvidia)
 
 
 def test_a_configured_provider_is_not_claimed_to_be_reachable() -> None:

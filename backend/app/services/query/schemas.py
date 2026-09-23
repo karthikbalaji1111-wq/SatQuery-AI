@@ -8,7 +8,7 @@ the existing Geospatial Service; the :class:`BoundingBox` type is reused verbati
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal, Self
 
 from pydantic import (
@@ -24,6 +24,7 @@ from app.services.geospatial.schemas import BoundingBox
 from app.services.satellite.schemas import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
+    SAR_IMAGERY_ASSET,
     ImageryResponse,
     Scene,
 )
@@ -90,8 +91,61 @@ class NdwiThreshold(BaseModel):
 MAX_TIME_WINDOWS = 24
 
 
+#: The earliest date any supported mission could have observed anything.
+#: Sentinel-1A began routine acquisition in October 2014 and Sentinel-2A in
+#: June 2015; this is the earlier of the two, so it bounds BOTH modalities
+#: without preferring either. A window ending before this cannot be answered by
+#: any catalog - not "no scenes matched", but "nothing was in orbit yet" - and
+#: the two deserve different messages.
+EARLIEST_OBSERVATION_DATE = date(2014, 10, 3)
+
+#: How far past today a window may still START. A window that begins tomorrow
+#: describes an observation that has not happened, and no catalog can return it.
+#: One day of slack absorbs the difference between the caller's clock, its time
+#: zone and UTC, so a legitimate "today" is never refused for being a few hours
+#: ahead.
+FUTURE_START_GRACE_DAYS = 1
+
+
+def observation_period_problem(window: TimeRange, *, today: date) -> str | None:
+    """Why no observation can exist in ``window``, or ``None`` when one can.
+
+    The single statement of which periods are answerable at all. Both the
+    intent contract and the analysis request gate apply it, so the two
+    boundaries cannot drift into disagreeing about the same dates - which is
+    what two copies of these comparisons would eventually do.
+    """
+
+    if window.end_date < EARLIEST_OBSERVATION_DATE:
+        return (
+            f"the window ending {window.end_date.isoformat()} precedes "
+            f"the first available observation "
+            f"({EARLIEST_OBSERVATION_DATE.isoformat()}); no satellite "
+            "in this catalog was acquiring data yet"
+        )
+    if (window.start_date - today).days > FUTURE_START_GRACE_DAYS:
+        return (
+            f"the window starting {window.start_date.isoformat()} is in "
+            "the future; only past observations can be retrieved"
+        )
+    return None
+
+
 class SatQueryIntent(BaseModel):
-    """What the user asks for, before any location grounding."""
+    """What the user asks for, before any location grounding.
+
+    ``extra="forbid"`` because a PLANNER fills this model. The agent contracts
+    are closed for exactly this reason, and the intent was the one link in that
+    chain that was not: a plan carrying ``bbox``, ``lat``, ``lon`` or ``center``
+    was accepted and the field silently dropped. Nothing downstream read it - the
+    location is resolved from ``location_query`` alone - so no substitution ever
+    occurred; but "accepted and ignored" is the wrong answer to a model trying to
+    supply its own coordinates. Refusing is how the closed contract is stated
+    everywhere else, and it makes the intent say what it means: the geocoder
+    grounds the place, the planner does not get a vote.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     location_query: str = Field(min_length=1, max_length=300)
     temporal_mode: TemporalMode
@@ -109,7 +163,20 @@ class SatQueryIntent(BaseModel):
     @field_validator("location_query", mode="before")
     @classmethod
     def _strip_location(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
+        if not isinstance(value, str):
+            return value
+        # Control characters are refused rather than stripped. No place name
+        # contains a NUL, a CR or a LF, and this field is filled by a PLANNER -
+        # untrusted output. httpx already percent-encodes them, so this closes
+        # no live hole; it closes the CLASS, so the safety of a place name stops
+        # depending on a third-party library's escaping behaviour staying the
+        # same. It matches how `_require_readable_scheme` treats the other
+        # untrusted string this system puts into a URL.
+        if any(ch in value for ch in "\x00\r\n\t"):
+            raise ValueError(
+                "location_query must not contain control characters"
+            )
+        return value.strip()
 
     @field_validator("modalities")
     @classmethod
@@ -141,7 +208,48 @@ class SatQueryIntent(BaseModel):
                 f"a query may span at most {MAX_TIME_WINDOWS} time windows; "
                 f"{count} were requested"
             )
+
+        # Observability bounds, enforced HERE so they are provider-independent:
+        # every path that builds an intent - Gemini, NVIDIA, the manual form or
+        # a direct API call - inherits exactly the same rule, and no model can
+        # invent a date the archive could never contain. Without this an
+        # impossible window reached the catalog and came back empty, which the
+        # UI then reported as "no scenes found" - indistinguishable from a real
+        # gap in coverage, and pointing the reader at the wrong problem.
+        ranges = (
+            [windows.baseline, windows.target] if is_comparison else list(windows)
+        )
+        today = datetime.now(UTC).date()
+        for window in ranges:
+            problem = observation_period_problem(window, today=today)
+            if problem is not None:
+                raise ValueError(problem)
         return self
+
+
+def expand_windows(intent: SatQueryIntent) -> list[tuple[str, TimeRange]]:
+    """Expand a validated intent's ``time_windows`` into labelled windows.
+
+    ``SatQueryIntent`` already guarantees the shape, so this is total:
+
+    - ``single``     -> ``[("single", <the one range>)]``
+    - ``timeseries`` -> ``[("series[0]", ...), ("series[1]", ...), ...]``
+    - ``compare``    -> ``[("baseline", ...), ("target", ...)]``
+
+    It lives on the CONTRACT rather than in the execution service because two
+    parties need it and they must not disagree: the service produces windows
+    from an intent, and the integrity validator checks a client-supplied
+    result's windows AGAINST that intent. Two copies of this rule would drift,
+    and the validator would then reject perfectly good results - or accept
+    fabricated ones.
+    """
+
+    windows = intent.time_windows
+    if isinstance(windows, TemporalComparison):
+        return [("baseline", windows.baseline), ("target", windows.target)]
+    if intent.temporal_mode == "single":
+        return [("single", windows[0])]
+    return [(f"series[{index}]", window) for index, window in enumerate(windows)]
 
 
 class ResolvedQueryPlan(BaseModel):
@@ -181,6 +289,12 @@ class QueryExecutionRequest(BaseModel):
     include_imagery: bool = False
     max_cloud_cover: float | None = Field(default=None, ge=0, le=100)
     limit: int = Field(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
+    #: Which Sentinel-1 polarization to render when a SAR window retrieves
+    #: imagery. Ignored for optical windows, which have their own asset. VV was
+    #: previously hardcoded here, leaving VH unreachable through this route even
+    #: though the imagery service already supported it; defaulting to VV keeps
+    #: every existing caller byte-identical.
+    sar_polarization: Literal["vv", "vh"] = SAR_IMAGERY_ASSET
 
 
 class ExecutedWindow(BaseModel):
@@ -194,6 +308,29 @@ class ExecutedWindow(BaseModel):
     selected_scene_id: str | None
     imagery: ImageryResponse | None = None
     imagery_error: str | None = None
+    #: Which catalog answered THIS window.
+    #:
+    #: A mixed request reaches two different services - Sentinel-2 from Earth
+    #: Search, Sentinel-1 RTC from the Planetary Computer - and the result
+    #: carried ONE top-level ``catalog`` string, assigned inside the loop, so
+    #: whichever window ran last silently spoke for all of them. Provenance has
+    #: to travel with the observation it describes.
+    #:
+    #: Optional for backward compatibility: an older stored result, or a
+    #: window whose discovery failed before any catalog answered, has ``None``.
+    catalog: str | None = None
+    #: How many scenes the catalog reported as MATCHING this window, when it
+    #: said. ``scene_count`` is how many were returned and therefore how many
+    #: deterministic selection actually chose between; a larger ``scenes_matched``
+    #: means the chosen scene is the best of a bounded page, not of the archive.
+    scenes_matched: int | None = None
+    #: Why this window produced nothing, when DISCOVERY itself failed.
+    #:
+    #: Distinct from ``imagery_error``, which means the scene was found and its
+    #: picture could not be read. This one means the catalog could not be asked,
+    #: so the window contributes no observation at all - and says so, rather
+    #: than looking like a window where nothing matched.
+    error: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -327,6 +464,18 @@ class ObservationSet(BaseModel):
         )
 
 
+#: ``completed`` - every requested window was executed.
+#: ``partial``   - at least one window was executed and at least one failed.
+#: ``failed``    - no window was executed.
+#:
+#: This describes EXECUTION, not scientific completeness: a window that ran and
+#: matched no scene is ``completed``, because discovery worked and the honest
+#: answer is that the archive holds nothing there. Whether the requested
+#: ANALYSIS was actually produced is a separate question, answered by
+#: :class:`~app.services.analysis.schemas.AnalysisResult`.
+ExecutionStatus = Literal["completed", "partial", "failed"]
+
+
 class QueryExecutionResult(BaseModel):
     """Structured, deterministic result of executing a :class:`SatQueryIntent`."""
 
@@ -334,7 +483,49 @@ class QueryExecutionResult(BaseModel):
     executed_modalities: list[Modality]
     skipped_modalities: list[SkippedModality]
     windows: list[ExecutedWindow]
+    #: The catalog that answered FIRST, kept for backward compatibility.
+    #:
+    #: It was assigned inside the execution loop, so in a mixed Sentinel-1 +
+    #: Sentinel-2 run it reported whichever service happened to answer last.
+    #: :attr:`ExecutedWindow.catalog` is now the authoritative per-observation
+    #: provenance and :attr:`catalogs` lists every service involved; this field
+    #: remains so existing clients keep working, and is deliberately the FIRST
+    #: rather than the last, which at least makes it deterministic.
     catalog: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def catalogs(self) -> list[str]:
+        """Every catalog that answered, in the order first seen.
+
+        Derived from the windows, so prose or a UI can name both services in a
+        mixed run instead of implying that one answered for everything.
+        """
+
+        seen: list[str] = []
+        for window in self.windows:
+            if window.catalog and window.catalog not in seen:
+                seen.append(window.catalog)
+        return seen
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def status(self) -> ExecutionStatus:
+        """Whether every requested window actually executed.
+
+        DERIVED, never stored, for the same reason ``observations`` is: this
+        model is accepted from a client at ``/query/analyze``, and a stored
+        status would be a claim the client could make about its own payload.
+        Computed here, "completed" can only mean that the windows in this very
+        object carry no discovery error.
+        """
+
+        if not self.windows:
+            return "failed"
+        failed = sum(1 for window in self.windows if window.error is not None)
+        if failed == 0:
+            return "completed"
+        return "failed" if failed == len(self.windows) else "partial"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

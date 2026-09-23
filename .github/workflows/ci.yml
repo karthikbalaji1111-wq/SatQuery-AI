@@ -23,6 +23,10 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+        env:
+          VITE_API_BASE_URL: https://api.satquery.example
+      - name: Build production frontend image
+        run: docker build -f Dockerfile.prod --build-arg VITE_API_BASE_URL=https://api.satquery.example -t satquery-frontend:ci .
 
   backend:
     runs-on: ubuntu-latest
@@ -37,3 +41,7 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest
+      - name: Build production backend and check native imports
+        run: |
+          docker build -f Dockerfile.prod -t satquery-backend:ci .
+          docker run --rm --network none --entrypoint /app/.venv/bin/python -e SATQUERY_CORS_ORIGINS=https://satquery.example -e SATQUERY_TRUSTED_ASSET_HOSTS=sentinel-cogs.s3.us-west-2.amazonaws.com satquery-backend:ci -c 'import rasterio; from app.main import app; assert app.title'

@@ -22,44 +22,81 @@
    ========================================================================== */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --ink: #101214;
-  --ink-2: #454b51;
-  /* Secondary text. Was #767d84, which measured 4.17:1 on white and 3.76:1
-     on the app background - under WCAG AA's 4.5:1 - and it carries nearly
-     every form label and panel eyebrow in the app, all at 9-10.5px where the
-     large-text exemption does not apply. #63696f measures 5.55 and 5.00 and
-     is still clearly lighter than --ink-2, so the hierarchy is unchanged. */
-  --ink-3: #63696f;
+  /* Dark-first, because the subject is imagery. A near-black ground keeps the
+     scene the brightest object on screen and lets hairlines carry structure
+     instead of boxes. Every custom property below keeps the name the rest of
+     this file already uses, so the palette changes and the rules do not. */
 
-  --line-strong: #c9ced2;
-  --line: #d9dee2;
-  --line-soft: #e4e7e9;
-  --line-hair: #edeff0;
+  /* Type, measured against --surface (#0d1117): --ink 16.0:1, --ink-2 9.2:1,
+     --ink-3 5.6:1. The worst pairing in the whole palette is --ink-3 on the
+     raised panel at 4.8:1 - still above WCAG AA's 4.5:1, which matters
+     because --ink-3 carries the 9-10.5px eyebrows and field labels where the
+     large-text exemption does not apply. */
+  --ink: #e6edf3;
+  --ink-2: #a9b6c3;
+  --ink-3: #7f8d9b;
+  /* Text that sits ON a bright chip or an accent fill, never on a panel. */
+  --on-bright: #06080b;
 
-  --bg: #f2f3f5;
-  --surface: #ffffff;
-  --surface-alt: #f2f8fc;
+  /* Hairlines rather than borders: translucent, so they read as the edge of
+     one surface instead of the outline of a stacked card. */
+  --line-strong: rgb(214 232 255 / 0.22);
+  --line: rgb(214 232 255 / 0.13);
+  --line-soft: rgb(214 232 255 / 0.08);
+  --line-hair: rgb(214 232 255 / 0.05);
 
-  --geo-blue: #0b6bcb;
-  --geo-cyan: #0e7c93;
+  --bg: #06080b;
+  --surface: #0d1117;
+  --surface-alt: #121a24;
+  --surface-raised: #17212c;
+
+  /* The legend is unchanged - BLUE/CYAN measured, GREEN operational, VIOLET
+     model interpretation, AMBER a qualification, RED a failure - relit for a
+     dark ground, where the light-theme inks were nearly black. */
+  --geo-blue: #58a6ff;
+  --geo-blue-strong: #7cc0ff;
+  --geo-cyan: #56d4e4;
   --footprint-cyan: #5fd3f3;
 
-  --green: #1b7a4b;
-  --green-ink: #16603c;
-  --green-soft: #f1f8f4;
-  --violet: #5b3fd1;
-  --violet-ink: #4a2fbd;
-  --violet-soft: #f7f5ff;
-  /* Warning text. #b26a00 measured 4.24:1 on white; this measures 5.38. */
-  --amber: #9a5c00;
-  --amber-ink: #8a5300;
-  --amber-soft: #fffaf2;
-  --danger: #b3261e;
-  --danger-soft: #fdf4f3;
+  --green: #56d68a;
+  --green-ink: #8ce8b0;
+  --green-soft: rgb(86 214 138 / 0.12);
+  --violet: #a78bfa;
+  --violet-ink: #c9b6ff;
+  --violet-soft: rgb(167 139 250 / 0.14);
+  --amber: #f2b45e;
+  --amber-ink: #ffcf8c;
+  --amber-soft: rgb(242 180 94 / 0.12);
+  --danger: #ff7b72;
+  --danger-soft: rgb(255 123 114 / 0.12);
 
-  --void: #0f1417;
+  /* The imagery frame: darker than any panel, so a scene lifts off it. */
+  --void: #04060a;
+
+  /* One spacing scale, one radius scale, one elevation set and one motion
+     vocabulary, so surfaces agree with each other instead of each inventing a
+     value at the point of use. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius-sm: 3px;
+  --radius: 5px;
+  --radius-lg: 9px;
+
+  --elev-1: 0 1px 0 rgb(255 255 255 / 0.03) inset;
+  --elev-2: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 10px 28px -18px rgb(0 0 0 / 0.9);
+  --focus-ring: 0 0 0 1px var(--bg), 0 0 0 3px rgb(88 166 255 / 0.55);
+
+  --dur-fast: 110ms;
+  --dur: 170ms;
+  --dur-slow: 260ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.3, 1);
 
   --font-display: "Aptos Display", "Aptos", "Segoe UI Variable Display",
     "Segoe UI", system-ui, sans-serif;
@@ -108,13 +145,15 @@ body {
   height: 22px;
   display: grid;
   place-items: center;
-  background: var(--ink);
+  background: rgb(86 212 228 / 0.1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 
 .brand-glyph svg {
   width: 14px;
   height: 14px;
-  stroke: #fff;
+  stroke: var(--geo-cyan);
 }
 
 .app-header h1 {
@@ -162,6 +201,7 @@ body {
 }
 
 .backend-status .ok,
+.backend-status .degraded,
 .backend-status .error,
 .backend-status > span {
   display: inline-flex;
@@ -173,6 +213,7 @@ body {
 }
 
 .backend-status .ok::before,
+.backend-status .degraded::before,
 .backend-status .error::before {
   content: "";
   flex: none;
@@ -183,6 +224,18 @@ body {
 
 .backend-status .ok::before {
   background: var(--green);
+}
+
+/* Alive and reachable, but unable to do the advertised work - a qualification,
+   not a failure, which is exactly what amber is for here. Without its own rule
+   this state inherited the plain span styling and lost the status dot, so the
+   one state an operator most needs to notice was the least visible. */
+.backend-status .degraded {
+  color: var(--amber-ink);
+}
+
+.backend-status .degraded::before {
+  background: var(--amber);
 }
 
 .backend-status .error {
@@ -461,23 +514,34 @@ button:disabled {
 .btn-primary,
 .query-form button[type="submit"],
 .plan-form > button[type="button"] {
-  color: #fff;
-  background: var(--ink);
-  border-color: var(--ink);
+  color: var(--on-bright);
+  background: linear-gradient(180deg, var(--geo-blue-strong), var(--geo-blue));
+  border-color: rgb(124 192 255 / 0.55);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.22) inset,
+    0 8px 18px -12px rgb(88 166 255 / 0.9);
+  transition:
+    filter var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .btn-primary:hover:not(:disabled),
 .query-form button[type="submit"]:hover:not(:disabled),
 .plan-form > button[type="button"]:hover:not(:disabled) {
-  background: #000;
+  filter: brightness(1.08);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.28) inset,
+    0 10px 22px -12px rgb(88 166 255 / 1);
 }
 
 .btn-primary:disabled,
 .query-form button[type="submit"]:disabled,
 .plan-form > button[type="button"]:disabled {
-  color: #fff;
-  background: #9aa2aa;
-  border-color: #9aa2aa;
+  color: var(--ink-3);
+  background: var(--surface-alt);
+  border-color: var(--line-soft);
+  box-shadow: none;
+  filter: none;
 }
 
 .link-button {
@@ -539,7 +603,7 @@ button:disabled {
 /* A prompt, never content: lighter and one weight down, so an empty field can
    never be mistaken for a hardcoded query. */
 .query-input::placeholder {
-  color: #8b939b;
+  color: var(--ink-3);
   font-weight: 400;
   opacity: 1;
 }
@@ -824,8 +888,8 @@ button:disabled {
 }
 
 .layer-cell[data-active="true"] {
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.94);
+  color: var(--on-bright);
+  background: rgb(232 241 250 / 0.94);
   border-color: transparent;
 }
 
@@ -956,6 +1020,28 @@ button:disabled {
   border-left: 1px solid var(--line-soft);
 }
 
+/* One readout per index computed. Stacked with a rule between them so three
+   indices read as three separate measurements and never as one continuous
+   block of numbers. */
+.index-readouts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.index-readouts .index-readout + .index-readout {
+  padding-top: 14px;
+  border-top: 1px solid var(--line-hair);
+}
+
+.index-pixels {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
 .index-value-row {
   display: flex;
   align-items: baseline;
@@ -980,9 +1066,9 @@ button:disabled {
   height: 7px;
   background: linear-gradient(
     90deg,
-    #e8e2d6,
-    #dce6ea 44%,
-    #9fd3e4 62%,
+    #1b2532,
+    #24384a 44%,
+    #2f86a0 62%,
     var(--geo-cyan)
   );
 }
@@ -2513,7 +2599,7 @@ details > summary:focus-visible {
   margin: 10px 0 0;
   padding: 10px 12px;
   border-left: 2px solid var(--amber);
-  background: #fdf8f0;
+  background: var(--amber-soft);
 }
 
 .imagery-notice-failure {
@@ -2621,4 +2707,401 @@ details > summary:focus-visible {
 .index-meaning {
   color: var(--ink-3);
   font-size: 11px;
+}
+
+.sar-backscatter {
+  border-top: 1px solid var(--border, #283544);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.sar-backscatter h3, .sar-backscatter h4 { margin: 0.75rem 0; }
+.sar-backscatter .evidence-grid { margin: 0.75rem 0; }
+.sar-polarizations { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+
+/* Which provider actually produced the result on screen. Muted: it is
+   provenance, not a headline - but it must be present, because the selector
+   above can have moved on since the run was submitted. */
+.run-attribution {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, #8a8f98);
+}
+
+/* ==========================================================================
+   PREMIUM DARK LAYER
+   --------------------------------------------------------------------------
+   Appended last on purpose: everything above keeps its structure, its class
+   names and its meaning, and this section raises the finish. It changes how
+   surfaces sit in depth, how interactive elements answer a pointer, and how
+   the measured values carry weight - never what the markup claims.
+
+   Nothing here invents a state. Colour still follows the legend declared at
+   the top of this file, and every status string on screen is still the one
+   the server sent.
+   ========================================================================== */
+
+/* ------------------------------------------------------------------ shell -- */
+
+.app {
+  /* A faint cyan horizon behind the whole workspace: enough to stop the
+     background reading as flat black on an OLED panel, far too faint to
+     compete with imagery. */
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgb(86 212 228 / 0.05), transparent 60%),
+    var(--bg);
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 46px;
+  padding: 0 var(--space-4);
+  gap: var(--space-3);
+  background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+  /* Was a near-black rule, which inverts into a bright line on this ground. */
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 10px 24px -22px rgb(0 0 0 / 0.9);
+}
+
+.app-header h1 {
+  font-size: 15.5px;
+  letter-spacing: 0.01em;
+}
+
+.brand-mark {
+  color: var(--geo-cyan);
+  letter-spacing: 0.06em;
+}
+
+.header-caps {
+  padding: 3px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+/* Panels lift off the ground by one hairline and one inset highlight rather
+   than by a drop shadow, which at this density would read as clutter. */
+.panel,
+.pipeline-strip {
+  border-radius: var(--radius);
+  box-shadow: var(--elev-1);
+}
+
+.imagery-cell {
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2);
+}
+
+/* Dark scrollbars: the default light track cuts a white stripe down each
+   column on this ground. */
+.col-config,
+.col-centre,
+.col-rail {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(214 232 255 / 0.16) transparent;
+}
+
+::selection {
+  background: rgb(88 166 255 / 0.32);
+}
+
+/* ----------------------------------------------------------- the composer -- */
+
+.query-card {
+  background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+/* The whole card answers focus, not just the 1px under the text: this is the
+   primary instrument of the workspace and should feel like one. */
+.query-card:focus-within {
+  border-color: rgb(88 166 255 / 0.5);
+  box-shadow:
+    var(--elev-1),
+    0 0 0 1px rgb(88 166 255 / 0.25),
+    0 18px 40px -28px rgb(88 166 255 / 0.55);
+}
+
+.query-input {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.query-input:focus-visible {
+  border-bottom-color: var(--geo-blue);
+  box-shadow: 0 1px 0 0 var(--geo-blue);
+}
+
+.example-link {
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.example-link:hover:not(:disabled) {
+  color: var(--geo-blue-strong);
+}
+
+/* ------------------------------------------------------------- pipeline -- */
+
+.stage-flow li {
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.pipeline-state {
+  padding: 2px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  letter-spacing: 0.06em;
+}
+
+/* A run in flight breathes once every two seconds. One element, opacity only:
+   no layout, no spinner, nothing that suggests progress the server has not
+   reported. */
+.pipeline-state[data-state="running"]::before {
+  animation: satquery-pulse 2s ease-in-out infinite;
+}
+
+@keyframes satquery-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* --------------------------------------------------------------- results -- */
+
+.agent-answer {
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+
+/* The measured value is the product. It carries the accent; the label above it
+   stays quiet. */
+.metric-pair dd,
+.index-value {
+  color: var(--geo-cyan);
+}
+
+.metric-pair > div,
+.collected-summary > div {
+  border-radius: var(--radius-sm);
+}
+
+/* Grounding reads as a verdict strip rather than a tinted paragraph. */
+.validation-box {
+  border-radius: var(--radius-sm);
+  border-left-width: 3px;
+}
+
+.index-readout {
+  padding: 12px 0 12px 20px;
+}
+
+.index-ramp {
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.index-tick {
+  box-shadow: 0 0 6px rgb(230 237 243 / 0.6);
+}
+
+/* Evidence rows answer the pointer, so a dense table still feels inspectable. */
+.evidence-grid > div {
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.evidence-grid > div:hover {
+  background: rgb(214 232 255 / 0.04);
+}
+
+.citation-list dt {
+  color: var(--ink-3);
+}
+
+/* The model's reading stays visibly apart from anything measured. */
+.observation-body {
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------------- map -- */
+
+.layer-cell {
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.layer-cell[data-active="false"]:hover {
+  background: rgb(6 8 11 / 0.55);
+  border-color: rgb(255 255 255 / 0.7);
+}
+
+.imagery-caption {
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.65);
+}
+
+.map-panel > .hint {
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(6px);
+}
+
+/* --------------------------------------------------------------- motion -- */
+
+button,
+.link-button,
+.example-link,
+.layer-cell {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+/* One focus treatment everywhere, visible on every surface in the app. */
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--geo-blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-state[data-state="running"]::before {
+    animation: none;
+  }
+
+  button,
+  .link-button,
+  .example-link,
+  .layer-cell,
+  .query-card,
+  .query-input,
+  .evidence-grid > div {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------- premium dark layer, part 2 --
+   Written after looking at the first pass in the browser: panels read as flat
+   rectangles on the new ground, and the configuration rail - all hairline
+   borders and tertiary ink on the light theme - lost its structure entirely.
+   -------------------------------------------------------------------------- */
+
+/* A one-pixel top highlight is what separates a surface from a hole on a dark
+   ground. Cheap, and it does the work a drop shadow would do noisily. */
+.panel,
+.pipeline-strip,
+.query-card {
+  background-image: linear-gradient(180deg, rgb(214 232 255 / 0.035), transparent 46px);
+}
+
+/* The configuration rail: selectable things must look selectable. */
+.sensor-card,
+.analysis-chip,
+.index-picker,
+.plan-form fieldset {
+  border-radius: var(--radius-sm);
+}
+
+.sensor-card,
+.analysis-chip {
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.sensor-card:hover,
+.analysis-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-alt);
+}
+
+/* Active is the accent, not merely a slightly different grey - on this ground
+   the light theme's near-black border read as "off". */
+.sensor-card[data-active="true"] {
+  border-color: rgb(88 166 255 / 0.55);
+  background: rgb(88 166 255 / 0.1);
+  box-shadow: inset 2px 0 0 var(--geo-blue);
+}
+
+.analysis-chip[data-active="true"] {
+  border-color: rgb(88 166 255 / 0.5);
+  color: var(--ink);
+  background: rgb(88 166 255 / 0.1);
+}
+
+/* The empty workspace is most of the screen before a run. It should read as a
+   prepared instrument rather than an unpainted rectangle: a faint graticule,
+   fading out, with the copy sitting on top of it. */
+.workspace-intro {
+  position: relative;
+}
+
+/* The graticule sits on a pseudo-element, not on the section itself: masking
+   the section faded the copy along with the grid, which is the opposite of
+   the intent - the text must stay at full contrast. */
+.workspace-intro::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(214 232 255 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(214 232 255 / 0.04) 1px, transparent 1px);
+  background-size: 48px 48px, 48px 48px;
+  background-position: center;
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 40%, #000 25%, transparent 76%);
+  mask-image: radial-gradient(120% 90% at 50% 40%, #000 25%, transparent 76%);
+}
+
+.workspace-intro > * {
+  position: relative;
+}
+
+.intro-lead {
+  letter-spacing: -0.015em;
+}
+
+/* The evidence strip carries the audit trail; give its header the same weight
+   as the panels it explains. */
+.evidence-panel .panel-head {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-hair);
+}
+
+/* The model selector is a product control, not a bare <select>. */
+.model-selector select {
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  border-color: var(--line);
+  background: var(--surface-alt);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.model-selector select:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.model-status {
+  padding: 2px 8px 2px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+
+/* Ready is the only state that glows. Every other state keeps its own colour
+   from the server and stays flat, so a failure never looks like a success. */
+.model-status[data-ready="true"]::before {
+  box-shadow: 0 0 8px rgb(86 214 138 / 0.9);
 }

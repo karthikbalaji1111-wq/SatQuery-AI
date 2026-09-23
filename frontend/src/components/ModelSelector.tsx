@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError } from "../api/client";
 import { fetchModelCatalog } from "../api/models";
@@ -13,6 +13,10 @@ import type { ModelOption } from "../api/types";
  * comes from the backend; this component renders a choice and reports the
  * selection upward. It holds no key and no model list of its own.
  *
+ * A model RETIRED by its provider is disabled for the same reason and shown
+ * with the server's retirement status, so a reader learns the model exists and
+ * why it cannot be picked - hiding it would invite someone to re-add it.
+ *
  * Models that cannot fill the step are shown but disabled rather than hidden:
  * a reader looking for a Nemotron they know exists should see why it is not
  * selectable, not silently fail to find it. The status text is the server's,
@@ -22,10 +26,16 @@ import type { ModelOption } from "../api/types";
 export function ModelSelector({
   value,
   onChange,
+  onDefaults,
 }: {
   /** The selected `model_id`, or `null` for the deployment's default. */
   value: string | null;
   onChange: (selection: { provider: string; model: string } | null) => void;
+  /**
+   * The deployment default, once the catalog reports it. Display provenance
+   * only - it never changes what the request sends.
+   */
+  onDefaults?: (defaults: { provider: string; model: string }) => void;
 }) {
   const [models, setModels] = useState<ModelOption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +44,43 @@ export function ModelSelector({
     model: string;
   } | null>(null);
 
+  // Held in a ref so the catalog fetch keeps its empty dependency list. Adding
+  // the callback to the deps would re-run the fetch whenever a caller passed a
+  // fresh inline function - one network request per render.
+  const onDefaultsRef = useRef(onDefaults);
+  useEffect(() => {
+    onDefaultsRef.current = onDefaults;
+  });
+
+  // Whether a catalog request is in flight, so a burst of focus events cannot
+  // stack requests.
+  const loadingRef = useRef(false);
+  // Bumped to re-read the catalog. Statuses are a snapshot: a local model's
+  // "Not installed" or "Ollama not running" goes stale the moment someone
+  // starts Ollama or pulls the model in another window - observed live, the
+  // badge kept reading "Not installed" beside a successful local answer.
+  const [generation, setGeneration] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (!loadingRef.current) setGeneration((value) => value + 1);
+    };
+    // A focused window is visible by definition; a visibility change only
+    // counts when the tab has come back into view.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
+    loadingRef.current = true;
     fetchModelCatalog("visual", controller.signal)
       .then((catalog) => {
         // API data, so it is checked rather than trusted: a malformed catalog
@@ -50,15 +95,27 @@ export function ModelSelector({
           provider: catalog.default_provider,
           model: catalog.default_model,
         });
+        // Reported separately from `onChange`, which means "the user picked
+        // this". The request body deliberately OMITS an untouched default so
+        // the server stays the authority on what that default is - but the
+        // workspace still needs to know it, to attribute a finished result to
+        // the provider that actually ran it.
+        onDefaultsRef.current?.({
+          provider: catalog.default_provider,
+          model: catalog.default_model,
+        });
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         setError(
           cause instanceof ApiError ? cause.message : "Model catalog unavailable",
         );
+      })
+      .finally(() => {
+        loadingRef.current = false;
       });
     return () => controller.abort();
-  }, []);
+  }, [generation]);
 
   if (error !== null) {
     return (
@@ -97,18 +154,26 @@ export function ModelSelector({
             value={model.model_id}
             // Incompatible or unconfigured models stay visible but unusable,
             // with the server's own reason attached.
-            disabled={!model.compatible || !model.configured}
+            disabled={
+              !model.compatible ||
+              !model.configured ||
+              model.available === false
+            }
             title={`${model.provider} · ${model.status}`}
           >
             {providerLabel(model.provider)} · {model.display_name}
-            {model.compatible && model.configured ? "" : ` — ${model.status}`}
+            {model.status === "Ready" ? "" : ` — ${model.status}`}
           </option>
         ))}
       </select>
       {current !== undefined && (
         <span
           className="model-status"
-          data-ready={current.compatible && current.configured}
+          // Green only when the SERVER says the model is usable. Configured,
+          // compatible and not retired is not enough: a local model can be all
+          // three and still be uninstalled, or its Ollama not running - and a
+          // green dot beside "Not installed" states the opposite of the text.
+          data-ready={current.status === "Ready"}
         >
           {current.status}
         </span>
@@ -120,6 +185,8 @@ export function ModelSelector({
 const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   nvidia: "NVIDIA",
+  anthropic: "Claude",
+  local: "Local",
 };
 
 function providerLabel(provider: string): string {

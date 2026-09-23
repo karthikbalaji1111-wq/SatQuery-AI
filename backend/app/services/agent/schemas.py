@@ -54,6 +54,7 @@ from app.services.query.schemas import QueryExecutionResult, SatQueryIntent
 ToolName = Literal[
     "execute_query",
     "spectral_indices",
+    "sar_backscatter_statistics",
     "ndwi_statistics",
     "temporal_ndwi_statistics",
     "rs_model_analysis",
@@ -83,6 +84,7 @@ EvidenceSource = Literal[
     "ndwi",
     "ndbi",
     "temporal_ndwi",
+    "sar_backscatter",
     "compatibility",
     "model",
 ]
@@ -136,6 +138,7 @@ class ExecuteQueryParams(_StrictModel):
     tool: Literal["execute_query"] = "execute_query"
     intent: SatQueryIntent
     include_imagery: bool = False
+    sar_polarization: Literal["vv", "vh"] = "vv"
     max_cloud_cover: float | None = Field(default=None, ge=0, le=100)
 
 
@@ -179,6 +182,12 @@ class SpectralIndicesParams(_StrictModel):
         return value
 
 
+class SarBackscatterParams(_StrictModel):
+    """Quantitative provider RTC VV/VH statistics; no model-controlled calibration."""
+
+    tool: Literal["sar_backscatter_statistics"] = "sar_backscatter_statistics"
+
+
 class TemporalNdwiParams(_StrictModel):
     """Temporal NDWI Statistics for one deterministic Sentinel-2 pair.
 
@@ -214,6 +223,7 @@ ToolCall = Annotated[
     | SpectralIndicesParams
     | NdwiParams
     | TemporalNdwiParams
+    | SarBackscatterParams
     | RsModelParams,
     Field(discriminator="tool"),
 ]
@@ -276,7 +286,7 @@ class AgentPlan(_StrictModel):
         # Spectral results are displayed beside the same selected scene's RGB.
         # Request it even when the planner omitted the display-only switch.
         if set(tools) & {"rs_model_analysis", "ndwi_statistics", "spectral_indices",
-                         "temporal_ndwi_statistics"}:
+                         "temporal_ndwi_statistics", "sar_backscatter_statistics"}:
             for index, step in enumerate(self.steps):
                 if isinstance(step, ExecuteQueryParams) and not step.include_imagery:
                     self.steps[index] = step.model_copy(

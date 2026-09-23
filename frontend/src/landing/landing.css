@@ -768,3 +768,59 @@ a:focus-visible,
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+/* ==========================================================================
+   Landing polish
+   --------------------------------------------------------------------------
+   The page's editorial voice, the chapter scrims and the planet are left
+   exactly as they were - they are the strongest thing in the product. What
+   changes here is the primary call to action, which was a flat near-white
+   slab: it now carries the same accent identity as the workspace's primary
+   action, so arriving in the app is continuous rather than a jump.
+   ========================================================================== */
+
+.cta-primary {
+  background: linear-gradient(180deg, var(--cyan), var(--blue));
+  color: var(--space);
+  border: 1px solid rgb(134 217 224 / 0.5);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.25) inset,
+    0 14px 30px -18px rgb(134 217 224 / 0.8);
+  transition:
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.cta-primary:hover {
+  background: linear-gradient(180deg, var(--cyan), var(--blue));
+  filter: brightness(1.07);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.32) inset,
+    0 16px 34px -18px rgb(134 217 224 / 0.95);
+}
+
+/* The secondary action should read as the quieter twin, not as a disabled
+   control: one hairline brighter on hover, nothing else. */
+.cta-secondary:hover {
+  border-color: rgb(134 217 224 / 0.45);
+  color: var(--ink);
+}
+
+/* Keyboard users get the same ring the workspace uses. */
+.cta:focus-visible,
+.nav-cta:focus-visible,
+.landing-header a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+.hero-title {
+  letter-spacing: -0.03em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta-primary,
+  .cta-secondary {
+    transition: none;
+  }
+}

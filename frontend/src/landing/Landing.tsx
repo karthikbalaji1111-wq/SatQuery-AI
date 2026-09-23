@@ -246,10 +246,19 @@ export function Landing() {
                 optical ones.
               </p>
               <p className="boundary">
-                <strong>Real VV/VH imagery.</strong> Public terrain-corrected
-                Sentinel-1 RTC data is rendered as georeferenced grayscale.
-                Processing comes from the data provider; SatQuery does not
-                perform SAR calibration or quantitative backscatter analysis.
+                <strong>Real VV/VH imagery and backscatter.</strong> Public
+                terrain-corrected Sentinel-1 RTC data is rendered as
+                georeferenced grayscale, and quantitative VV/VH gamma-naught
+                backscatter is measured in decibels from the provider&rsquo;s
+                linear power values &mdash; averaged in linear power, then
+                converted.
+              </p>
+              <p className="fineprint">
+                The terrain correction is the data provider&rsquo;s, not
+                SatQuery&rsquo;s. No radiometric calibration, speckle filtering
+                or polarimetric decomposition is performed, and the product
+                carries no quality mask beyond nodata. VV&minus;VH is a
+                difference of measurements, not a land-cover classification.
                 Access-restricted GRD imagery is reported honestly.
               </p>
             </article>

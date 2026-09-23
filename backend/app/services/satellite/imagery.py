@@ -1,7 +1,15 @@
-"""Bounded Sentinel-2 imagery retrieval.
+"""Bounded imagery retrieval.
 
-scene_id + bbox + asset -> STAC item lookup (metadata only) -> windowed COG
-read -> standardized RGB PNG. No AI/VLM logic lives here.
+scene_id + bbox + asset -> STAC item lookup (metadata only) -> (Sentinel-1 RTC
+only: bounded SAS signing) -> windowed COG read -> standardized RGB PNG. No
+AI/VLM logic lives here.
+
+Two sources, one contract. Sentinel-2 assets on Earth Search are anonymously
+readable. Sentinel-1 RTC assets on the Planetary Computer are NOT: the storage
+account refuses public access (HTTP 409 PublicAccessNotPermitted), so each read
+is preceded by a call to the provider's anonymous signing endpoint. The
+resulting token is used to open the raster and never leaves the server -
+``ImageryResponse.asset_href`` carries the unsigned href.
 """
 
 from __future__ import annotations
@@ -9,8 +17,11 @@ from __future__ import annotations
 import base64
 import io
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from ipaddress import ip_address
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image, UnidentifiedImageError
@@ -32,9 +43,22 @@ from app.services.satellite.raster import (
     read_band_window,
     read_rgb_window,
 )
-from app.services.satellite.rtc import RTC_COLLECTION, catalog_for, sign_rtc_asset
+from app.services.satellite.rtc import (
+    RTC_COLLECTION,
+    catalog_for,
+    require_linear_power_encoding,
+    sign_rtc_asset,
+)
+from app.services.satellite.scene_validation import (
+    Modality,
+    SceneValidationError,
+    ValidatedScene,
+    validate_scene_item,
+)
 from app.services.satellite.schemas import (
     ANALYSIS_BAND_ASSETS,
+    QUALITY_BAND_ASSETS,
+    SAR_ANALYSIS_BAND_ASSETS,
     SUPPORTED_IMAGERY_ASSETS,
     ImageryRequest,
     ImageryResponse,
@@ -72,19 +96,44 @@ _COG_TYPE_HINT = "geotiff"
 # constraining legitimate use.
 # --------------------------------------------------------------------------- #
 
+@dataclass(frozen=True)
+class QuantitativeReadLimits:
+    """How large a native-resolution window :meth:`ImageryService.read_band` reads.
+
+    Quantitative reads are never decimated, so these are REJECTION bounds: a
+    window beyond either is refused, not resampled to fit.
+    """
+
+    #: Longest side of the native window, in pixels.
+    max_dimension: int
+    #: Width x height of the native window, in pixels.
+    max_window_pixels: int
+
+
 _STAC_IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,200}")
 #: Path segments that would traverse even though their characters are allowed.
 _RESERVED_SEGMENTS = frozenset({".", ".."})
 
 
+def is_valid_stac_identifier(value: object) -> bool:
+    """Whether ``value`` is a safe single STAC URL path segment.
+
+    The predicate behind :func:`_validate_stac_identifier`, public so the
+    analysis request gate can apply the SAME rule before any catalog call
+    instead of restating it.
+    """
+
+    return (
+        isinstance(value, str)
+        and _STAC_IDENTIFIER.fullmatch(value) is not None
+        and value not in _RESERVED_SEGMENTS
+    )
+
+
 def _validate_stac_identifier(value: str, field: str) -> str:
     """Return ``value`` if it is a safe single URL path segment, else raise."""
 
-    if (
-        not isinstance(value, str)
-        or _STAC_IDENTIFIER.fullmatch(value) is None
-        or value in _RESERVED_SEGMENTS
-    ):
+    if not is_valid_stac_identifier(value):
         shown = value[:80] if isinstance(value, str) else value
         raise InvalidInputError(
             f"{field} {shown!r} is not a valid STAC identifier. Expected 1-200 "
@@ -158,15 +207,94 @@ def _require_readable_scheme(asset_key: str, href: str) -> None:
     if scheme not in _READABLE_SCHEMES:
         raise InvalidInputError(
             f"Asset {asset_key!r} is published as {scheme or 'an unknown'}:// "
-            "which this deployment cannot read; only anonymous HTTPS assets "
-            "are supported. Sentinel-1 GRD measurement assets are currently "
-            "published this way, so bounded Sentinel-1 retrieval is not "
-            "available - see the Sentinel-1 note in the README."
+            "which this deployment cannot read; only HTTPS assets are "
+            "supported. Earth Search publishes Sentinel-1 GRD measurement "
+            "assets on a requester-pays s3:// bucket, and this deployment "
+            "reads only anonymous HTTPS. Sentinel-1 imagery is served instead "
+            "from the 'sentinel-1-rtc' collection (the configured default), "
+            "whose provider terrain-corrected rasters are readable over HTTPS."
         )
 
 
+def _require_permitted_host(
+    asset_key: str, href: str, trusted: list[str]
+) -> None:
+    """Refuse an href pointing somewhere this server must not reach.
+
+    The scheme check above establishes that the URL is HTTP(S). It does not say
+    WHERE. The href comes from an external catalog's response, and whatever it
+    names is fetched by this process, from inside whatever network it runs in -
+    which is the shape of a server-side request forgery whether or not the
+    catalog is hostile today.
+
+    Two rules, deliberately different in strength:
+
+    * **Always**: a host that is a private, loopback, link-local, reserved,
+      multicast or unspecified IP ADDRESS is refused. That is the dangerous
+      class - ``169.254.169.254`` is a cloud metadata service, ``127.0.0.1`` is
+      whatever else this host runs - and refusing it costs nothing legitimate,
+      because no public satellite catalog publishes rasters there.
+    * **When configured**: ``trusted_asset_hosts`` restricts reads to named
+      hosts. Left empty, any public host is allowed; a deployment that knows
+      its catalogs should say so, and the production profile does.
+
+    KNOWN LIMITATION: this checks the NAME. It does not pin the address that
+    name resolves to, so a DNS rebind between this check and the read is not
+    prevented - the raster stack does not expose the connection for that.
+    """
+
+    host = (urlsplit(href).hostname or "").strip()
+    if not host:
+        raise InvalidInputError(
+            f"Asset {asset_key!r} has a href with no host, which cannot be read."
+        )
+
+    try:
+        address = ip_address(host)
+    except ValueError:
+        address = None
+    # Two clauses, because neither alone is correct - measured on this Python
+    # rather than assumed:
+    #
+    #   100.64.0.1  (carrier-grade NAT)  is_private=False  is_global=False
+    #   224.0.0.1   (IPv4 multicast)     is_private=False  is_global=True
+    #
+    # So a private-address check misses shared address space, and a global-only
+    # check admits multicast. A satellite catalog publishes its rasters on the
+    # public unicast internet; anything else here is this server being pointed
+    # inwards at whatever it can reach.
+    if address is not None and (not address.is_global or address.is_multicast):
+        # Named rather than echoed back in full: the refusal says what KIND of
+        # address it was, which is what an operator needs.
+        raise InvalidInputError(
+            f"Asset {asset_key!r} points at a non-public address, which this "
+            "deployment refuses to read on the catalog's behalf."
+        )
+
+    if not trusted:
+        return
+    lowered = host.lower()
+    for entry in trusted:
+        candidate = entry.strip().lower().lstrip("*")
+        if not candidate:
+            continue
+        if lowered == candidate.lstrip(".") or lowered.endswith(
+            candidate if candidate.startswith(".") else f".{candidate}"
+        ):
+            return
+    raise InvalidInputError(
+        f"Asset {asset_key!r} is hosted at {lowered!r}, which is not among the "
+        "asset hosts this deployment is configured to read."
+    )
+
+
 class ImageryService(DomainService):
-    """Windowed RGB reads for an already-selected Sentinel-2 scene."""
+    """Windowed reads for an already-selected scene.
+
+    Sentinel-2 ``visual`` is returned as true colour. Sentinel-1 RTC ``vv``/
+    ``vh`` are single-band provider gamma-naught rasters, display-stretched to
+    grayscale by the raster layer - a rendering, never a calibration.
+    """
 
     name = "satellite.imagery"
 
@@ -185,8 +313,72 @@ class ImageryService(DomainService):
         self._read_window = raster_reader or read_rgb_window
         self._read_band = band_reader or read_band_window
 
+    def quantitative_read_limits(self) -> QuantitativeReadLimits:
+        """The bounds :meth:`read_band` refuses a window beyond.
+
+        Declared rather than private so a caller can apply them BEFORE the
+        catalog fetch and the remote open that :meth:`read_band` performs
+        first. :meth:`read_band` reads its own bounds from here, so the early
+        check and the authoritative one cannot come to disagree.
+        """
+
+        return QuantitativeReadLimits(
+            max_dimension=self._settings.imagery_hard_max_dimension,
+            max_window_pixels=self._settings.imagery_max_window_pixels,
+        )
+
+    def validate_scene(
+        self,
+        *,
+        scene_id: str,
+        collection: str | None,
+        modality: Modality,
+        assets: Sequence[str],
+        bbox: BoundingBox,
+        require_all_assets: bool = True,
+    ) -> ValidatedScene:
+        """Blocking: fetch ``scene_id``'s catalog item and validate it for measurement.
+
+        The catalog item is the authority - nothing a client said about the
+        scene is consulted. It is the same item lookup :meth:`read_band` uses,
+        and the same href scheme and host rules, applied BEFORE any raster is
+        opened. The rules themselves live in
+        :mod:`app.services.satellite.scene_validation`.
+        """
+
+        resolved = _validate_stac_identifier(
+            collection or self._settings.stac_collection, "collection"
+        )
+        scene_id = _validate_stac_identifier(scene_id, "scene_id")
+        try:
+            item = self._fetch_item(scene_id, resolved)
+        except NotFoundError:
+            raise SceneValidationError(
+                "scene_not_found",
+                f"the catalog has no scene {scene_id!r} in {resolved!r}.",
+            ) from None
+
+        def check_href(key: str, href: str) -> None:
+            _require_readable_scheme(key, href)
+            _require_permitted_host(key, href, self._settings.trusted_asset_hosts)
+
+        return validate_scene_item(
+            item,
+            scene_id=scene_id,
+            collection=resolved,
+            modality=modality,
+            assets=assets,
+            aoi=bbox,
+            check_href=check_href,
+            require_all_assets=require_all_assets,
+            min_coverage=self._settings.scene_min_aoi_coverage,
+        )
+
     def describe(self) -> str:
-        return "Bounded Sentinel-2 RGB imagery retrieval via windowed COG reads."
+        return (
+            "Bounded Sentinel-2 RGB and Sentinel-1 RTC grayscale imagery "
+            "retrieval via windowed COG reads."
+        )
 
     # -- STAC item lookup (metadata only) ---------------------------------- #
 
@@ -244,6 +436,7 @@ class ImageryService(DomainService):
                 "windowed-readable GeoTIFF; bounded retrieval is not supported."
             )
         _require_readable_scheme(asset_key, href)
+        _require_permitted_host(asset_key, href, self._settings.trusted_asset_hosts)
         return href
 
     def retrieve(self, request: ImageryRequest) -> ImageryResponse:
@@ -312,9 +505,20 @@ class ImageryService(DomainService):
             crs=window.crs,
             resolution=window.resolution,
             normalization=(
-                "Provider RTC gamma naught; "
-                + window.normalization.replace("display only, not calibrated", "display only")
-                + "; no local calibration, dB conversion, or speckle filtering"
+                # The provider terrain-corrected these values; SatQuery did
+                # not. Everything after the semicolon is a display transform
+                # over the provider's numbers, which are themselves untouched.
+                "Provider RTC gamma naught (terrain-corrected by the data "
+                "provider, not by SatQuery); "
+                + window.normalization.replace(
+                    "display only, not calibrated", "display only"
+                )
+                + "; the stretch is for display only and is applied to this "
+                "PNG alone - the quantitative statistics, when requested, are "
+                "computed from the provider's linear power values, never from "
+                "these display bytes. SatQuery performs no radiometric "
+                "calibration, speckle filtering or terrain correction of its "
+                "own"
                 if collection == RTC_COLLECTION else window.normalization
             ),
             window=WindowInfo(**window.window),
@@ -346,21 +550,49 @@ class ImageryService(DomainService):
         :func:`~app.services.satellite.raster.read_band_window` - never through
         the display path, and never decimated.
 
-        ``asset`` is an Earth Search STAC asset key and must be in
-        ``ANALYSIS_BAND_ASSETS``; the display whitelist does not apply here.
-        The STAC-advertised ``scale``/``offset`` are deliberately NOT read or
-        applied - see ``app.services.analysis.engines``.
-        """
+        ``asset`` is a STAC asset key and must be in ``ANALYSIS_BAND_ASSETS``
+        (Sentinel-2 spectral bands) or, for the Sentinel-1 RTC collection only,
+        ``SAR_ANALYSIS_BAND_ASSETS`` (``vv``/``vh``); the display whitelist does
+        not apply here. The STAC-advertised ``scale``/``offset`` are
+        deliberately NOT read or applied - see
+        ``app.services.analysis.engines``. Sentinel-1 RTC values are the
+        provider's linear gamma-naught power, returned untouched; the
+        conversion to decibels is the analysis engine's.
 
-        if asset not in ANALYSIS_BAND_ASSETS:
-            raise InvalidInputError(
-                f"Asset {asset!r} is not supported for quantitative band "
-                f"reads. Supported: {', '.join(ANALYSIS_BAND_ASSETS)}."
-            )
+        Sentinel-1 RTC rasters are not anonymously readable, so the resolved
+        href is exchanged for a short-lived read URL exactly as
+        :meth:`retrieve` does - the same bounded signing path, not a second
+        one. The token never leaves this method.
+        """
 
         resolved_collection = _validate_stac_identifier(
             collection or self._settings.stac_collection, "collection"
         )
+        if asset in SAR_ANALYSIS_BAND_ASSETS:
+            # A polarization is only a physical quantity in the collection that
+            # publishes it as terrain-corrected gamma naught. Refusing here
+            # keeps a SAR asset key from being resolved against an optical
+            # collection, where it would either not exist or not mean this.
+            if resolved_collection != RTC_COLLECTION:
+                raise InvalidInputError(
+                    f"Asset {asset!r} is a Sentinel-1 polarization and is "
+                    f"readable quantitatively only from the "
+                    f"{RTC_COLLECTION!r} collection, not "
+                    f"{resolved_collection!r}."
+                )
+        elif asset in QUALITY_BAND_ASSETS:
+            # Sentinel-2's scene classification: meaningless on a SAR product.
+            if resolved_collection == RTC_COLLECTION:
+                raise InvalidInputError(
+                    f"Asset {asset!r} is a Sentinel-2 quality layer and cannot be "
+                    f"read from {RTC_COLLECTION!r}."
+                )
+        elif asset not in ANALYSIS_BAND_ASSETS:
+            readable = (*ANALYSIS_BAND_ASSETS, *QUALITY_BAND_ASSETS, *SAR_ANALYSIS_BAND_ASSETS)
+            raise InvalidInputError(
+                f"Asset {asset!r} is not supported for quantitative band "
+                f"reads. Supported: {', '.join(readable)}."
+            )
         scene_id = _validate_stac_identifier(scene_id, "scene_id")
         item = self._fetch_item(scene_id, resolved_collection)
         scene_bbox = item.get("bbox")
@@ -370,15 +602,34 @@ class ImageryService(DomainService):
             )
 
         href = self._resolve_asset_href(item, asset)
+        if asset in SAR_ANALYSIS_BAND_ASSETS:
+            descriptions = item["assets"][asset].get("raster:bands", [])
+            if descriptions:
+                if not isinstance(descriptions, list) or not isinstance(descriptions[0], dict):
+                    raise InvalidInputError("The Sentinel-1 RTC band metadata is malformed.")
+                encoding = descriptions[0]
+                require_linear_power_encoding(
+                    scale=encoding.get("scale", 1.0),
+                    offset=encoding.get("offset", 0.0), unit=encoding.get("unit"),
+                )
+        read_href = (
+            sign_rtc_asset(href, settings=self._settings, transport=self._transport)
+            if resolved_collection == RTC_COLLECTION else href
+        )
 
+        limits = self.quantitative_read_limits()
         band = self._read_band(
-            href,
+            read_href,
             bbox,
             # Rejection bounds, not a decimation target: quantitative reads stay
             # at native resolution, so an oversized window is refused.
-            max_dimension=self._settings.imagery_hard_max_dimension,
-            max_window_pixels=self._settings.imagery_max_window_pixels,
+            max_dimension=limits.max_dimension,
+            max_window_pixels=limits.max_window_pixels,
         )
+        if asset in SAR_ANALYSIS_BAND_ASSETS:
+            require_linear_power_encoding(
+                scale=band.source_scale, offset=band.source_offset, unit=band.source_unit,
+            )
         logger.info(
             "Band %s for %s (%s): %sx%s px at %s m/px",
             asset,

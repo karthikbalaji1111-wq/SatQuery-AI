@@ -2,8 +2,28 @@
 
 from __future__ import annotations
 
+from app.api.routes.query import get_ai_service
 from app.main import create_app
+from app.services.ai import AiService, MockIntentParser
 from fastapi.testclient import TestClient
+
+
+def envelope_client() -> TestClient:
+    """A client whose AI provider is wired with a fake parser.
+
+    The tests below are about the shape of an ERROR RESPONSE, not about any
+    provider. Left to the real factory, the request never reaches body
+    validation on a deployment holding no credential: the dependency is
+    resolved first and raises, so the assertion sees the upstream 502 rather
+    than the 422 it is written about. Injecting the fake makes these tests
+    say what they mean, on any machine.
+    """
+
+    app = create_app()
+    app.dependency_overrides[get_ai_service] = lambda: AiService(
+        parser=MockIntentParser()
+    )
+    return TestClient(app, raise_server_exceptions=False)
 
 
 def test_health_ok(client: TestClient) -> None:
@@ -31,7 +51,7 @@ def test_health_ok(client: TestClient) -> None:
 
 
 def test_a_malformed_body_uses_the_same_envelope_as_every_other_error() -> None:
-    client = TestClient(create_app(), raise_server_exceptions=False)
+    client = envelope_client()
     response = client.post("/api/v1/query/parse", json={})
 
     assert response.status_code == 422
@@ -49,7 +69,7 @@ def test_a_schema_rejection_stays_distinguishable_from_a_semantic_one() -> None:
     one are different failures, and unifying the envelope must not erase that.
     """
 
-    client = TestClient(create_app(), raise_server_exceptions=False)
+    client = envelope_client()
     malformed = client.post("/api/v1/query/parse", json={})
     semantic = client.post(
         "/api/v1/satellite/imagery",
@@ -72,7 +92,7 @@ def test_a_validation_error_never_echoes_the_offending_value() -> None:
     inside an error, so only the location and the reason are reported.
     """
 
-    client = TestClient(create_app(), raise_server_exceptions=False)
+    client = envelope_client()
     secret = "sk-CANARY-must-not-be-echoed"
     response = client.post(
         "/api/v1/query/parse", json={"prompt": {"nested": secret}}

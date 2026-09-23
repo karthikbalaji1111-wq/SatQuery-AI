@@ -1385,11 +1385,12 @@ def test_read_band_is_collection_aware() -> None:
     assert fetcher.scene_ids == ["scene-x"]
 
 
-# swir16 is now readable (NDBI needs it, through an explicit guarded
-# co-registration). scl stays out - cloud masking is not implemented - and
-# the display assets stay out because display and analysis are different
-# concerns that must not merge.
-@pytest.mark.parametrize("asset", ["scl", "visual", "vv", "vh"])
+# swir16 is readable (NDBI needs it, through an explicit guarded
+# co-registration). scl became readable with pixel quality control (Stage 3),
+# through its own QUALITY_BAND_ASSETS allowlist - see the tests below. The
+# display assets stay out because display and analysis are different concerns
+# that must not merge.
+@pytest.mark.parametrize("asset", ["visual", "vv", "vh", "aot", "B01"])
 def test_read_band_rejects_assets_outside_the_analysis_allowlist(asset: str) -> None:
     service, fetcher, reader = band_service()
     with pytest.raises(InvalidInputError, match="quantitative"):

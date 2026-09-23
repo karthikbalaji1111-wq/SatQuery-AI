@@ -7,6 +7,33 @@ export interface HealthResponse {
   environment: string;
 }
 
+/** One thing the deployment needs in order to do its work. */
+export interface Capability {
+  name: string;
+  ready: boolean;
+  /** Why, in the server's own words - populated whether ready or not. */
+  detail: string;
+}
+
+/**
+ * Whether this deployment can actually perform its advertised workflow.
+ *
+ * Distinct from `HealthResponse`, which answers only "is the process alive?".
+ * A process with no credential for its selected provider is perfectly alive and
+ * cannot answer a single query, and `/health` reported that as `ok`.
+ *
+ * The endpoint answers **503 when not ready**, so orchestration reads the
+ * status code - but the body is still the explanation, which is why it must be
+ * read on both 200 and 503.
+ */
+export interface ReadinessResponse {
+  ready: boolean;
+  service: string;
+  version: string;
+  environment: string;
+  capabilities: Capability[];
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;
@@ -85,6 +112,15 @@ export interface SceneSearchResponse {
   scene_count: number;
   scenes: SatelliteScene[];
   catalog: string;
+  /**
+   * How many scenes the query matched IN THE CATALOG, when it reported that.
+   *
+   * `scene_count` is how many came back - one bounded page. Selection picks
+   * from that page, so a chosen scene is the best of what was returned, not
+   * the best that exists. `null`/absent means the catalog did not say, which is
+   * not the same as "all of them".
+   */
+  scenes_matched?: number | null;
 }
 
 export interface ImageryRequest {
@@ -192,13 +228,44 @@ export interface ExecutedWindow {
   selected_scene_id: string | null;
   imagery: ImageryResponse | null;
   imagery_error: string | null;
+  /**
+   * Which catalog answered THIS window. A mixed request reaches two services -
+   * Sentinel-2 from Earth Search, Sentinel-1 RTC from the Planetary Computer -
+   * so provenance travels per observation rather than once per result.
+   * Optional: an older server does not send it.
+   */
+  catalog?: string | null;
+  /**
+   * Why this window produced nothing, when DISCOVERY failed. Distinct from
+   * `imagery_error`, which means the scene was found and its picture could not
+   * be read.
+   */
+  error?: string | null;
+  /**
+   * How many scenes matched this window in the catalog, when it said. Together
+   * with `scene_count` this is what makes the scope of the selection readable.
+   */
+  scenes_matched?: number | null;
 }
+
+/**
+ * Which Sentinel-1 polarization a SAR window renders when imagery is
+ * requested. Both are real measurement bands of the same RTC acquisition; VV
+ * and VH are NOT a classification and neither is "the" SAR image.
+ */
+export type SarPolarization = "vv" | "vh";
 
 export interface QueryExecutionRequest {
   intent: SatQueryIntent;
   include_imagery?: boolean;
   max_cloud_cover?: number;
   limit?: number;
+  /**
+   * Which polarization a Sentinel-1 window renders. Ignored by optical
+   * windows, which have their own asset. Omitted leaves the request
+   * byte-identical to the previous contract; the backend defaults to `vv`.
+   */
+  sar_polarization?: SarPolarization;
 }
 
 /**
@@ -223,12 +290,30 @@ export interface ObservationSet {
   observations: Observation[];
 }
 
+/**
+ * Whether every requested window actually executed.
+ *
+ * About EXECUTION, not scientific completeness: a window that ran and matched
+ * no scene is `completed`, because discovery worked and the archive simply
+ * holds nothing there. Derived server-side from the windows, so it cannot
+ * disagree with them.
+ */
+export type ExecutionStatus = "completed" | "partial" | "failed";
+
 export interface QueryExecutionResult {
   plan: ResolvedQueryPlan;
   executed_modalities: Modality[];
   skipped_modalities: SkippedModality[];
   windows: ExecutedWindow[];
+  /**
+   * The catalog that answered first. Kept for compatibility; `catalogs` names
+   * every service a mixed run actually used, and each window carries its own.
+   */
   catalog: string;
+  /** Every catalog that answered, in the order first seen. */
+  catalogs?: string[];
+  /** Optional so existing fixtures and older servers remain valid. */
+  status?: ExecutionStatus;
   /**
    * Derived server-side from `windows`; the backend always sends it and
    * recomputes it on input. Optional here so existing fixtures and consumers
@@ -371,6 +456,19 @@ export interface AnalysisRequest {
    * `false`.
    */
   include_temporal_ndwi?: boolean;
+  /**
+   * Opt in to quantitative Sentinel-1 backscatter statistics over the SAR
+   * window: VV and VH gamma-naught in decibels, plus their mean difference.
+   *
+   * The provider (Microsoft Planetary Computer) supplies radiometrically
+   * terrain-corrected gamma naught; SatQuery converts those provider values to
+   * dB and reports statistics over them. It performs no radiometric
+   * calibration, speckle filtering or polarimetric decomposition of its own.
+   *
+   * Omitted (or `false`) leaves the request identical to the previous
+   * behaviour; the backend defaults it to `false`.
+   */
+  include_sar_backscatter?: boolean;
 }
 
 /**
@@ -422,7 +520,63 @@ export interface SpatialMeasurement {
   corners_wgs84: number[][] | null;
 }
 
+export interface SarPolarizationStatistics {
+  polarization: SarPolarization;
+  measurements: Measurement[];
+  valid_pixel_count: number;
+  nonpositive_pixel_count: number;
+  window_pixel_count: number;
+  crs: string | null;
+  resolution: number | null;
+  transform: number[] | null;
+}
+
+export interface SarBackscatterResult {
+  scene_id: string;
+  window_label: string;
+  acquired_at: string | null;
+  collection: string | null;
+  polarizations: SarPolarizationStatistics[];
+  difference: {
+    vv_mean_db: number;
+    vh_mean_db: number;
+    vv_minus_vh_mean_db: number;
+    paired_valid_pixel_count: number;
+    crs: string | null;
+    transform: number[] | null;
+  } | null;
+  measurements: Measurement[];
+  warnings: string[];
+}
+
+/**
+ * What became of ONE requested analysis.
+ *
+ * `status` (below) answers a different question - whether the TASK has an
+ * engine - so on its own it reported "ok" for a request whose analysis
+ * produced nothing at all.
+ */
+export interface AnalysisOutcome {
+  /** "ndvi" | "ndwi" | "ndbi" | "temporal_ndwi" | "sar_backscatter". */
+  name: string;
+  status: "completed" | "unavailable";
+  /** Present only when unavailable; the server's own words. */
+  reason?: string | null;
+}
+
+/**
+ * Whether the analyses the request asked for were produced. `not_requested` is
+ * distinct from `none`: asking for nothing and getting nothing is a complete
+ * answer to the question that was asked.
+ */
+export type AnalysisCompleteness =
+  | "complete"
+  | "partial"
+  | "none"
+  | "not_requested";
+
 export interface AnalysisResult {
+  sar_backscatter?: SarBackscatterResult | null;
   status: AnalysisStatus;
   task: QueryTask;
   answer: string;
@@ -447,6 +601,13 @@ export interface AnalysisResult {
    * fabricated 0%.
    */
   spatial_measurement?: SpatialMeasurement | null;
+  /**
+   * One entry per analysis the request asked for. Optional so existing
+   * fixtures and older servers remain valid.
+   */
+  analysis_outcomes?: AnalysisOutcome[];
+  /** Derived server-side from `analysis_outcomes`. */
+  completeness?: AnalysisCompleteness;
 }
 
 // --------------------------------------------------------------------------- //
@@ -461,6 +622,7 @@ export type AgentToolName =
   | "execute_query"
   | "spectral_indices"
   | "ndwi_statistics"
+  | "sar_backscatter_statistics"
   | "temporal_ndwi_statistics"
   | "rs_model_analysis";
 
@@ -488,6 +650,10 @@ export interface NdwiParams {
   tool: "ndwi_statistics";
 }
 
+export interface SarBackscatterParams {
+  tool: "sar_backscatter_statistics";
+}
+
 export interface TemporalNdwiParams {
   tool: "temporal_ndwi_statistics";
 }
@@ -507,6 +673,7 @@ export type AgentToolCall =
   | ExecuteQueryParams
   | SpectralIndicesParams
   | NdwiParams
+  | SarBackscatterParams
   | TemporalNdwiParams
   | RsModelParams;
 
@@ -572,6 +739,7 @@ export interface EvidenceItem {
     | "ndwi"
     | "ndbi"
     | "temporal_ndwi"
+    | "sar_backscatter"
     | "compatibility"
     | "model";
   measurement: Measurement | null;
@@ -617,7 +785,7 @@ export interface AgentQuestionRequest {
  * inference backend and nothing else: the deterministic pipeline, grounding
  * and evidence contract are identical either way.
  */
-export type AiProvider = "gemini" | "nvidia";
+export type AiProvider = "gemini" | "nvidia" | "anthropic" | "local";
 
 /** Which step a model would fill. */
 export type ModelRole = "visual" | "text";
@@ -625,10 +793,15 @@ export type ModelRole = "visual" | "text";
 /**
  * One catalogued model and this deployment's view of it.
  *
- * `configured` and `compatible` are separate questions and are reported
- * separately: a model can exist, be incompatible with the step, or lack a
- * credential. None of these means "reachable" - only a real request answers
- * that, so the server never claims availability here.
+ * `configured`, `compatible` and `available` are separate questions and are
+ * reported separately: a model can exist, be incompatible with the step, lack a
+ * credential, or have been RETIRED by its provider. None of these means
+ * "reachable" - only a real request answers that, so the server never claims
+ * availability here.
+ *
+ * `available` is a published retirement fact, not a health check: a retired
+ * model stays `compatible` (it is still image-capable) but must never be
+ * selectable, because the request would fail with 410.
  */
 export interface ModelOption {
   provider: string;
@@ -643,6 +816,11 @@ export interface ModelOption {
   endpoint_type: string;
   configured: boolean;
   compatible: boolean;
+  /** False when the provider has retired the model. Optional for forward
+   *  compatibility with a server that predates the field; treated as available
+   *  when absent, which matches how such a server behaved. */
+  available?: boolean;
+  retired_reason?: string | null;
   status: string;
 }
 

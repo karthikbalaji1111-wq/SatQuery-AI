@@ -237,6 +237,9 @@ def test_the_registry_is_still_exactly_the_approved_tools() -> None:
         "ndwi_statistics",
         "temporal_ndwi_statistics",
         "rs_model_analysis",
+        # Quantitative Sentinel-1 backscatter. Added deliberately; the list
+        # stays exhaustive so an unreviewed tool still fails this test.
+        "sar_backscatter_statistics",
     }
 
 

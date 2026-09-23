@@ -92,10 +92,16 @@ def _require_matching_band_grids(high: BandWindow, low: BandWindow, label: str) 
         )
 
 
-def _normalised_difference_values(
+def _pair_operands(
     high: BandWindow, low: BandWindow, label: str
-) -> np.ndarray:
-    """``(high - low) / (high + low)`` over pixels valid in both. Finite, 1-D."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """``(a, b, a + b, valid)`` for a band pair on one grid.
+
+    The ONE statement of which pixels a normalised difference may use: valid in
+    both source masks, finite, and a non-zero denominator. Pixel quality
+    (``analysis.pixel_quality``) counts band-nodata with this same function, so
+    the quality record and the statistic cannot disagree about a pixel.
+    """
 
     if high.values.shape != low.values.shape:
         raise ImageryError(
@@ -116,7 +122,21 @@ def _normalised_difference_values(
 
     denominator = a + b
     valid &= denominator != 0.0
+    return a, b, denominator, valid
 
+
+def pair_validity(high: BandWindow, low: BandWindow, label: str) -> np.ndarray:
+    """Pixels where ``(high - low) / (high + low)`` is defined by the band data."""
+
+    return _pair_operands(high, low, label)[3]
+
+
+def _normalised_difference_values(
+    high: BandWindow, low: BandWindow, label: str
+) -> np.ndarray:
+    """``(high - low) / (high + low)`` over pixels valid in both. Finite, 1-D."""
+
+    a, b, denominator, valid = _pair_operands(high, low, label)
     index = (a[valid] - b[valid]) / denominator[valid]
     return index[np.isfinite(index)]
 
@@ -126,20 +146,7 @@ def _normalised_difference_grid(
 ) -> tuple[np.ndarray, np.ndarray]:
     """The 2-D sibling of :func:`_normalised_difference_values`."""
 
-    if high.values.shape != low.values.shape:
-        raise ImageryError(
-            f"Cannot compute {label}: the two band windows have different "
-            f"shapes ({high.values.shape} vs {low.values.shape}). Both bands "
-            "must describe the same pixels."
-        )
-
-    _require_matching_band_grids(high, low, label)
-    a = high.values.astype(np.float64)
-    b = low.values.astype(np.float64)
-    valid = high.valid & low.valid & np.isfinite(a) & np.isfinite(b)
-
-    denominator = a + b
-    valid &= denominator != 0.0
+    a, b, denominator, valid = _pair_operands(high, low, label)
 
     index = np.zeros(a.shape, dtype=np.float64)
     np.divide(a - b, denominator, out=index, where=valid)
@@ -691,18 +698,24 @@ def compute_ndwi_temporal_change(
 #: The one derived measurement this engine may emit.
 MEAN_NDWI_DIFFERENCE = "mean_ndwi_difference"
 
-#: Above this reported scene cloud cover the statistics get an explicit warning.
-#: The index is never cloud-masked, so this is context, not a correction.
+#: Above this reported SCENE cloud cover the statistics get an explicit warning.
+#: Context, not a correction: the index is computed only over pixels the Scene
+#: Classification Layer marks clear, but that classification is itself imperfect
+#: and a heavily clouded scene leaves little clear ground to summarise.
 HIGH_CLOUD_COVER_PERCENT = 30.0
 
 _MEAN_NAME = "ndwi_mean"
 _COUNT_NAME = "ndwi_valid_pixel_count"
 
+#: Scoped to THIS value on purpose. It used to say flatly "No pixels were
+#: compared against one another" - true of mean_ndwi_difference, but shipped in
+#: the same response as the paired-pixel NDWI change computed on a shared grid,
+#: where a reader met it as a statement about the whole result and found the
+#: evidence contradicting itself.
 _WARN_AGGREGATE = (
     "mean_ndwi_difference is the difference between two independently computed "
-    "aggregate statistics, each summarising its own set of pixels. No pixels "
-    "were compared against one another, and the value describes the statistics "
-    "only."
+    "aggregate statistics, each summarising its own set of pixels. This value "
+    "compares no pixel with another; it describes the two statistics only."
 )
 _WARN_NO_MEAN = (
     "At least one observation has no valid pixels and therefore no mean NDWI, "
@@ -787,14 +800,16 @@ def _cloud_warnings(observation: ObservationIndexResult) -> list[str]:
     label = observation.window_label
     if cover is None:
         return [
-            f"Observation {label!r} reports no cloud cover metadata, so cloud "
-            "contamination is unknown; the index is not cloud-masked."
+            f"Observation {label!r} reports no scene cloud cover metadata, so its "
+            "scene-level cloud cover is unknown; its usable pixels are stated by "
+            "the scene classification mask alone."
         ]
     if cover > HIGH_CLOUD_COVER_PERCENT:
         return [
-            f"Observation {label!r} reports {cover}% cloud cover; the index is "
-            "not cloud-masked, so its statistics may reflect cloud rather than "
-            "ground."
+            f"Observation {label!r} reports {cover}% scene cloud cover. Pixels "
+            "the scene classification marks as cloud, cloud shadow or snow were "
+            "excluded, but that classification is not perfect, so residual "
+            "cloud may remain in the statistics."
         ]
     return []
 

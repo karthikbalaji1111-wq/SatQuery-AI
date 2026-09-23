@@ -6,7 +6,7 @@ grounding, evidence, API contract - can tell which provider answered except
 through the attribution that travels with the observation.
 
 There is deliberately **no fallback**. If the configured provider cannot be
-built, this raises. Quietly answering with the other provider would make a
+built, this raises. Quietly answering with a different provider would make a
 result unattributable, which is exactly the property the visual path exists to
 preserve.
 """
@@ -15,10 +15,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.core.config import SUPPORTED_AI_PROVIDERS, Settings, get_settings
+from app.core.config import (
+    AI_PROVIDER_FIELDS,
+    SUPPORTED_AI_PROVIDERS,
+    Settings,
+    get_settings,
+)
 from app.core.errors import UpstreamServiceError
 from app.services.agent.planner import AgentPlanner
-from app.services.agent.providers.catalog import ModelRole, find_model
+from app.services.agent.providers.catalog import ModelCard, ModelRole, find_model
 from app.services.agent.synthesizer import AnswerSynthesizer
 from app.services.agent.visual import VisualAnalyst, VisualAnswer
 from app.services.ai.ports import IntentParser
@@ -61,32 +66,38 @@ def get_visual_analyst(
 
     _check_configured_model(settings, selected, role)
 
+    if not settings.is_configured(selected):
+        raise UpstreamServiceError(
+            f"{AI_PROVIDER_FIELDS[selected].env_var} is not configured; "
+            f"visual analysis is unavailable for the {selected} provider."
+        )
+
+    # Imported here, not at module scope: a provider SDK is heavy and a build
+    # that only ever runs one provider should not pay to import the others.
     if selected == "gemini":
-        if not settings.gemini_api_key:
-            raise UpstreamServiceError(
-                "GEMINI_API_KEY is not configured; visual analysis is "
-                "unavailable for the gemini provider."
-            )
-        # Imported here, not at module scope: the SDK is heavy and a build that
-        # only ever runs NVIDIA should not pay to import it.
         from app.services.agent.providers.gemini import GeminiVisualAnalyst
 
         return GeminiVisualAnalyst(settings=settings)
 
-    if not settings.nvidia_api_key:
-        raise UpstreamServiceError(
-            "NVIDIA_API_KEY is not configured; visual analysis is unavailable "
-            "for the nvidia provider."
+    if selected == "anthropic":
+        from app.services.agent.providers.anthropic import (
+            AnthropicVisualAnalyst,
         )
+
+        return AnthropicVisualAnalyst(settings=settings)
+
+    if selected == "local":
+        from app.services.agent.providers.local import LocalVisualAnalyst
+
+        return LocalVisualAnalyst(settings=settings)
+
     from app.services.agent.providers.nvidia import NvidiaVisualAnalyst
 
     return NvidiaVisualAnalyst(settings=settings)
 
 
 def _configured_model(settings: Settings, provider: str) -> str:
-    return (
-        settings.gemini_model if provider == "gemini" else settings.nvidia_model
-    )
+    return settings.model_for(provider)
 
 
 def _apply_model_override(
@@ -107,10 +118,17 @@ def _apply_model_override(
         raise UpstreamServiceError(
             f"Model {chosen!r} is not in the catalog for provider {provider!r}."
         )
+    # Retirement is checked BEFORE capability. `serves()` already returns False
+    # for a retired model, so without this the caller would be told the model
+    # "does not support visual analysis" - a true statement about the wrong
+    # problem, sending them to pick a different capability instead of a
+    # different model.
+    if not card.is_available:
+        raise UpstreamServiceError(_retired_message(card))
     if not card.serves(role):
         raise UpstreamServiceError(_unsupported_message(card.display_name, role))
 
-    field = "gemini_model" if provider == "gemini" else "nvidia_model"
+    field = AI_PROVIDER_FIELDS[provider].model
     return settings.model_copy(update={field: chosen})
 
 
@@ -127,8 +145,24 @@ def _check_configured_model(
 
     configured = _configured_model(settings, provider)
     card = find_model(provider, configured)
+    if card is not None and not card.is_available:
+        raise UpstreamServiceError(_retired_message(card))
     if card is not None and not card.serves(role):
         raise UpstreamServiceError(_unsupported_message(card.display_name, role))
+
+
+def _retired_message(card: ModelCard) -> str:
+    """Name the retirement and its reason, so the fix is obvious.
+
+    The reason is catalogued static text written in this repository, not
+    provider output, so quoting it leaks nothing.
+    """
+
+    return (
+        f"{card.display_name} ({card.model_id}) has been retired by its "
+        f"provider and can no longer be selected. {card.retired_reason} "
+        "Choose a different model."
+    )
 
 
 def _unsupported_message(display_name: str, role: ModelRole) -> str:
@@ -200,6 +234,34 @@ def get_agent_providers(
             synthesizer=GeminiAnswerSynthesizer(settings=resolved),
         )
 
+    if selected == "anthropic":
+        from app.services.agent.providers.anthropic import (
+            AnthropicAgentPlanner,
+            AnthropicAnswerSynthesizer,
+        )
+
+        return ProviderBundle(
+            provider=selected,
+            model=chosen_model,
+            planner=AnthropicAgentPlanner(settings=resolved),
+            visual_analyst=_deferred_visual(resolved, selected, model),
+            synthesizer=AnthropicAnswerSynthesizer(settings=resolved),
+        )
+
+    if selected == "local":
+        from app.services.agent.providers.local import (
+            LocalAgentPlanner,
+            LocalAnswerSynthesizer,
+        )
+
+        return ProviderBundle(
+            provider=selected,
+            model=chosen_model,
+            planner=LocalAgentPlanner(settings=resolved),
+            visual_analyst=_deferred_visual(resolved, selected, model),
+            synthesizer=LocalAnswerSynthesizer(settings=resolved),
+        )
+
     from app.services.agent.providers.nvidia import (
         NvidiaAgentPlanner,
         NvidiaAnswerSynthesizer,
@@ -225,15 +287,18 @@ def _resolve_provider(settings: Settings, provider: str | None) -> str:
 
 
 def _require_credential(settings: Settings, provider: str) -> None:
-    if provider == "gemini" and not settings.gemini_api_key:
+    """Refuse a provider this deployment holds no credential for.
+
+    Table-driven rather than a chain of ``if provider ==`` branches: a
+    provider added to :data:`AI_PROVIDER_FIELDS` but forgotten here would
+    silently skip its own credential check, and the message names the variable
+    an operator actually sets.
+    """
+
+    if not settings.is_configured(provider):
         raise UpstreamServiceError(
-            "GEMINI_API_KEY is not configured; the gemini provider is "
-            "unavailable."
-        )
-    if provider == "nvidia" and not settings.nvidia_api_key:
-        raise UpstreamServiceError(
-            "NVIDIA_API_KEY is not configured; the nvidia provider is "
-            "unavailable."
+            f"{AI_PROVIDER_FIELDS[provider].env_var} is not configured; the "
+            f"{provider} provider is unavailable."
         )
 
 
@@ -296,7 +361,7 @@ def get_intent_parser(
     text-only model can serve it.
 
     Raises :class:`UpstreamServiceError` when the selected provider has no
-    credential. It never falls back to the other provider: an intent silently
+    credential. It never falls back to another provider: an intent silently
     parsed by a provider the operator did not select would make the whole run
     unattributable.
     """
@@ -310,6 +375,18 @@ def get_intent_parser(
         from app.services.ai.parser import GeminiIntentParser
 
         return GeminiIntentParser(settings=settings)
+
+    if selected == "anthropic":
+        from app.services.agent.providers.anthropic import (
+            AnthropicIntentParser,
+        )
+
+        return AnthropicIntentParser(settings=settings)
+
+    if selected == "local":
+        from app.services.agent.providers.local import LocalIntentParser
+
+        return LocalIntentParser(settings=settings)
 
     from app.services.agent.providers.nvidia import NvidiaIntentParser
 

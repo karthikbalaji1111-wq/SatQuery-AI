@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import ceil
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -20,6 +22,11 @@ class AppError(Exception):
     def __init__(self, message: str, *, code: str | None = None) -> None:
         super().__init__(message)
         self.message = message
+        #: Response headers this error carries, or ``None``. Exists for the one
+        #: case where the status code alone is not actionable: a 429 without
+        #: ``Retry-After`` tells a client to back off for an unknown time, so it
+        #: retries immediately and the limit does its job twice.
+        self.headers: dict[str, str] | None = None
         if code is not None:
             self.code = code
 
@@ -59,6 +66,61 @@ class ImageryError(AppError):
     code = "imagery_error"
 
 
+class RateLimitedError(AppError):
+    """Raised when one client has exceeded its request allowance.
+
+    Carries ``Retry-After`` so a well-behaved client knows how long to wait
+    instead of guessing.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+
+    def __init__(self, message: str, *, retry_after_seconds: float) -> None:
+        super().__init__(message)
+        # Whole seconds, rounded UP: rounding down would invite a retry that is
+        # still inside the window.
+        self.retry_after_seconds = retry_after_seconds
+        self.headers = {"Retry-After": str(max(1, ceil(retry_after_seconds)))}
+
+
+class ServiceOverloadedError(AppError):
+    """Raised when every slot for an expensive operation is already in use.
+
+    Deliberately 503 rather than 429: the client did nothing wrong and the same
+    request may well succeed shortly. It is a statement about this process, not
+    about this caller.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_overloaded"
+
+    def __init__(self, message: str, *, retry_after_seconds: float = 5.0) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        self.headers = {"Retry-After": str(max(1, ceil(retry_after_seconds)))}
+
+
+class PayloadTooLargeError(AppError):
+    """Raised when a request body exceeds the configured ceiling."""
+
+    # The 413 constant was renamed; the older alias is deprecated and warns.
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    code = "payload_too_large"
+
+
+class WorkflowTimeoutError(AppError):
+    """Raised when a workflow exhausts its total execution budget.
+
+    504 rather than 500: the work was still running when the budget expired, so
+    nothing is known to be broken - the request simply cost more than this
+    deployment allows one request to cost.
+    """
+
+    status_code = status.HTTP_504_GATEWAY_TIMEOUT
+    code = "workflow_timeout"
+
+
 class IntentParsingError(AppError):
     """Raised when a prompt cannot be turned into a valid ``SatQueryIntent``.
 
@@ -74,6 +136,28 @@ def _error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
 
+def error_response(
+    code: str,
+    message: str,
+    *,
+    status_code: int,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    """The one error envelope, as a response.
+
+    Exists for code that cannot raise: an exception raised inside an outer HTTP
+    middleware travels past the handlers registered below - they sit further in
+    - and would surface as a bare 500 with a different shape. Such a middleware
+    returns this instead, so one envelope still describes every failure.
+    """
+
+    return JSONResponse(
+        status_code=status_code,
+        content=_error_body(code, message),
+        headers=headers,
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach JSON error handlers to the app."""
 
@@ -83,6 +167,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(exc.code, exc.message),
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

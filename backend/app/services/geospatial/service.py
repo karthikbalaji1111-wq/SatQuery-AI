@@ -58,6 +58,8 @@ class GeospatialService(DomainService):
         return ResolveResponse(
             query_type="place",
             display_name=place.display_name,
+            place_class=place.place_class,
+            place_type=place.place_type,
             center=place.center,
             bbox=place.bbox,
             source="nominatim",

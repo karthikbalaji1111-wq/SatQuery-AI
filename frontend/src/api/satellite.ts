@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import { asSceneSearchResponse } from "./validate";
 import type {
   ImageryRequest,
   ImageryResponse,
@@ -10,15 +11,17 @@ import type {
  * Discover Sentinel-2 L2A scenes (STAC metadata only) for a bounding box and
  * date range via the backend. No imagery is fetched.
  */
-export function searchScenes(
+export async function searchScenes(
   request: SceneSearchRequest,
   signal?: AbortSignal,
 ): Promise<SceneSearchResponse> {
-  return apiRequest<SceneSearchResponse>("/api/v1/satellite/search", {
-    method: "POST",
-    body: request,
-    signal,
-  });
+  return asSceneSearchResponse(
+    await apiRequest<unknown>("/api/v1/satellite/search", {
+      method: "POST",
+      body: request,
+      signal,
+    }),
+  );
 }
 
 /**

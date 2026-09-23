@@ -63,7 +63,7 @@ export function EarthCanvas() {
         return;
       }
 
-      const { buildWorld, qualityFor } = await import("./scene");
+      const { buildWorld, qualityFor, applyEnvironment } = await import("./scene");
       const quality = qualityFor(
         window.innerWidth,
         navigator.hardwareConcurrency ?? 4,
@@ -88,12 +88,40 @@ export function EarthCanvas() {
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       host.appendChild(renderer.domElement);
 
+      // Gives the satellite's metals something to reflect. Generated, not
+      // fetched, so it costs one startup pass and no request.
+      const environment = applyEnvironment(renderer, world);
+
+      // Loop state, declared ahead of everything that touches it: resize() and
+      // readScroll() both run once during setup, and a `let` read before its
+      // declaration is a ReferenceError rather than an undefined.
+      let smoothed = 0;
+      let last = performance.now();
+      let frame = 0;
+      let visible = true;
+      let lastScrollAt = performance.now();
+      let lastDrawn = 0;
+      let started = false;
+
+      // Once the camera has caught up and the reader has stopped, the only
+      // thing still changing is a cloud drift of 0.004 rad/s. Presenting that
+      // at 120 Hz on a fanless laptop is pure heat, so the loop keeps full
+      // rate while anything is actually happening and halves it when nothing
+      // is. Any scroll event restores full rate on the very next frame, so
+      // this can never be felt as lag.
+      const IDLE_AFTER_MS = 420;
+      const IDLE_FRAME_MS = 1000 / 30;
+
       const resize = () => {
         const w = host.clientWidth;
         const h = host.clientHeight;
         renderer.setSize(w, h, false);
         world.camera.aspect = w / Math.max(1, h);
         world.camera.updateProjectionMatrix();
+        // Under reduced motion the loop renders once and stops, so a resize
+        // would otherwise leave the held frame stretched across the new
+        // viewport until something else happened to redraw it.
+        if (reducedMotion && started) frame = requestAnimationFrame(tick);
       };
       resize();
       window.addEventListener("resize", resize);
@@ -104,15 +132,13 @@ export function EarthCanvas() {
       const readScroll = () => {
         const max = document.documentElement.scrollHeight - window.innerHeight;
         targetProgress = max > 0 ? window.scrollY / max : 0;
+        lastScrollAt = performance.now();
       };
       readScroll();
       window.addEventListener("scroll", readScroll, { passive: true });
       window.addEventListener("resize", readScroll);
 
-      let smoothed = targetProgress;
-      let last = performance.now();
-      let frame = 0;
-      let visible = true;
+      smoothed = targetProgress;
 
       // Stop rendering entirely when the tab is hidden or the canvas is
       // scrolled past: a fixed WebGL canvas quietly burning GPU behind other
@@ -132,17 +158,32 @@ export function EarthCanvas() {
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
 
-        // Reduced motion: hold the opening pose. The Earth is still there and
-        // still beautiful; it simply does not move with the page.
-        smoothed = reducedMotion
-          ? 0
-          : damp(smoothed, targetProgress, 5.2, dt);
+        if (reducedMotion) {
+          // Hold the opening pose, and hold it as ONE frame. The Earth is
+          // still there and still beautiful; it simply does not move with the
+          // page, and a loop redrawing an identical image forever is not
+          // "reduced" motion by any reading of the request.
+          applyProgress(world, 0, 0, quality.motionScale);
+          renderer.render(world.scene, world.camera);
+          return;
+        }
 
-        applyProgress(world, smoothed, now / 1000);
+        const settled = Math.abs(targetProgress - smoothed) < 1e-4
+          && now - lastScrollAt > IDLE_AFTER_MS;
+        if (settled && now - lastDrawn < IDLE_FRAME_MS) {
+          if (visible) frame = requestAnimationFrame(tick);
+          return;
+        }
+        lastDrawn = now;
+
+        smoothed = damp(smoothed, targetProgress, 5.2, dt);
+
+        applyProgress(world, smoothed, now / 1000, quality.motionScale);
         renderer.render(world.scene, world.camera);
         if (visible) frame = requestAnimationFrame(tick);
       }
 
+      started = true;
       frame = requestAnimationFrame(tick);
       setReady(true);
 
@@ -152,6 +193,12 @@ export function EarthCanvas() {
         window.removeEventListener("resize", readScroll);
         window.removeEventListener("scroll", readScroll);
         document.removeEventListener("visibilitychange", onVisibility);
+        environment.dispose();
+        world.scene.environment = null;
+        // Textures are not reachable from the materials that hold them, so the
+        // world hands over its own ledger. Skipping this stranded three NASA
+        // maps on the GPU every time the reduced-motion preference changed.
+        for (const texture of world.textures) texture.dispose();
         renderer.dispose();
         world.scene.traverse((object) => {
           const mesh = object as { geometry?: { dispose(): void }; material?: unknown };

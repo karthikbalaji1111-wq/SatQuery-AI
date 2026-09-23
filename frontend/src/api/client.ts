@@ -46,7 +46,27 @@ export async function apiRequest<T>(
   }
 
   const text = await response.text();
-  const parsed: unknown = text ? JSON.parse(text) : null;
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // A body that is not JSON at all: an HTML error page from a proxy or a
+      // single-page host, a gateway's own plain-text message, or a truncated
+      // response. `JSON.parse` threw a raw SyntaxError straight out of this
+      // client, past every caller's `instanceof ApiError` handling, so the UI
+      // reported "Unexpected error" with no status - indistinguishable from a
+      // bug in the application. The status code is the useful fact here, and
+      // it survives.
+      throw new ApiError(
+        response.ok
+          ? `The server returned a non-JSON response (HTTP ${response.status}).`
+          : `Request failed with ${response.status}`,
+        response.status,
+        response.ok ? "invalid_response" : "http_error",
+      );
+    }
+  }
 
   if (!response.ok) {
     const errBody = parsed as ApiErrorBody | null;
