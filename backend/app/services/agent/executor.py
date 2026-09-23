@@ -45,6 +45,7 @@ from __future__ import annotations
 import base64
 import binascii
 from dataclasses import dataclass, field
+from typing import Protocol, runtime_checkable
 
 from app.core.errors import AppError, InvalidInputError
 from app.core.logging import get_logger
@@ -63,9 +64,33 @@ from app.services.agent.schemas import (
 from app.services.agent.visual import VisualAnalyst
 from app.services.analysis.schemas import AnalysisRequest, AnalysisResult, Measurement
 from app.services.analysis.service import AnalysisService
+from app.services.geospatial.schemas import BoundingBox
 from app.services.query.execution import QueryExecutionService
-from app.services.query.schemas import QueryExecutionRequest, QueryExecutionResult
+from app.services.query.schemas import (
+    QueryExecutionRequest,
+    QueryExecutionResult,
+    ResolvedQueryPlan,
+)
 from app.services.satellite.schemas import DEFAULT_LIMIT, ImageryResponse
+
+
+@runtime_checkable
+class PrechecksPlan(Protocol):
+    """An analysis service that can refuse an area before discovery.
+
+    The real :class:`AnalysisService` does. A test double that does not is
+    simply not consulted, and discovery runs as it always has.
+    """
+
+    def precheck_plan(
+        self,
+        bbox: BoundingBox,
+        *,
+        indices: tuple[str, ...] = (),
+        include_ndwi: bool = False,
+        include_temporal_ndwi: bool = False,
+        include_sar_backscatter: bool = False,
+    ) -> None: ...
 
 logger = get_logger("agent.executor")
 
@@ -105,6 +130,7 @@ def _execution_request(params: ExecuteQueryParams) -> QueryExecutionRequest:
     return QueryExecutionRequest(
         intent=params.intent,
         include_imagery=params.include_imagery,
+        sar_polarization=params.sar_polarization,
         max_cloud_cover=params.max_cloud_cover,
         limit=SERVER_QUERY_LIMIT,
     )
@@ -163,7 +189,7 @@ def _execution_items(execution: QueryExecutionResult) -> list[EvidenceItem]:
             text=f"Sentinel-1 RTC {polarization} imagery was retrieved. "
                  "The provider supplies terrain-corrected gamma naught. "
                  "SatQuery renders a grayscale display and does not perform SAR "
-                 "calibration or quantitative backscatter analysis.",
+                 "calibration; quantitative statistics are reported only when computed.",
             produced_by=_EXECUTION_PRODUCER,
         ))
     return items
@@ -202,12 +228,25 @@ def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
                     produced_by=_INDEX_PRODUCERS[key],
                 )
             )
+    sar = analysis.sar_backscatter
+    if sar is not None:
+        items.extend(_measurement_items(
+            sar.measurements, prefix="sar_backscatter", source="sar_backscatter",
+            produced_by="analysis.sar.compute_sar_backscatter",
+        ))
+        for index, warning in enumerate(sar.warnings):
+            items.append(EvidenceItem(
+                id=f"sar_backscatter.warning.{index}", source="sar_backscatter",
+                text=warning, produced_by="analysis.sar.compute_sar_backscatter",
+            ))
+    sar_names = {m.name for m in sar.measurements} if sar is not None else set()
     # Anything that named no index still reports, under the analysis source it
     # already had, rather than being dropped.
     unclaimed = [
         m
         for m in analysis.measurements
-        if not any(m.name.startswith(f"{k}_") for k in ("ndvi", "ndwi", "ndbi"))
+        if m.name not in sar_names
+        and not any(m.name.startswith(f"{k}_") for k in ("ndvi", "ndwi", "ndbi"))
     ]
     if unclaimed:
         items.extend(
@@ -422,17 +461,33 @@ class AgentExecutor:
 
         discovery, analysis_steps, visual_steps = self._classify(plan)
 
+        # What the analysis step will ask for, known before discovery runs.
+        # Explicit type check rather than a dynamic attribute lookup: the
+        # executor is deliberately free of reflection primitives, and the one
+        # tool that carries indices is known by name.
+        requested_indices: list[str] = []
+        for _, params, _ in analysis_steps:
+            if isinstance(params, SpectralIndicesParams):
+                for key in params.indices:
+                    if key not in requested_indices:
+                        requested_indices.append(key)
+        analysis_flags = [flag for _, _, flag in analysis_steps if flag is not None]
+
         steps: dict[int, AgentToolStep] = {}
         execution: QueryExecutionResult | None = None
+        discovery_failure: str | None = None
 
         if discovery is not None:
             index, params = discovery
             try:
-                execution = await self._query.execute(_execution_request(params))
+                execution = await self._execute_discovery(
+                    params, analysis_flags, requested_indices
+                )
             except AppError as exc:
                 logger.info(
                     "Agent discovery failed [%s]: %s", exc.code, exc.message
                 )
+                discovery_failure = exc.message
                 steps[index] = AgentToolStep(
                     status="failed", parameters=params, error_message=exc.message
                 )
@@ -440,21 +495,13 @@ class AgentExecutor:
                 steps[index] = AgentToolStep(status="ok", parameters=params)
 
         analysis = None
+        analysis_failure: str | None = None
         if analysis_steps:
-            # Explicit type check rather than a dynamic attribute lookup: the
-            # executor is deliberately free of reflection primitives, and the
-            # one tool that carries indices is known by name.
-            requested_indices: list[str] = []
-            for _, params, _ in analysis_steps:
-                if isinstance(params, SpectralIndicesParams):
-                    for key in params.indices:
-                        if key not in requested_indices:
-                            requested_indices.append(key)
             analysis, analysis_status, message = await self._run_analysis(
-                execution,
-                [flag for _, _, flag in analysis_steps if flag is not None],
-                requested_indices,
+                execution, analysis_flags, requested_indices
             )
+            if analysis_status == "failed":
+                analysis_failure = message
             for index, params, _ in analysis_steps:
                 steps[index] = AgentToolStep(
                     status=analysis_status,
@@ -469,11 +516,14 @@ class AgentExecutor:
                 )
 
         visual: EvidenceItem | None = None
+        visual_failure: str | None = None
         if visual_steps:
             visual, visual_step_state = await self._run_visual(
                 execution, visual_steps[0][1]
             )
             status, message, rejection = visual_step_state
+            if status == "failed":
+                visual_failure = message
             for index, params in visual_steps:
                 steps[index] = AgentToolStep(
                     status=status,
@@ -482,7 +532,14 @@ class AgentExecutor:
                     rejection_reason=rejection,
                 )
 
-        evidence = self._assemble_evidence(execution, analysis, visual)
+        evidence = self._assemble_evidence(
+            execution,
+            analysis,
+            visual,
+            discovery_failure=discovery_failure,
+            analysis_failure=analysis_failure,
+            visual_failure=visual_failure,
+        )
         ordered = [steps[index] for index in sorted(steps)]
 
         logger.info(
@@ -491,6 +548,39 @@ class AgentExecutor:
             ", ".join(f"{step.tool}={step.status}" for step in ordered),
         )
         return ExecutionOutcome(steps=ordered, evidence=evidence)
+
+    # -- discovery -------------------------------------------------------- #
+
+    async def _execute_discovery(
+        self,
+        params: ExecuteQueryParams,
+        flags: list[AnalysisFlag],
+        indices: list[str],
+    ) -> QueryExecutionResult:
+        """Run discovery, refusing an unmeasurable area BEFORE the catalog search.
+
+        When the plan will analyse, the analysis service's own request-stage
+        area rule runs on the grounded plan through ``before_discovery``: an
+        area the analysis would refuse costs a geocode, not a set of catalog
+        searches. Without an analysis step - or with an analysis service that
+        declares no precheck - discovery runs exactly as before.
+        """
+
+        request = _execution_request(params)
+        if not (flags or indices) or not isinstance(self._analysis, PrechecksPlan):
+            return await self._query.execute(request)
+        analysis = self._analysis
+
+        def precheck(plan: ResolvedQueryPlan) -> None:
+            analysis.precheck_plan(
+                plan.bbox,
+                indices=tuple(indices),
+                include_ndwi="include_ndwi" in flags,
+                include_temporal_ndwi="include_temporal_ndwi" in flags,
+                include_sar_backscatter="include_sar_backscatter" in flags,
+            )
+
+        return await self._query.execute(request, before_discovery=precheck)
 
     # -- planning-time classification ------------------------------------- #
 
@@ -563,6 +653,7 @@ class AgentExecutor:
             execution=execution,
             include_ndwi="include_ndwi" in flags,
             include_temporal_ndwi="include_temporal_ndwi" in flags,
+            include_sar_backscatter="include_sar_backscatter" in flags,
             indices=indices,
         )
         try:
@@ -586,8 +677,10 @@ class AgentExecutor:
         is admitted.
 
         Returns the evidence item (or ``None``) and the step's observed state.
-        A refusal or a provider failure yields no evidence at all rather than a
-        placeholder: an observation nobody made must not appear as one.
+        A refusal or a provider failure yields no OBSERVATION rather than a
+        placeholder: an observation nobody made must not appear as one. (A
+        failure is separately explained by a plain execution text item - see
+        ``_assemble_evidence`` - which carries no ``visual`` field.)
         """
 
         if self._visual is None:
@@ -639,22 +732,52 @@ class AgentExecutor:
         execution: QueryExecutionResult | None,
         analysis: AnalysisResult | None,
         visual: EvidenceItem | None = None,
+        *,
+        discovery_failure: str | None = None,
+        analysis_failure: str | None = None,
+        visual_failure: str | None = None,
     ) -> AgentEvidence:
         """Collect the deterministic outputs into the Commit 1 evidence shape.
 
         Nothing is interpreted, summarised or rounded here - the results are
         carried verbatim and the flattened ``items`` view exists only so a later
         grounding step can resolve a reference by id.
+
+        A failed step becomes one citable text item explaining the absence.
+        Without it the synthesiser received evidence with a hole in it and -
+        correctly, given that - wrote "Insufficient evidence", so a catalog
+        outage or a busy vision endpoint was presented to the user as a
+        successful abstention (both observed live). The message is the
+        system-authored ``AppError`` text already shown in the trace, never
+        upstream content. It adds no measurement, and it is never shaped as an
+        observation: it has no ``visual`` field, so a failed look cannot read as
+        something a model saw.
         """
 
         items: list[EvidenceItem] = []
+        failures = (
+            ("execution.discovery_failure", "Scene discovery", discovery_failure),
+            ("execution.analysis_failure", "The analysis", analysis_failure),
+            ("execution.visual_failure", "The visual observation", visual_failure),
+        )
+        explanations = [
+            EvidenceItem(
+                id=item_id,
+                source="execution",
+                text=f"{stage} did not complete: {message}",
+                produced_by="agent.executor",
+            )
+            for item_id, stage, message in failures
+            if message is not None
+        ]
         if execution is not None:
             items.extend(_execution_items(execution))
         if analysis is not None:
             items.extend(_analysis_items(analysis))
         if visual is not None:
-            # Last, and structurally distinct: it is the only item here that a
-            # model authored rather than an engine computed.
+            # Last among results, and structurally distinct: it is the only item
+            # here that a model authored rather than an engine computed.
             items.append(visual)
+        items.extend(explanations)
 
         return AgentEvidence(items=items, execution=execution, analysis=analysis)

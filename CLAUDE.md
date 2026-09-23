@@ -47,13 +47,41 @@ Core intended capabilities:
    naming the cause, rather than letting it reach GDAL and surface as an opaque
    credentials error.
 
-   **Sentinel-1 is therefore discovery-only (step 7 works; step 8 does not).**
-   Closing this requires S3 access configuration, GCP-based georeferencing and
-   calibration-LUT interpolation - genuine future research work, deliberately
-   not faked. The display code path is retained and tested because it is
-   correct for a projected single-band asset. SAR scientific processing
-   (speckle filtering, calibration, terrain correction, fusion, analysis)
-   remains out of scope, and no SAR band is in `ANALYSIS_BAND_ASSETS`.
+   **SUPERSEDED - see step 8b.** The paragraphs above remain accurate about
+   Earth Search GRD, which is still refused. They are no longer the whole
+   picture: Sentinel-1 imagery now works through a different collection.
+
+8b. Sentinel-1 RTC imagery - **IMPLEMENTED AND VERIFIED LIVE.** Discovery,
+   deterministic selection and bounded **VV and VH** retrieval run against
+   Microsoft Planetary Computer's Sentinel-1 RTC collection (`satellite/rtc.py`),
+   which publishes analysis-ready, **provider terrain-corrected** gamma-naught
+   COGs (float32, projected, nodata -32768). Assets return
+   `409 PublicAccessNotPermitted` unsigned; the public `/api/sas/v1/sign`
+   endpoint signs them without credentials, so no secret is stored for it.
+   Rendering is `10*log10` -> 2nd-98th percentile clip -> 8-bit grayscale,
+   **display only** - a monotonic transform on the rendered PNG that never
+   reaches a quantitative path. The linear stretch used previously put 75% of
+   pixels in the darkest tenth of the range (median level 3/255) and was
+   effectively black; the decibel stretch gives median 75/255.
+
+8c. Quantitative Sentinel-1 backscatter - **IMPLEMENTED AND VALIDATED.**
+   `analysis/sar.py` measures VV/VH gamma naught in decibels. The assets are
+   linear POWER (proven from the product: strictly positive pixels, medians
+   0.0272 VV / 0.0083 VH, GDAL scale 1.0 / offset 0.0, and the provider's own
+   tilejson takes a log of `vv`), so `dB = 10*log10(power)` with NO amplitude
+   squaring. **Means average in linear power, then convert** -
+   `10*log10(mean(power))`; `mean(10*log10(power))` is a geometric mean, biased
+   low, and 7 tests fail if that mutation is applied. nodata, non-finite and
+   non-positive samples are excluded and counted, never clamped. Validated
+   against independent NumPy on the same window: worst discrepancy 0.000e+00.
+   Agent tool `sar_backscatter_statistics`; evidence namespaced
+   `sar_backscatter.*` with unit `dB`, bound by grounding so a VV claim cannot
+   be satisfied by VH evidence.
+
+   STILL out of scope: radiometric calibration from raw GRD, speckle filtering,
+   custom terrain correction, layover/shadow masking, polarimetric
+   decomposition, SAR classification, optical-SAR fusion. The terrain
+   correction is the PROVIDER'S; never describe it as SatQuery calibration.
 
 9. Analysis boundary (contract only): `POST /api/v1/query/analyze` accepts an
    already-computed `QueryExecutionResult` and returns an `AnalysisResult`
@@ -103,7 +131,8 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are backend 1356 / frontend 210.
+current backend figure is in section 23 (the scientific core, M1-M4), which also
+supersedes any statement below that the optical indices are not cloud-masked.
 
 ## Architecture Rules
 
@@ -340,7 +369,7 @@ EPSG:32643).
 | `nir` | B08 | 10 m | `uint16` | `0` | **use** (NDWI) |
 | `red` | B04 | 10 m | `uint16` | `0` | available (NDVI) |
 | `swir16` | B11 | 20 m | `uint16` | `0` | **deferred** — different grid, needs resampling |
-| `scl` | SCL | 20 m | `uint8` | `0` | **deferred** for the first 10 m NDWI path |
+| `scl` | SCL | 20 m | `uint8` | `0` | deferred in Phase 11; **used since M3** as the pixel-quality mask (section 23) |
 | `visual` | TCI | 10 m | `uint8` RGB | — | display only (existing behaviour) |
 
 COG characteristics (read from actual headers): 10 m bands are
@@ -457,7 +486,8 @@ Dependency order as built:
 **Pixel access mechanism:** pixels stay **server-side**. The engine re-retrieves
 through `ImageryService` keyed by `selected_scene_id` + `collection` + asset +
 `plan.bbox`. Re-retrieval is correct here — COG windowed reads are cheap and
-idempotent, and an NDWI needs only two reads.
+idempotent, and an NDWI needs only two reads. (Three since M3: `scl` is read
+first for pixel quality - section 23.)
 
 **Output:** **scalar `Measurement`s only** (e.g. mean/min/max NDWI, valid-pixel
 count, % of valid pixels above a stated index threshold).
@@ -503,7 +533,8 @@ detection". A threshold, if reported at all, must be labelled explicitly as an
 *index threshold* (e.g. "% of valid pixels with NDWI > 0.3"), never as a
 validated water or flood classification. `scl` can later provide an independent
 validation reference, but that is deferred. Do not claim an analysis the system
-did not perform.
+did not perform. (Since M3 `scl` IS used - as a per-pixel QUALITY mask, never as
+a water reference or a validation of any index; see section 23.)
 
 ## 13. Phase 13 — Observation Compatibility Reporting — IMPLEMENTED
 
@@ -685,11 +716,14 @@ cloud, tiny sample). `AnalysisResult.warnings` carries orchestration outcomes
 (no pair formed, a band read failed, further pairs not analysed). No duplication.
 
 **Cloud.** `Scene.cloud_cover` is reported as context and warned on above 30%.
-The index is **never cloud-masked** - `scl` remains deferred - and unknown cloud
-cover is reported as unknown, never assumed clear.
+HISTORICAL: in Phase 14 the index was never cloud-masked. **Since M3 it is**:
+each observation is masked by its own Sentinel-2 SCL before any statistic, and
+the paired change uses only pixels usable on both dates (section 23). Unknown
+scene-level cloud cover is still reported as unknown, never assumed clear.
 
-**Reads.** Exactly four per comparison: `green` + `nir` per observation, through
-the **unchanged** `ImageryService.read_band`. Deliberately not optimised - no
+**Reads.** Exactly four per comparison in Phase 14: `green` + `nir` per
+observation, through the **unchanged** `ImageryService.read_band`. **Six since
+M3**: `scl`, `green`, `nir` per observation (section 23). Deliberately not optimised - no
 batching, no caching, no multi-band redesign. `raster.py` and `imagery.py` are
 untouched.
 
@@ -913,8 +947,12 @@ The measurements are the product; the sentence is a presentation of them.
 **Grounding is containment, not proof.** It establishes that every number in an
 answer is traceable to evidence at the precision stated, that citations
 resolve, and that no forbidden phrase appears. It does NOT establish
-qualitative correctness or causal attribution - an unquantified claim passes.
-That limit is documented in `grounding.py` rather than papered over.
+qualitative correctness or causal attribution. It is nonetheless conservative
+about prose: a qualitative sentence must repeat a citation to survive, so an
+arbitrary unsupported sentence does NOT simply pass. What stays outside its
+reach is a claim that is supported by the evidence and still wrong about what
+the evidence means. That limit is documented in `grounding.py` rather than
+papered over.
 
 **Frontend boundary.** `AgentPanel` posts to `/api/v1/query/agent` and nothing
 else. It performs no planning, execution, grounding or provider call, renders
@@ -985,6 +1023,10 @@ applied, the test observed failing, and the mutation reverted.
 working; non-functional against live Earth Search. See pipeline step 8 - now
 corrected to discovery-only, with `_require_readable_scheme` refusing the
 `s3://` asset at the boundary and naming the cause.
+
+> HISTORICAL. This paragraph records the state at the time of that sprint and
+> remains true of Earth Search GRD only. Sentinel-1 is NO LONGER discovery-only:
+> see pipeline steps 8b (RTC VV/VH imagery) and 8c (quantitative backscatter).
 
 **`NdwiTemporalChange` labelled its axes by requested role (P1).**
 `TemporalComparison` does not require `baseline` to precede `target`, and
@@ -1135,7 +1177,8 @@ Gemini planned `execute_query, spectral_indices` → read exactly B08 and B04 �
 `accepted=True, numeric=pass, terms=pass, refs=pass`, 5 citations.
 
 **Band reads are shared**: three indices cost four reads, not six, because NIR
-is common to all three. Measured.
+is common to all three. Measured. (Five since M3: the `scl` quality layer is read
+once per scene and shared by all three - section 23.)
 
 ## 18. Auditable evidence export — IMPLEMENTED
 
@@ -1159,3 +1202,730 @@ a mutation-checked test proves no credential-shaped material can reach the file.
 | `pytest -q` | **1386 passed** |
 | `npm run test` | **226 passed** |
 | ruff / eslint / tsc / build / `git diff --check` | clean |
+
+---
+
+## 19. Anthropic (Claude) as a third AI provider — IMPLEMENTED
+
+A third inference backend behind the existing abstractions. Additive
+throughout: no route changed, no contract field was added or removed, and the
+deterministic half of the system is untouched.
+
+**Not verified against the live Anthropic API.** Every test here runs through a
+hand-written recording fake. What is established is selection, isolation,
+request shape and error mapping; what is NOT established is that a real Claude
+model plans well against this tool allowlist. Treat that the way Phase 15
+treated Gemini before its live run.
+
+**Where it lives.** `app/services/agent/providers/anthropic.py` implements all
+four provider-neutral roles - `AgentPlanner`, `AnswerSynthesizer`,
+`VisualAnalyst` and `IntentParser` - through one shared
+`_AnthropicMessagesClient`. The official `anthropic` SDK is a new dependency
+and is confined to that single file, exactly as `google-genai` is confined to
+`gemini.py`; an AST test asserts the importer list is exactly
+`['providers/anthropic.py']`, plus a non-vacuity test that the file really does
+import it. The SDK was chosen over raw `httpx` (the NVIDIA route) because
+Anthropic publishes a first-party async client; reimplementing its
+authentication, retry and error taxonomy would buy nothing.
+
+**Selection is table-driven now.** `AI_PROVIDER_FIELDS` in `core/config.py`
+maps each provider to its `Settings` key field, model field and environment
+variable, and `SUPPORTED_AI_PROVIDERS` is derived from it. `Settings.
+api_key_for()` / `.model_for()` replaced the `if provider == "gemini" else
+nvidia` branches in `factory.py` and `api/routes/ai.py`. This is the direct
+lesson of the Phase 15 defect that `test_provider_isolation.py` documents -
+only the visual step was provider-aware, so planning silently stayed on Gemini
+- and a test now pins `set(AI_PROVIDER_FIELDS) == SUPPORTED_AI_PROVIDERS`.
+Every credential message is unchanged in wording; it is now formatted from the
+table rather than written out per provider.
+
+**Three request-shape decisions, each a fact about the models, not a taste:**
+
+- **No `temperature`.** The Gemini and NVIDIA adapters pin it to 0.0. Sampling
+  parameters were REMOVED from the current Claude models and return HTTP 400,
+  so sending one would not add determinism - it would fail every request.
+- **No `thinking` and no `output_config`.** Claude thinks adaptively by default
+  on current models, and `output_config.effort` is rejected by some older ones;
+  sending neither keeps the adapter compatible with any model id an operator
+  configures, catalogued or not. Reasoning is never *read*: `_message_text`
+  takes text blocks only, so no thinking block is parsed, stored, returned or
+  rendered and the Phase 15 rule holds unchanged.
+- **No server-side refusal fallbacks.** Anthropic can reroute a refused request
+  to another model automatically. Deliberately not enabled: a silently
+  substituted model would break the attribution that travels with every
+  observation, which is the same reason there is no fallback BETWEEN providers.
+
+`stop_reason` is inspected before any parsing: `refusal` becomes an upstream
+failure and `max_tokens` becomes an explicit "cut off" error, because truncated
+JSON would otherwise be reported as a malformed plan - blaming the model for a
+budget this adapter set.
+
+**Catalog.** Three Claude models: `claude-opus-5` (the default),
+`claude-sonnet-5`, `claude-haiku-4-5`, all `endpoint_type="anthropic-messages"`.
+Every one accepts image input, so unlike the NVIDIA section there is no
+text-only entry and no capability refusal to encode - a test asserts the visual
+and text model sets are identical.
+
+**Isolation is proven in every direction.** `test_provider_isolation.py` now
+arms an Anthropic tripwire (all four role classes plus the shared messages
+client) and asserts Gemini- and NVIDIA-selected runs never touch it, with a
+vacuity check that the tripwire fires; and an Anthropic-selected run is checked
+against the Gemini AND NVIDIA tripwires armed simultaneously. Every provider is
+credentialed in that fixture, so an absent touch is never explained by an
+absent key. `test_provider_credential_isolation.py` gained an
+`ANTHROPIC_SENTINEL` and now also refuses `sk-ant-` and `x-api-key` anywhere in
+a response or a log - Anthropic authenticates with `x-api-key`, not
+`Authorization`.
+
+**Frontend.** `AiProvider` gained `"anthropic"`; `AgentPanel` and
+`ModelSelector` label it **Claude**. Nothing else changed - the browser still
+posts to one endpoint and never sees a key.
+
+**Phase 19 does NOT contain:** tool use, structured outputs, prompt caching,
+extended-thinking configuration, streaming, batches, the Files API, Managed
+Agents, any change to the tool allowlist, grounding, evidence shape, the raster
+path, or any analysis/query/satellite module.
+
+### Baseline after Phase 19 — VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **1892 passed** (1836 before) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **268 passed** (267 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 20. Productionization pass — IMPLEMENTED (2026-09-15)
+
+Every item here was reproduced live before it was changed and re-verified live
+after: Gemini `gemini-3.6-flash`, NVIDIA
+`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, Earth Search, Planetary
+Computer and Nominatim, plus the real UI in a browser.
+
+### Confirmed and fixed
+
+- **NVIDIA planning was non-functional.** On the `json_object` path the
+  configured model returned tool names as bare strings
+  (`{"steps": ["execute_query", "ndwi_statistics"]}`), so every NVIDIA run was
+  `planner_unavailable`. `NvidiaAgentPlanner` now forces one tool call whose
+  schema is `AgentPlan.model_json_schema()` and falls back to `json_object` only
+  when a model answers without a tool call. `_PLAN_MAX_TOKENS = 4096` (measured
+  1,430-2,179 completion tokens per plan). A missing tool call logs
+  `finish_reason` only, never content.
+- **Planners returned valid but incomplete plans** (both providers).
+  `agent/plan_completion.py` adds exactly the step a question explicitly asks
+  for: the named index (NDVI/NDWI/NDBI acronym, single-window Sentinel-2), the
+  visual observation ("visible", "look like", "can you see"; the user's question
+  verbatim, at most 500 chars, never truncated), and temporal NDWI (compare mode
+  over Sentinel-2 plus "water"/"NDWI"). The result is re-validated through
+  `AgentPlan`, a planner step is never dropped, and `trace.plan` keeps the
+  planner's own plan.
+- **Synthesis abstained on about half of direct questions** with identical
+  evidence. Root cause: the rendered evidence named metric and value but not
+  place, window, scene or date. `_render_evidence` now prefixes a non-citable
+  CONTEXT block built from `evidence.execution` (6/6 grounded, versus 2/4
+  before). Values are shown at four significant figures (`_display_value`);
+  stored evidence, the API response and the export keep full precision, and a
+  property test proves every displayed value is groundable.
+- **Comparison answers were withheld.** Models reused the single-scene template
+  ("The mean NDWI was X" twice), which grounding correctly refuses as
+  ambiguous. The synthesis instruction now carries an exact comparison template
+  (earlier / later / difference, full ids); a test pins it groundable. Live:
+  Gemini answered it grounded.
+- **NVIDIA synthesis and visual calls died on one 503.** `_retry_transient`
+  retries 429/5xx up to three attempts; malformed responses and timeouts are not
+  retried.
+- **STAC search had no retry.** `_post_search` makes a second attempt after a
+  transport error, 429 or 5xx, for both Earth Search and Planetary Computer.
+- **A failed step left a silent hole.** The executor now adds
+  `execution.discovery_failure`, `execution.analysis_failure` or
+  `execution.visual_failure` text items (system-authored message, no
+  measurement, never a `visual` field). This RESOLVES the section-15 known
+  limitation about discovery failures.
+- **An NDVI run could be labelled `object_identification`**, which made
+  `analysis.status` read `not_implemented` and the UI highlight "Object ID (not
+  implemented)". The planning instruction now states when each task applies.
+- **`_WARN_AGGREGATE` said flatly "No pixels were compared against one
+  another"** beside the paired-pixel change; it is now scoped to
+  `mean_ndwi_difference`.
+- **A temporal run's headline showed one observation, unlabelled.** Both
+  observations' means are named `ndwi_mean`, so the Analysis Result headline
+  set the EARLIER mean large as "ndwi mean" beside an answer about change.
+  `headlineMeasurements` now headlines a comparison by `mean_ndwi_difference`
+  and `ndwi_change_mean`, or by nothing when those were suppressed.
+- **README facts corrected**: the S1 data source, the `/query/parse` provider,
+  the retired NVIDIA model, the GRD contradiction, co-registration wording, and
+  the cloud / scene-selection rule.
+
+### Verified correct, left unchanged
+
+- S2 NDVI/NDWI/NDBI, temporal NDWI with a same-grid paired change, S1 RTC VV/VH
+  backscatter and georeferenced overlays, all live. Overlays align with the OSM
+  basemap in Chennai (EPSG:32644) and Bengaluru (EPSG:32643).
+- Scene selection: S2 lowest cloud cover, then earliest, then id; S1 earliest,
+  then id. Selection itself still uses only scene-level cloud cover. (At the
+  time of this pass no per-pixel cloud mask existed; since M3 the optical
+  indices are masked per pixel by the Sentinel-2 SCL - section 23.)
+- Attribution uses the run snapshot: switching the provider after a run does
+  not relabel it. A new query replaces the answer, map, evidence and scenes.
+
+### Known limitations and external constraints
+
+- Free tiers are the practical limit. Gemini returned 429 on first attempts for
+  long stretches; NVIDIA's hosted NIM answered about half of sampled requests
+  with 503 or a timeout. Both surface honestly as `planner_unavailable` or
+  `synthesis_unavailable` with the evidence preserved.
+- The NVIDIA model occasionally ignores the forced `tool_choice`
+  (`finish_reason=stop`); the planner's three-attempt loop re-samples it.
+- Plan completion is keyword-narrow by design. A question that implies an
+  analysis without naming it remains the planner's judgement.
+- Browser automation: a Chrome tab reporting `visibilityState: hidden` pauses
+  `requestAnimationFrame`, so MapLibre never fires `load` and the map looks
+  black or stuck at its initial view until an input event forces a frame. This
+  is not a product defect; verify maps with a forced frame.
+- The UI's raw evidence list shows full-precision floats (the headline metrics
+  are formatted). P2.
+
+### Baseline after the productionization pass — VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **2024 passed** (1892 at the start of the pass) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **270 passed** (268 at the start of the pass) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 21. Local open-weight provider (Ollama + Qwen3-VL) — IMPLEMENTED (2026-09-15)
+
+A fourth AI provider that runs on the developer's machine, so SatQuery can plan,
+look and describe without a cloud quota. Additive: the planner, executor,
+grounding, evidence shape, geospatial services and frontend architecture are
+unchanged; the local model is trusted exactly as little as a cloud one.
+
+**Where it lives.** `app/services/agent/providers/local.py` implements
+`AgentPlanner`, `AnswerSynthesizer`, `VisualAnalyst` and `IntentParser` over
+Ollama's native `POST /api/chat` with plain `httpx` (no SDK). `format` carries
+a JSON Schema that Ollama compiles into a decoding grammar: `DraftAnswer`'s and
+`SatQueryIntent`'s own schemas, and for planning a grammar DERIVED from
+`AgentPlan`'s (`_plan_grammar`: a required `discovery` slot holding the
+`execute_query` step, then `analysis` with up to two other tools, `tool`
+required everywhere). The provider only orders the two slots into `steps`; the
+Pydantic contract still validates the result, so the closed tool union remains
+the authority. Requests
+send `think: false`, temperature 0 and `num_ctx` from settings. The visual role
+sends the exact PNG the pipeline retrieved, base64 in `images`.
+
+**Configuration is table-driven.** `ProviderFields.api_key` may be `None` for a
+keyless provider, which names an `endpoint` field instead;
+`Settings.is_configured()` replaced the key-only checks in the factory and the
+models route. Variables: `AI_PROVIDER=local`, `LOCAL_AI_BASE_URL`
+(`http://127.0.0.1:11434`), `LOCAL_AI_MODEL` (`qwen3-vl:4b-instruct`),
+`SATQUERY_LOCAL_AI_TIMEOUT_SECONDS` (300), `SATQUERY_LOCAL_AI_NUM_CTX` (4096).
+
+**No fallback, honest failure.** Unreachable Ollama ->
+"Local AI provider is unavailable. Start Ollama and ensure the selected Qwen3-VL
+model is installed."; 404 -> "not installed. Install it with: ollama pull
+<tag>"; memory -> "not enough free memory"; timeout -> "did not answer within N
+seconds"; any other error answer -> one follow-up `GET /api/tags`, and if Ollama
+cannot list its models -> "Ollama is running but cannot read its installed
+models. If they are stored on an external drive, check that it is connected,
+then try again.", otherwise "The local AI provider failed to answer.". Ollama's
+own error text is read to classify, never repeated.
+
+**Detection.** `GET /api/v1/ai/models` asks the local endpoint once
+(`GET /api/tags`: 2 s to connect, 10 s to answer) and reports each local model
+as Ready / Not installed / Ollama not running / Ollama cannot read models
+(reachable, but no model list: `ProbeFailure.MODELS_UNREADABLE`). The only
+reachability check in the catalog - justified
+because the service is on this machine. The frontend badge is green only when
+the server says "Ready" (it was green for configured+compatible, i.e. also for
+"Not installed").
+
+### Findings - VERIFIED
+
+- **Hardware:** Apple M2 MacBook Air, 8 GB unified memory, 6-12 GB free disk
+  (volume 95-97% full), 7-10.5 GB of swap in use with ordinary apps open.
+  `qwen3-vl:8b` (6.14 GB of weights) is excluded here; 4B is the default and 2B
+  the fallback. Ollama 0.20.2 was already installed and serving.
+- **Every plain `qwen3-vl` tag is the thinking variant.** `4b`, `8b`, `2b`
+  and `30b` share config and weight digests with their `-thinking` tags. That
+  variant ignores `think: false`: a one-word reply cost 220 generated tokens
+  (967 characters in `message.thinking`), and a real planning call did not
+  finish in 300 s. The catalog therefore lists `-instruct` tags only
+  (`2b-instruct`, `4b-instruct`, `8b-instruct`, `30b-a3b-instruct`;
+  `30b-instruct` does not exist), and a test pins that.
+- **Thinking 4B, measured:** cold 42.0 s (load 19.3 s), warm 17.4 s for a
+  trivial prompt; 5.30 GB resident at an 8K context; free memory 38% -> 5% and
+  swap 7.1 -> 10.5 GB while loaded.
+- **Discovery must be first in the grammar itself.** Decoding under the plain
+  `AgentPlan` schema, the 4B instruct model returned
+  `{"steps": [{"tool": "ndwi_statistics"}]}` - well-formed steps, discovery
+  missing - identically on every re-ask at temperature 0. The "exactly one
+  execute_query, first" rule lives in a validator that a schema-derived grammar
+  cannot see, and Ollama 0.20.2 ignores `prefixItems`. The two-slot grammar uses
+  only constructs Ollama honours (required properties, `oneOf` over `$ref`);
+  verified live 3/3 valid plans (NDWI, visual water, temporal compare), 5-17 s
+  each.
+- **Context:** the largest prompt (temporal synthesis) is about 2.2k tokens, so
+  4096 fits every role and halves the 8K KV cache. A prompt that fills the
+  window is logged as a warning (Ollama truncates from the start). Measured
+  2026-09-16 from Ollama's `/api/ps`: 4.37 / 4.48 / 4.64 GB resident at
+  `num_ctx` 2048 / 3072 / 4096; the largest prompt in the live matrix was 1,726
+  tokens (+98 generated). 4096 kept: 3072 saves 0.16 GB, 2048 cannot hold a
+  2.2k prompt.
+- **Network:** the model pulls ran at 0.1-6 MB/s with repeated CDN connection
+  resets; one pull was stopped for low memory and resumed. External.
+
+### Verified live
+
+- Detection in the API and in the UI selector (default Local, badge
+  "Not installed" before the instruct model was present).
+- Honest failure in the API and the UI, with zero cloud calls in the backend
+  log, while the model was not installed.
+- Switching in the UI: NVIDIA answered "The mean NDWI was 0.1464 index."
+  (grounded); Gemini was reached and refused by its free-tier quota (429).
+
+### Verified live on `qwen3-vl:4b-instruct`
+
+- **Smoke test 5/5** (`backend/scripts/local_model_smoke.py`): intent
+  (Marina Beach, January 2025); a valid `AgentPlan` (`execute_query` +
+  `ndwi_statistics`); the real retrieved 112x300 Sentinel-2 PNG described as "a
+  long, narrow strip of sandy beach bordered by dark water on one side and a
+  developed coastal area with buildings and vegetation on the other";
+  synthesis "The mean NDWI was 0.1464 index." (grounded); a question inviting
+  invented figures answered with an abstention; an invented NDWI refused.
+- **In the UI with `AI_PROVIDER=local`:** NDWI 0.1464, NDVI -0.06136 and NDBI
+  0.01184, each grounded (numeric/refs/terms pass) and attributed "Produced by
+  Local · qwen3-vl:4b-instruct"; round trips 94 / 110 / 131 s. Evidence panel
+  complete (scene, acquisition, CRS, bounds, 33,600 valid pixels).
+- **Detection:** the selector badge reads Ready for the installed tag and "Not
+  installed" for the others. It went stale when a model was installed while the
+  page was open; the catalog is now re-read on window focus and visibility.
+- **Performance:** cold load about 20 s; 4.64 GB resident at `num_ctx` 4096;
+  planning 10-82 s, observation about 20 s, synthesis 13-52 s. The same call
+  varied three- to eightfold with swap pressure (9.9-10.9 GB of swap in use).
+- **Browser automation:** partway through, the Chrome extension's tools began
+  failing with "Couldn't determine which page this action targets" while the
+  tab was still valid, so the last two checks went through the same
+  `POST /api/v1/query/agent` endpoint the UI calls, with `provider: local`:
+  - **Temporal NDWI:** "The earlier mean NDWI was 0.02665 index. The later mean
+    NDWI was 0.1464 index. The mean NDWI difference was 0.1197 index." -
+    grounded, three full-id citations; the local planner chose
+    `temporal_ndwi_statistics` itself (S2A 2024-01-15 -> S2B 2025-01-04); 100.6 s.
+  - **Visual:** "Yes, there is visible water in the image, appearing as the
+    dark blue expanse along the coastline." - an attributed observation of the
+    real retrieved scene (`visual_claims: attributed`). The planner chose NDWI
+    statistics; plan completion added the observation the question asked for;
+    32.4 s.
+
+### Hardening pass (2026-09-16) - VERIFIED
+
+Found live on the reference machine, with the models on a USB hard disk
+(`~/.ollama/models -> /Volumes/Expansion/ollama/models`, exFAT):
+
+- **False "Ollama not running" after the drive slept.** macOS spins the disk
+  down after 10 idle minutes (`disksleep 10`); Ollama then needed ~4 s to answer
+  `/api/tags`, past the probe's single 2 s budget, so a running Ollama was
+  reported as not running. The probe now allows 2 s to connect, 10 s to answer.
+- **A real USB dropout.** Mid-matrix the drive dropped off (it re-enumerated,
+  disk6 -> disk4). Ollama kept running, answered `/api/tags` with 500 and every
+  chat with 400 "model is required" in milliseconds; SatQuery said "Ollama not
+  running" (catalog) and "The local AI provider failed to answer." (query) -
+  honest, wrong about the cause. The probe now returns
+  `ProbeFailure.MODELS_UNREADABLE` for a reachable Ollama that gives no usable
+  model list (non-200, malformed, read timeout; a connect failure is still "not
+  running"), the catalog says "Ollama cannot read models", and an unclassified
+  chat error asks `/api/tags` once and names the drive. Ollama recovered without
+  a restart once the drive was back (same process), as the dangling-symlink
+  simulation predicted; it will not START while the drive is missing.
+- **The local plan adapter dropped unknown keys.** `_plan_from_slots` read the
+  two slots and silently ignored any other top-level key, so a plan carrying a
+  smuggled `"steps": [{"tool": "shell"}]` or `"evidence"` key was ACCEPTED
+  (replayed against the old code) - one level above the contract's
+  `extra="forbid"`. It now refuses anything but exactly `discovery` (a dict)
+  and `analysis` (a list).
+- **The NDBI caveat withholding was a genuine grounding mismatch, not
+  conservatism.** A sentence repeating a cited engine caveat verbatim passed
+  `_prose_supported` but failed numeric grounding on the caveat's own figures
+  ("20 m", "10 m"; the SAR caveat's `10*log10` had the same trap).
+  `_ungrounded_claims` now skips a sentence that repeats - whitespace, case and
+  closing punctuation aside, every digit, sign and decimal exact - a sentence of
+  a CITED `*.warning.N` / `*.limitation.N` item from a numeric authority. Model
+  observations never qualify (source), executor failure notes never qualify
+  (id), and the figures authorise nothing elsewhere.
+  `tests/test_grounding_verbatim_caveat.py`: 4 of its tests failed on the old
+  code, all 11 pass now.
+- **Considered and left alone:** `num_predict` (largest output observed: 192
+  tokens; a runaway is bounded by the timeout and fails validation);
+  `keep_alive` (documented `OLLAMA_KEEP_ALIVE` instead - holding 4.6 GB of 8 GB
+  longer is the operator's call); a raster read retry (a truncated COG tile read
+  under a network saturated by a model download rejected the visual step and
+  the model abstained - honest, and outside this pass).
+
+| Live check (real Ollama, real Sentinel data) | Result |
+| --- | --- |
+| A. Ollama running | Ready, green badge |
+| B. Ollama stopped | "Ollama not running"; query `planner_unavailable` with the agreed message; 0 cloud requests; relaunch -> Ready |
+| C. Model missing | `planner_unavailable`, "...not installed. Install it with: ollama pull qwen3-vl:2b-instruct"; 0 steps; 0 cloud requests |
+| D. Drive unavailable | the real dropout above, and a replay: "Ollama cannot read models" / the drive message; recovers without a restart |
+| E. Timeout | `SATQUERY_LOCAL_AI_TIMEOUT_SECONDS=1` -> stated failure after 1.0 s |
+| F. Malformed answer | non-JSON, list, no message, non-text content, truncated plan -> `intent_parse_error`, executor never called (tests) |
+| G. Invalid plan | 13 malicious local outputs refused after one re-ask, never reaching the executor; a URL or path as a place name only ever reaches the geocoder's `q` (tests) |
+| H. Secrets | real Gemini and NVIDIA keys loaded, recording proxy in front of Ollama: absent from local traffic, logs, `backend.log` and the response; no Authorization header; 0 cloud calls |
+
+**Verified with the drive physically detached (2026-09-16 09:45).** The real
+condition the probe change was written for, not the simulation: Ollama running
+(`/api/version` 200) with `/api/tags` 500 because `~/.ollama/models` dangled.
+The catalog reported "Ollama cannot read models" for all four local models, a
+local query returned `planner_unavailable` with "Ollama is running but cannot
+read its installed models. If they are stored on an external drive, check that
+it is connected, then try again.", and the run touched 0 steps, 0 evidence and
+0 cloud endpoints. Before this pass the same state read "Ollama not running"
+and "The local AI provider failed to answer."
+
+**Sentinel-1 after the provider recovered (same session).** Planetary Computer
+answered 200 again (its `*.azureedge.net` certificate mismatch had cleared).
+With no model involved at all, the deterministic pipeline computed NDVI
+-0.0613608, NDWI 0.146391, NDBI 0.0118356 (S2B_44PMV_20250104, 23.7 s) and SAR
+VV -5.44372 dB, VH -17.8496 dB, VV-VH 12.4059 dB (S1A ... 20250111, 13.7 s).
+Through the agent on NVIDIA: "The mean VV was -5.444 dB. The mean VH was -17.85
+dB." and "The mean NDWI was 0.1464 index.", both grounded, citing the
+measurement ids, with the provider-RTC caveat carried in the evidence and no
+claim that SatQuery performed terrain correction. The earlier SAR failures were
+the outage, nothing else.
+
+### Qwen3-VL bake-off (2026-09-16) - 2B and 4B VERIFIED
+
+Protocol, identical for every model: one model loaded at a time (everything
+resident is unloaded first), `num_ctx` 4096, never during a model download
+(a download saturates the link and truncates COG reads), backend restarted
+with `LOCAL_AI_MODEL=<model>`. Tooling outside the repo in
+`~/satquery-bakeoff/`: cold T1 intent parse, T2 planner (x2), T10 live
+adversarial prompt, T6 vision on ONE cached real scene
+(`S2B_44PMV_20250104_0_L2A`, 112x300 PNG, identical bytes and question for
+every model, x2), two end-to-end API passes of NDVI / NDWI / NDBI / visual
+features / temporal / SAR VV+VH / refusal, 3 API intent parses, memory sampled
+every 2 s.
+
+| | 2B | 4B |
+| --- | --- | --- |
+| Cold first request (model load, USB disk) | 32.2 s (28.2 s) | 62.8 s (40.8 s) |
+| Planner median (range) | 5.0 s (3.1-7.7) | 11.6 s (9.6-22.1) |
+| Vision probe / synthesis median | 5.6 s / 3.8 s | 4.0 s / 6.3 s |
+| End-to-end median, pass 1 / pass 2 | 11.4 / 12.6 s | 24.8 / 22.1 s |
+| Resident / free memory min, median | 2.96 GB / 12%, 20% | 4.64 GB / 8%, 13% |
+| Swap over the session | 3.33 -> 3.47 GB | 3.68 -> 4.68 GB |
+| NDVI, NDWI, NDBI | plan-fail, ok, plan-fail | ok, ok, ok (all grounded) |
+| Visual, temporal, refusal | withheld, synthesis timeout, withheld | ok, ok, ok |
+| SAR VV+VH | network (both) | network (both) |
+| API parses / cloud calls | 3/3 / 0 | 3/3 / 0 |
+
+Failure classification - the model, SatQuery and the network are kept apart:
+
+- **2B NDVI/NDBI - model.** Its raw plans repeat `spectral_indices`
+  (`[ndvi]` then `[ndwi]`; `[ndbi]` twice); `AgentPlan` refuses a repeated tool
+  by design and the one re-ask repeats it.
+- **2B visual - model.** It filled all three plan slots
+  (`execute_query`, `ndwi_statistics`, `spectral_indices`), so plan completion
+  could not add the observation; completion adds, never removes.
+- **2B temporal - model.** Synthesis ran away until the 300 s timeout, twice;
+  SatQuery's bound held and reported it. A `num_predict` cap would make such a
+  runaway fail in seconds - recommended, not applied mid-bake-off.
+- **2B refusal - model, contained.** It wrote an unsupported number; grounding
+  withheld the answer.
+- **SAR, both models - external.** `planetarycomputer.microsoft.com` served a
+  genuine Microsoft certificate for `*.azureedge.net` (hostname mismatch, curl
+  exit 60); every Sentinel-1 search failed TLS verification and SatQuery said
+  "The satellite catalog is unavailable." Never bypassed.
+- **An earlier 4B regression run - network.** Run during the 2B download:
+  nearly every raster read truncated; every answer was an honest abstention and
+  no number was invented. Re-run on a clean network: all tasks ok.
+
+Vision, identical scene and question ("What water features are visibly present
+in this scene?"), deterministic across both runs:
+
+- **2B:** "There is a large body of water along the coast, and there are small,
+  scattered patches of water near the beach." (the scattered patches are not
+  evident in the scene)
+- **4B:** "A large body of dark water, likely the sea or ocean, is visible
+  along the right side of the image, bordering a sandy beach. The water appears
+  to be a continuous expanse with a clear shoreline."
+
+Browser, 4B default: landing, 3D Earth, Try SatQuery, Local Ready green,
+Not installed amber, Ollama-down amber, a real click-and-type NDWI run
+(grounded, "Produced by Local · qwen3-vl:4b-instruct", evidence complete), a
+selector switch leaving the finished result's attribution untouched, NVIDIA
+(one transient 503, then a grounded NDVI in 31 s), Gemini (routed, refused by
+its free-tier quota: 429 twice), a new query replacing the old result, and a
+temporal headline of the difference, not one scene. The map's bounds and
+canvases were correct; its rendering could not be judged because the Chrome
+window was hidden (requestAnimationFrame pauses).
+
+### Bake-off status (2026-09-18) — what is and is not measured
+
+Three models were benchmarked: `qwen3-vl:2b-instruct` and `qwen3-vl:4b-instruct`
+carry usable numbers; `qwen3-vl:8b-instruct` was measured and **failed
+outright**. `qwen3-vl:30b-a3b-instruct` was never installed and has been
+abandoned.
+
+**8B does not run on this machine.** Two full passes, 14 E2E attempts, **0
+`ok`** — every one returned `planner_unavailable` with "did not answer within
+300 seconds". Every auxiliary probe timed out as well: intent ×2, planner ×2,
+adversarial, and both vision runs. `backend.log` recorded **zero** "Local model
+answered" lines. Pass 1 took ~301–307 s per task; pass 2 degraded to
+1021–1672 s as the machine thrashed. The model needs **7.63 GB resident**
+(5.11 GB on GPU) on an **8 GB** machine: across 12,109 s the sampler saw free
+memory bottom out at **2%**, swap climb 7,565 → 12,611 MB with a **14,590 MB
+peak**, and was itself starved for one **1,074 s** gap between nominally 2 s
+samples. This is not a tuning problem; there is no headroom to tune.
+
+Two caveats on that run, both against it rather than for it:
+
+- Unrelated tool installs ran concurrently, so 8B's free%/swap columns are
+  contaminated. They cannot explain the outcome — installs cost hundreds of MB,
+  not the 7.6 GB that is the actual cause — but do not quote them as clean.
+- The run logged 3 cloud requests. Those were the driver's 3 closing stability
+  parses: `/api/v1/query/parse` resolves the **default** provider (Gemini), not
+  `LOCAL_AI_MODEL`. This was **not** a local→cloud fallback — provider selection
+  logged 14 × `provider=local`, zero otherwise, and no task produced any answer
+  at all. It does mean 8B's "stability parse" timings are Gemini's, not 8B's,
+  and that the earlier 2B/4B "0 cloud requests" figures were unreliable: they
+  were counted against a `backend.log` that had since been replaced.
+
+**30B was abandoned.** Three attempts; the last two were killed by the memory
+watchdog mid-download at 15 GB of 19 GB. The partial blob is preserved on disk
+and nothing was deleted. Note for anyone resuming it: the volume is exFAT, which
+has no sparse-file support, so ollama preallocates the blob at full size — the
+file measuring ~19.6 GB never indicated how much had actually been fetched.
+
+Do not infer 30B behaviour from the 2B→4B trend. That trend already broke at 8B:
+quality rose from 2B to 4B while cost rose too, and at 8B the cost simply
+exceeded the machine and quality went to zero.
+
+The repository default is unchanged: `local_ai_model = "qwen3-vl:4b-instruct"`.
+
+### Tests
+
+`tests/test_local_provider.py` (request shape, contract authority, every
+failure message, discovery, selection without cloud keys, grounding withholds a
+number the local model invents); isolation both ways in
+`test_provider_isolation.py` (a local run with Ollama down and every cloud
+provider credentialed AND armed fails honestly and touches none);
+`tests/test_local_credential_isolation.py` (with every cloud key set to a
+sentinel, no local role sends a credential or an Authorization header, and a
+local failure discloses none in its response or logs); the table test covers
+keyless providers; `conftest.py` stubs the catalog probe so the
+suite never calls a real Ollama (verified: zero `/api/tags` calls during a
+run). Frontend: local attribution and badge readiness. Live, not CI:
+`backend/scripts/local_model_smoke.py`.
+
+### Baseline — VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **2060 passed** |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **274 passed** |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 22. Production readiness pass — IMPLEMENTED (2026-09-17)
+
+An audit-and-remediate pass over correctness, resource safety, provenance,
+observability and deployment. Sixteen audit findings were re-verified against
+this tree before anything was changed; two did not hold as described and are
+recorded as such. Nothing was committed or pushed.
+
+### Correctness
+
+- **A parsed intent was silently narrowed by the manual form.**
+  `QueryPanel.currentIntent()` rebuilt the intent from the form's own controls,
+  so anything the form had no control for was dropped between parsing and
+  executing: a TIME SERIES collapsed to `windows[0]` ("monthly, January through
+  March" executed as January alone) and an NDWI THRESHOLD never reached the
+  wire. Neither failed - both answered a different question. The panel now holds
+  the parsed series and threshold, offers a "Time series (N windows)" mode, and
+  emits `ndwi_threshold` when the request stated one. Contract tests assert the
+  executed body equals the parsed intent.
+- **Plan completion honoured substring presence, not intent.** "Show imagery
+  only. Do not calculate NDVI." added NDVI. Completion now classifies each
+  mention - refusal, quotation, supposition or definition - and adds nothing
+  unless it is a request. Deliberately biased one way: an unclear mention adds
+  nothing, because a missed completion leaves the planner's own judgement while
+  an invented one executes work the user refused. `_DEFINITION_LEAD` separates
+  "What is NDWI?" from "What is the NDWI of Chennai?" by the determiner.
+- **The MapLibre worker was never emitted.** MapLibre resolves its worker
+  relative to its own module URL; rolled into the app chunk, that pointed at
+  `/assets/maplibre-gl-worker.mjs`, which Vite never built. A single-page host
+  answers that with `index.html`, so the browser loaded HTML as JavaScript - the
+  basemap rendered (it needs no worker) and footprint geometry did not.
+  `maplibreWorker.ts` imports the worker with `?worker&url` (which bundles it
+  WITH its dependencies) and states the URL through MapLibre's own
+  `setWorkerUrl`. The build now emits `maplibre-gl-worker-<hash>.js` and the app
+  chunk references it.
+
+### The suite was not independent of the machine
+
+2112 passed with a real `GEMINI_API_KEY` present; 2108 passed and 4 failed
+without one - same commit, same command. `tests/conftest.py` now clears every
+provider variable AND stops `Settings` reading the developer's `.env`. No
+credential is invented: a test needing one sets an obviously fake value itself.
+
+### Resource and policy controls
+
+- `app/core/limits.py`: per-client rate limit (429 + `Retry-After`), workflow
+  slots (503 after a brief wait), a raster gate, and a body-size refusal (413)
+  installed INSIDE the CORS middleware so a refusal still carries CORS headers.
+- The geocoder's budget is **application-wide**, in
+  `geospatial/nominatim.py`: one request at a time, spaced, with a TTL cache and
+  one bounded retry. "One per second per user" would let ten users send ten.
+- **Every limit is per process.** Documented in `DEPLOYMENT.md`, and the
+  production image runs one worker for that reason.
+
+### Honest results
+
+- **Partial execution.** One window's catalog failure aborted the whole run,
+  discarding windows that had already succeeded. Failures are now recorded
+  against their window (`ExecutedWindow.error`), `QueryExecutionResult.status`
+  is derived (`completed`/`partial`/`failed`), and a run where NOTHING succeeded
+  still raises rather than returning an empty result as success.
+- **Completeness.** `status: "ok"` is derived from the TASK, so an NDWI request
+  over an execution with no optical window returned "ok" with no measurements.
+  `analysis_outcomes` and a derived `completeness` now answer what was asked for
+  and what came of it; `status` keeps its exact previous values.
+- **Mixed-provider provenance.** The top-level `catalog` was assigned inside the
+  execution loop, so whichever window ran last spoke for all of them. Each
+  window carries its own `catalog`; `catalogs` lists every service that answered.
+- **Selection scope.** The catalog's `numberMatched` was read and discarded, so
+  "best of the 10 returned" and "best of 900 matching" looked identical.
+  `scenes_matched` is now carried through to the window.
+- **Execution integrity** (`services/query/integrity.py`). `/query/analyze`
+  accepts a client-supplied `QueryExecutionResult`; Pydantic proves its shape,
+  not that its parts agree. The relations are now checked - selected scene among
+  the scenes returned, counts coherent, imagery belonging to the selected scene,
+  windows belonging to the intent. **Periods bind, labels describe**: a window's
+  period must be one the intent requested; a label the intent assigns must mean
+  what the intent says.
+
+### Readiness, observability, provenance
+
+- `/health` stays liveness. `/ready` reports each capability and answers 503 when
+  one is missing - and never makes a paid provider call. The header no longer
+  says "Operational" when the selected AI path cannot run.
+- `core/observability.py`: a run id in a `ContextVar` stamped onto every log
+  line (including third-party loggers) plus stage timings. A failing stage logs
+  the exception CLASS, never its message.
+- The manual evidence export now carries the submitted intent, per-window
+  catalogs, discovery failures (kept apart from imagery failures) and the
+  analysis's own warnings and completeness.
+
+### Security
+
+- Asset hrefs come from an external catalog. A non-public address is refused -
+  measured on this Python: `100.64.0.1` (CGNAT) is **not** `is_private`, and
+  `224.0.0.1` (multicast) **is** `is_global`, so the rule is "not global or
+  multicast". `SATQUERY_TRUSTED_ASSET_HOSTS` narrows reads further when set.
+  KNOWN LIMITATION: the check is on the name, not on the address it resolves to,
+  so DNS rebinding is not defeated.
+- The frontend client no longer throws a raw `SyntaxError` on a non-JSON body
+  (an HTML error page, an empty body); every failure is an `ApiError` carrying
+  the status.
+
+### Two findings that did not hold as described
+
+- **"Application-factory settings do not propagate"** - true, and worse than
+  described: `api/router.py` called `get_settings()` at IMPORT time, so
+  `create_app(settings=...)` could not change a route prefix at all. Fixed by
+  building the router per application.
+- **"2,108 passed / 4 failed"** - reproduced exactly, but the cause was the
+  developer's `.env`, not only the ambient environment.
+
+### Deliberately NOT done
+
+- `ruff format` - 82 of 124 files would be reformatted; doing it here would bury
+  a behavioural diff in whitespace. Separate work.
+- **Docker images were never built or run**: the daemon is unavailable on this
+  machine. `docker compose -f docker-compose.prod.yml config` parses and
+  resolves; the images themselves are UNVERIFIED.
+- Durable jobs. Browser cancellation still does not cancel backend work, bounded
+  by `SATQUERY_WORKFLOW_BUDGET_SECONDS` and documented.
+
+### Baseline
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **2277 passed** (2112 before, with a credential present) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm test` | **307 passed** (276 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 23. Scientific core — M1–M4 validation stages — IMPLEMENTED (2026-09-23)
+
+Before any index or backscatter number exists, four stages run in order. Each
+refuses BEFORE the cost it protects. Stage 1 failures are HTTP 422; stages 2-4
+degrade the affected operation to a warning plus an `unavailable` outcome
+(the existing per-operation architecture), never to a silent number.
+
+| Stage | Module | Decides | Refusal |
+| --- | --- | --- | --- |
+| 1 Request (M1) | `analysis/validation.py` | operation allowlist, dataset/sensor, AOI (WGS84 rectangle; native-resolution size from the reader's OWN limits), Date 1 strictly before Date 2, parameters | `AnalysisRequestRejectedError`, 21 codes. The agent applies the area rule after geocoding and BEFORE any STAC search (`QueryExecutionService.execute(before_discovery=...)`, `AnalysisService.precheck_plan`) |
+| 2 Scene + asset (M2) | `satellite/scene_validation.py` | the CATALOG item is the authority (a client's `Scene` date, cloud, footprint are never used); sensor and collection; AOI coverage by footprint geometry; each asset exists, is a COG with role `data` and the expected dtype (`scl` is `uint8`); processing metadata recorded | `SceneValidationError` (`scene_not_found`, `scene_does_not_cover_aoi`, `required_asset_missing`, `unsupported_asset_type`, `unsupported_asset_encoding`, `unknown_processing_baseline`, `incompatible_sensor`, `incompatible_collection`, `temporal_scene_incompatible`, ...) |
+| 3 Pixel quality (M3) | `analysis/pixel_quality.py` | the Sentinel-2 SCL is placed on the FINAL 10 m analysis grid by whole-cell assignment (never blended - averaging classes 4 and 8 would invent 6, water); usable classes 4/5/6 only; every pixel counted once (nodata > saturated/defective > cloud > cloud shadow > snow > unknown class > other); the mask goes into `BandWindow.valid` BEFORE every statistic, overlay, threshold count and temporal change | `PixelQuality` per index grid and per temporal observation; `{index}_quality_*` measurements. SCL missing or unreadable: the index is not computed |
+| 4 Radiometric (M4) | `satellite/radiometry.py` | are the values on the representation the formula assumes, AS-IS? Optical: no additive offset and one shared scale/unit per band pair. SAR: linear power (never dB, never scaled/offset). Nothing is ever corrected | `RadiometricState` (`verified` / `verified_with_unknown_metadata` / `incompatible` / `undetermined`); `RadiometricValidationError`. Incompatible and undetermined are refused before any read (for SAR, before any asset is signed) |
+
+**SCL classes** come from ESA SentiWiki (S2 Processing); no catalog publishes
+`classification:classes`. Baseline 05.11 renamed class 2 DARK_FEATURES ->
+CAST_SHADOWS. Excluding 2 (cast shadow) and 7 (unclassified) is a SatQuery
+policy choice, stated once in `SCL_CATEGORY`.
+
+**The Sentinel-2 offset - measured, not assumed.** Baseline 04.00 (2022-01-25)
+introduced an additive offset. Earth Search publishes `earthsearch:boa_offset_applied`
+and a `raster:bands` offset of -0.1, and they disagree. Live, tile 44PMV:
+
+| Baseline | Flag | Declared offset | Pixels (bounded water read, NIR DN median) | M4 |
+| --- | --- | --- | --- | --- |
+| 03.01 | false | 0 | 346 - no offset | usable (`not_introduced`) |
+| 04.00 | false | -0.1 | 256-433 in 3 of 3 scenes - NO offset found | `undetermined`, refused |
+| 04.00 / 05.00 / 05.09 / 05.11 | true | -0.1 | 338 (2023); NDVI 0.637 vs impossible 1.30 if applied (section 7) | usable (`removed_by_provider`), -0.1 recorded as a contradicted conflict and never applied |
+
+Rule, in ONE place (`OFFSET_INTRODUCED_BASELINE`): offset-free iff the flag is
+true on a baseline >= 04.00, or the baseline predates 04.00 with no non-zero
+declared offset. Everything else is `undetermined`: metadata cannot establish
+it, and measurement did not find the offset the metadata claims, so it is not
+called `incompatible` either. Earth Search does not link ESA's product XML
+(the authoritative `BOA_ADD_OFFSET`). The scene PAIR rule compares the
+representation the pixels carry, not the flags: 03.01 (false) + 05.09 (true)
+are both offset-free and ARE comparable; comparing flags had refused them.
+
+**No thresholds anywhere in M1-M4.** `SATQUERY_SCENE_MIN_AOI_COVERAGE` defaults
+to 0.0 (partial coverage is reported, not refused). No valid range is invented
+from `bits_per_sample` (15, recorded). Saturation comes from SCL class 1 only.
+
+**Contracts (additive):** `AnalysisResult.pixel_quality`, `.radiometry`;
+`ObservationIndexResult.pixel_quality`, `.radiometry`. Optical reads: `scl` is
+read first, so a temporal comparison is six reads, and NDVI+NDWI+NDBI is five.
+
+### Known limitations
+
+- About 9% of 2022-23 scenes over Chennai (13 of 145: baseline >= 04.00 with the
+  flag false) are refused as `undetermined`, although measurement found them
+  offset-free. Scene SELECTION does not yet prefer radiometrically usable scenes.
+- `read_band` refetches the STAC item per band (correct, not optimal); the band
+  pair is promoted to float64 twice per index (quality + engine).
+- SCL misclassification is not assessed. The frontend is untouched: it does not
+  type the new fields, and the new quality measurements appear in its raw list.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **2684 passed** (2316 before M1; +164 M1, +79 M2, +58 M3, +66 M4, +1 re-parametrized) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| frontend | not re-run in M1-M4: no frontend file changed |

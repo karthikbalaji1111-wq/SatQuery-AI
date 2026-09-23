@@ -17,6 +17,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+import { ORBIT_INCLINATION_DEG } from "./timeline";
+
 export interface SceneQuality {
   /** Sphere tessellation. Lower on weak devices. */
   segments: number;
@@ -24,18 +26,28 @@ export interface SceneQuality {
   maxPixelRatio: number;
   clouds: boolean;
   stars: number;
+  /**
+   * How much of the choreography's secondary motion this device performs.
+   *
+   * 1 is the full desktop move. Lower values shrink the tilt and roll ONLY -
+   * the story (spin, distance, framing) is identical on every device, because
+   * a phone visitor should get the same narrative, just carried with less
+   * movement. Scaling the whole pose instead would put the small screen on a
+   * different journey from the large one.
+   */
+  motionScale: number;
 }
 
 export function qualityFor(width: number, cores: number): SceneQuality {
   // Deliberately coarse tiers. A long device-capability probe would cost more
   // than it saves; the honest signals are "small screen" and "few cores".
   if (width < 760 || cores <= 4) {
-    return { segments: 40, maxPixelRatio: 1.5, clouds: false, stars: 700 };
+    return { segments: 40, maxPixelRatio: 1.5, clouds: false, stars: 700, motionScale: 0.35 };
   }
   if (width < 1200) {
-    return { segments: 56, maxPixelRatio: 1.75, clouds: true, stars: 1100 };
+    return { segments: 56, maxPixelRatio: 1.75, clouds: true, stars: 1100, motionScale: 0.6 };
   }
-  return { segments: 72, maxPixelRatio: 2, clouds: true, stars: 1600 };
+  return { segments: 72, maxPixelRatio: 2, clouds: true, stars: 1600, motionScale: 1 };
 }
 
 const EARTH_RADIUS = 1;
@@ -52,9 +64,12 @@ const EARTH_RADIUS = 1;
 const earthVertex = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vNormalW;
+  varying vec3 vViewW;
   void main() {
     vUv = uv;
     vNormalW = normalize(mat3(modelMatrix) * normal);
+    vec4 world = modelMatrix * vec4(position, 1.0);
+    vViewW = normalize(cameraPosition - world.xyz);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -64,11 +79,14 @@ const earthFragment = /* glsl */ `
   uniform sampler2D nightMap;
   uniform vec3 sunDirection;
   uniform float nightLift;
+  uniform float glint;
   varying vec2 vUv;
   varying vec3 vNormalW;
+  varying vec3 vViewW;
 
   void main() {
-    vec3 day = texture2D(dayMap, vUv).rgb;
+    vec3 raw = texture2D(dayMap, vUv).rgb;
+    vec3 day = raw;
     vec3 night = texture2D(nightMap, vUv).rgb;
 
     // Blue Marble is a radiometrically faithful product, which means its
@@ -96,6 +114,23 @@ const earthFragment = /* glsl */ `
     // A touch of warmth exactly at the terminator: sunrise seen from orbit.
     float rim = smoothstep(0.0, 0.22, daylight) * (1.0 - smoothstep(0.22, 0.55, daylight));
     color += vec3(0.30, 0.16, 0.06) * rim * 0.5;
+
+    // Sun glint off water.
+    //
+    // The ocean mask is blue dominance over red, taken from the UNGAINED
+    // sample: Blue Marble's water is strongly blue-biased where soil, snow and
+    // cloud are not, so no separate specular map has to be shipped for it.
+    // This was checked against a Blender render of the same texture before it
+    // was written here - land stayed matte and the highlight landed on water.
+    //
+    // The highlight is divided down rather than clamped, so it rolls off
+    // toward white instead of clipping into a hard disc, which is the usual
+    // way a CG ocean ends up with a headlight on it.
+    float ocean = clamp((raw.b - raw.r) * 5.0, 0.0, 1.0);
+    vec3 halfway = normalize(normalize(sunDirection) + normalize(vViewW));
+    float spec = pow(max(dot(normalize(vNormalW), halfway), 0.0), 96.0);
+    spec = spec / (1.0 + spec * 0.85);
+    color += vec3(0.82, 0.89, 1.0) * spec * ocean * daylight * glint;
 
     gl_FragColor = vec4(color, 1.0);
   }
@@ -144,9 +179,19 @@ export interface WorldHandles {
   clouds: THREE.Mesh | null;
   atmosphere: THREE.Mesh;
   satellite: THREE.Group;
+  /** The satellite's solar array, when the asset ships one as its own node. */
+  solarWings: THREE.Object3D | null;
   orbit: THREE.Line;
   stars: THREE.Points;
   sunDirection: THREE.Vector3;
+  /**
+   * Every texture this world owns.
+   *
+   * Disposing a material does NOT dispose the textures its uniforms hold, and
+   * this world is rebuilt whenever the reduced-motion preference changes - so
+   * without an explicit ledger each toggle stranded three NASA maps on the GPU.
+   */
+  textures: THREE.Texture[];
 }
 
 function makeStars(count: number): THREE.Points {
@@ -197,12 +242,18 @@ function makeStars(count: number): THREE.Points {
   return new THREE.Points(geometry, material);
 }
 
-/** The orbit the satellite follows, drawn faintly and revealed on demand. */
-function makeOrbit(radius: number, inclination: number): THREE.Line {
+/**
+ * The orbit the satellite follows, drawn faintly and revealed on demand.
+ *
+ * Built at unit radius and scaled by the timeline, so the drawn path and the
+ * body on it read from one number and cannot drift apart when the orbit opens
+ * out in the chapters that are about the spacecraft.
+ */
+function makeOrbit(inclination: number): THREE.Line {
   const points: THREE.Vector3[] = [];
   for (let i = 0; i <= 160; i += 1) {
     const t = (i / 160) * Math.PI * 2;
-    points.push(new THREE.Vector3(Math.cos(t) * radius, 0, Math.sin(t) * radius));
+    points.push(new THREE.Vector3(Math.cos(t), 0, Math.sin(t)));
   }
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   const material = new THREE.LineBasicMaterial({
@@ -228,10 +279,15 @@ export async function buildWorld(
       loader.load(`${baseUrl}${file}`, resolve, undefined, reject);
     });
 
-  const [dayMap, nightMap] = await Promise.all([
+  // All three at once. The cloud map used to load only after the other two had
+  // resolved, which put a whole extra round trip in front of first paint for no
+  // reason - they are independent requests.
+  const [dayMap, nightMap, cloudMap] = await Promise.all([
     load("earth_day.jpg"),
     load("earth_night.jpg"),
+    quality.clouds ? load("earth_clouds.jpg") : Promise.resolve(null),
   ]);
+  const textures: THREE.Texture[] = [dayMap, nightMap];
   for (const map of [dayMap, nightMap]) {
     map.colorSpace = THREE.SRGBColorSpace;
     map.anisotropy = 4;
@@ -253,6 +309,9 @@ export async function buildWorld(
         // Not pure black: the night side of a real planet is lit by moonlight
         // and airglow, and crushing it to zero loses the whole limb.
         nightLift: { value: 0.085 },
+        // Deliberately low. A glint is a hint that the surface is wet, not a
+        // light source; past about 0.8 it reads as a lens flare.
+        glint: { value: 0.55 },
       },
       vertexShader: earthVertex,
       fragmentShader: earthFragment,
@@ -261,8 +320,8 @@ export async function buildWorld(
   scene.add(earth);
 
   let clouds: THREE.Mesh | null = null;
-  if (quality.clouds) {
-    const cloudMap = await load("earth_clouds.jpg");
+  if (cloudMap) {
+    textures.push(cloudMap);
     cloudMap.colorSpace = THREE.SRGBColorSpace;
     clouds = new THREE.Mesh(
       new THREE.SphereGeometry(EARTH_RADIUS * 1.012, quality.segments, quality.segments / 2),
@@ -312,7 +371,7 @@ export async function buildWorld(
   const stars = makeStars(quality.stars);
   scene.add(stars);
 
-  const orbit = makeOrbit(1.42, THREE.MathUtils.degToRad(24));
+  const orbit = makeOrbit(THREE.MathUtils.degToRad(ORBIT_INCLINATION_DEG));
   scene.add(orbit);
 
   // Lighting for the satellite only — the Earth is shaded by its own shader.
@@ -328,14 +387,104 @@ export async function buildWorld(
 
   const satellite = new THREE.Group();
   scene.add(satellite);
+  let solarWings: THREE.Object3D | null = null;
   try {
-    const gltf = await new GLTFLoader().loadAsync(`${baseUrl}satellite.glb`);
-    gltf.scene.scale.setScalar(0.035);
+    // Authored in Blender for this page. The aperture is modelled down -Z,
+    // which is the axis three's lookAt() aims, so pointing the instrument at
+    // the Earth needs no correction transform here. The previous asset was
+    // built down -Y and had been flying past the planet sideways.
+    const gltf = await new GLTFLoader().loadAsync(`${baseUrl}satellite-eo.glb`);
     satellite.add(gltf.scene);
+    solarWings = gltf.scene.getObjectByName("SolarWings") ?? null;
+    gltf.scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      const material = mesh.material as THREE.MeshStandardMaterial | undefined;
+      if (material && "envMapIntensity" in material) {
+        // The bus is mostly metal, and metal with no environment to reflect is
+        // black. This is what makes the environment below load-bearing rather
+        // than decorative.
+        material.envMapIntensity = 1.0;
+      }
+    });
   } catch {
     // The page must survive a missing asset: the story is carried by the HTML,
     // and an Earth without its satellite is still an Earth.
   }
 
-  return { scene, camera, earth, clouds, atmosphere, satellite, orbit, stars, sunDirection };
+  return {
+    scene, camera, earth, clouds, atmosphere,
+    satellite, solarWings, orbit, stars, sunDirection, textures,
+  };
+}
+
+
+/**
+ * A two-kilobyte sky for the spacecraft to reflect.
+ *
+ * Everything on the satellite is a metal, and a metal lit only by punctual
+ * lights has nothing to return to the camera but a few specular pinpoints — it
+ * renders as a black cut-out. Physically the fix is an environment, and in low
+ * Earth orbit that environment is simple enough to write down: a bright planet
+ * filling the hemisphere below, near-black sky above, and the sun.
+ *
+ * So it is generated rather than downloaded. A 64x32 equirectangular map costs
+ * one PMREM pass at startup and no network request at all, which is the right
+ * trade when the alternative is shipping an HDR to light an object that is
+ * never more than a few hundred pixels across.
+ */
+function makeEnvironmentSource(sun: THREE.Vector3): THREE.DataTexture {
+  const w = 64;
+  const h = 32;
+  const data = new Uint8Array(w * h * 4);
+  const dir = new THREE.Vector3();
+  for (let y = 0; y < h; y += 1) {
+    const phi = ((y + 0.5) / h) * Math.PI;
+    for (let x = 0; x < w; x += 1) {
+      const theta = ((x + 0.5) / w) * Math.PI * 2;
+      dir.set(
+        Math.sin(phi) * Math.cos(theta),
+        Math.cos(phi),
+        Math.sin(phi) * Math.sin(theta),
+      );
+      // Earthshine from below, falling off toward the horizon.
+      const below = Math.max(0, -dir.y) ** 0.7;
+      // The sun as a small, very bright cap rather than a point, so the
+      // roughness blur has something with area to work from.
+      const solar = Math.max(0, dir.dot(sun)) ** 150;
+      const r = 6 + below * 40 + solar * 250;
+      const g = 9 + below * 76 + solar * 240;
+      const b = 16 + below * 122 + solar * 220;
+      const i = (y * w + x) * 4;
+      data[i] = Math.min(255, r);
+      data[i + 1] = Math.min(255, g);
+      data[i + 2] = Math.min(255, b);
+      data[i + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Installs that environment. Needs the renderer, so it runs after the world is
+ * built rather than inside it.
+ *
+ * Only the satellite's standard materials consume it — the Earth, atmosphere,
+ * clouds and stars are all raw ShaderMaterials and are untouched by
+ * `scene.environment`, so this cannot disturb the tuned planet.
+ */
+export function applyEnvironment(
+  renderer: THREE.WebGLRenderer,
+  world: WorldHandles,
+): THREE.WebGLRenderTarget {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const source = makeEnvironmentSource(world.sunDirection);
+  const target = pmrem.fromEquirectangular(source);
+  world.scene.environment = target.texture;
+  source.dispose();
+  pmrem.dispose();
+  return target;
 }

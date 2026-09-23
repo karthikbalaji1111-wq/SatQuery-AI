@@ -22,17 +22,21 @@ import type {
   NdwiComparison,
   NdwiOverlay,
   NdwiTemporalChange,
+  NdwiThreshold,
   QueryExecutionResult,
   QueryTask,
   ResolvedQueryPlan,
   SatQueryIntent,
   SatelliteScene,
+  SarBackscatterResult,
+  SarPolarization,
   SceneSearchResponse,
   SpatialMeasurement,
   SpectralIndexKey,
   TemporalComparison,
   TemporalIndexComparison,
   TemporalMode,
+  TimeRange,
 } from "../../api/types";
 import type { MapAoi } from "../map/footprint";
 import { ConfigSummary } from "./ConfigSummary";
@@ -131,7 +135,14 @@ function formatPercent(value: number): string {
  */
 const TASK_OPTIONS: { value: QueryTask; label: string }[] = [
   { value: "visualize", label: "Visualize" },
-  { value: "change_detection", label: "Change Detection (unavailable)" },
+  {
+    value: "change_detection",
+    // Precise rather than merely discouraging. Temporal NDWI difference IS
+    // implemented and has its own checkbox below; what is unavailable is the
+    // general-purpose task - classifying what changed. Labelling this plain
+    // "unavailable" contradicted a capability the same panel offers.
+    label: "General change detection (not implemented)",
+  },
   {
     value: "object_identification",
     label: "Object Identification (unavailable)",
@@ -189,11 +200,27 @@ interface QueryPanelProps {
   onEvidence?: (evidence: ManualEvidence | null) => void;
 }
 
-/** What the manual path can establish without any model call. */
+/**
+ * What the manual path can establish without any model call.
+ *
+ * The first four fields are what a reader SEES. The last three are what makes
+ * an export auditable: the exported record used to carry a scene, a picture and
+ * some numbers, with no statement of what was asked, which catalog answered,
+ * which windows failed, or what the analysis warned about. A report that omits
+ * its own limitations reads as more authoritative than the run that produced
+ * it.
+ */
 export interface ManualEvidence {
   scene: SatelliteScene | null;
   imagery: ImageryResponse | null;
   measurements: Measurement[];
+  sar_backscatter?: SarBackscatterResult | null;
+  /** The intent actually submitted - not the form's current, editable state. */
+  intent?: SatQueryIntent | null;
+  /** Windows, per-window catalog and per-window failures, verbatim. */
+  execution?: QueryExecutionResult | null;
+  /** Status, completeness, outcomes and warnings, verbatim. */
+  analysis?: AnalysisResult | null;
 }
 
 /**
@@ -231,6 +258,30 @@ export function QueryPanel({
   // --- structured query intent ---
   const [temporalMode, setTemporalMode] = useState<TemporalMode>("single");
   const [obsDate, setObsDate] = useState("");
+  // The END of a single (non-comparison) window.
+  //
+  // The parser returns a full range - "January 2025" is 01-01 to 01-31 - and
+  // only the start was kept, so the request asked for one day and the answer
+  // described one day the user never named. Held separately from `obsDate`
+  // because the form offers ONE date box: typing in it means a point date, and
+  // that is still honoured (start === end). This only preserves a range the
+  // parser actually produced.
+  const [obsEnd, setObsEnd] = useState("");
+  // Every window a parsed TIME SERIES carried, kept whole.
+  //
+  // The manual form offers one date box, so a series cannot be authored here -
+  // but one that was parsed has to survive review and execution. It used to be
+  // collapsed to `windows[0]` and re-emitted as a single-window request, so
+  // "monthly analysis, January through March" executed as January alone and the
+  // answer described a period the user never asked about. `null` means the
+  // current request is not a series.
+  const [seriesWindows, setSeriesWindows] = useState<TimeRange[] | null>(null);
+  // An explicit NDWI threshold the request stated ("NDWI above 0.3"). The form
+  // has no control for it, and `currentIntent` used to rebuild the intent from
+  // the controls alone - so the threshold was dropped on the way out and a
+  // threshold question silently became a plain index question. The backend
+  // counts those pixels only when the intent carries this.
+  const [ndwiThreshold, setNdwiThreshold] = useState<NdwiThreshold | null>(null);
   const [baselineStart, setBaselineStart] = useState("");
   const [baselineEnd, setBaselineEnd] = useState("");
   const [targetStart, setTargetStart] = useState("");
@@ -244,6 +295,8 @@ export function QueryPanel({
   // Which additional spectral indices to compute. Independent of the NDWI
   // flag above, which is also what produces the georeferenced overlay.
   const [indices, setIndices] = useState<SpectralIndexKey[]>([]);
+  const [includeSarBackscatter, setIncludeSarBackscatter] = useState(false);
+  const [sarPolarization, setSarPolarization] = useState<SarPolarization>("vv");
   const [includeTemporalNdwi, setIncludeTemporalNdwi] = useState(false);
   const [executeState, setExecuteState] = useState<ExecuteState>({
     status: "idle",
@@ -283,10 +336,12 @@ export function QueryPanel({
   const temporalComplete =
     temporalMode === "single"
       ? obsDate !== ""
-      : baselineStart !== "" &&
-        baselineEnd !== "" &&
-        targetStart !== "" &&
-        targetEnd !== "";
+      : temporalMode === "timeseries"
+        ? seriesWindows !== null && seriesWindows.length > 1
+        : baselineStart !== "" &&
+          baselineEnd !== "" &&
+          targetStart !== "" &&
+          targetEnd !== "";
   const planReady =
     place.trim() !== "" &&
     modalities.length > 0 &&
@@ -295,24 +350,41 @@ export function QueryPanel({
   const canBuildPlan = planReady && planState.status !== "loading";
   const canExecute = planReady && executeState.status !== "loading";
 
-  /** Populate the editable Query Plan form from a parsed intent. */
+  /**
+   * Populate the editable Query Plan form from a parsed intent.
+   *
+   * Everything the intent established is carried, including what this form has
+   * no control for. A field the user does not edit must reach execution exactly
+   * as it was parsed: the form is a REVIEW of the request, and a review that
+   * quietly drops half of it turns one question into another.
+   */
   function applyIntent(intent: SatQueryIntent) {
     setPlace(intent.location_query);
     setOpticalOn(intent.modalities.includes("sentinel-2-optical"));
     setSarOn(intent.modalities.includes("sentinel-1-sar"));
     setTask(intent.task);
+    setNdwiThreshold(intent.ndwi_threshold ?? null);
 
     const windows = intent.time_windows;
     if (intent.temporal_mode === "compare" && !Array.isArray(windows)) {
       setTemporalMode("compare");
+      setSeriesWindows(null);
       setBaselineStart(windows.baseline.start_date);
       setBaselineEnd(windows.baseline.end_date);
       setTargetStart(windows.target.start_date);
       setTargetEnd(windows.target.end_date);
     } else if (Array.isArray(windows) && windows.length > 0) {
-      // single, or timeseries collapsed to its first window for the manual form
-      setTemporalMode("single");
+      // The first window fills the date box either way, so switching to Single
+      // date leaves a sensible value rather than an empty control.
       setObsDate(windows[0].start_date);
+      setObsEnd(windows[0].end_date);
+      if (intent.temporal_mode === "timeseries" && windows.length > 1) {
+        setTemporalMode("timeseries");
+        setSeriesWindows(windows);
+      } else {
+        setTemporalMode("single");
+        setSeriesWindows(null);
+      }
     }
   }
 
@@ -396,20 +468,36 @@ export function QueryPanel({
 
   /** Assemble a SatQueryIntent from the current Query Plan form state. */
   function currentIntent(): SatQueryIntent {
+    // A series that has been replaced by a typed date is no longer a series.
+    // Deriving the mode here rather than trusting the control keeps the mode
+    // and the windows from ever disagreeing on the wire.
+    const mode: TemporalMode =
+      temporalMode === "timeseries" && seriesWindows === null
+        ? "single"
+        : temporalMode;
+
     const timeWindows: SatQueryIntent["time_windows"] =
-      temporalMode === "single"
-        ? [{ start_date: obsDate, end_date: obsDate }]
-        : ({
+      mode === "compare"
+        ? ({
             baseline: { start_date: baselineStart, end_date: baselineEnd },
             target: { start_date: targetStart, end_date: targetEnd },
-          } satisfies TemporalComparison);
+          } satisfies TemporalComparison)
+        : mode === "timeseries" && seriesWindows !== null
+          ? // Every parsed window, in order - not just the first.
+            seriesWindows
+          : // `obsEnd` falls back to the start, so a hand-typed point date is
+            // unchanged; a parsed range survives intact.
+            [{ start_date: obsDate, end_date: obsEnd || obsDate }];
 
     return {
       location_query: place.trim(),
-      temporal_mode: temporalMode,
+      temporal_mode: mode,
       time_windows: timeWindows,
       modalities,
       task,
+      // Omitted when the request stated none, so an intent without a threshold
+      // stays byte-identical to the previous contract.
+      ...(ndwiThreshold !== null ? { ndwi_threshold: ndwiThreshold } : {}),
     };
   }
 
@@ -437,11 +525,16 @@ export function QueryPanel({
     onChange?.(null);
     setAnalyzeState({ status: "idle" });
 
+    // The intent AS SUBMITTED. The form stays editable after a run, so reading
+    // it back later would describe a request that was never made.
+    const submitted = currentIntent();
+
     let result: QueryExecutionResult;
     try {
       result = await executeQuery({
-        intent: currentIntent(),
+        intent: submitted,
         include_imagery: includeImagery,
+        ...(sarOn ? { sar_polarization: sarPolarization } : {}),
       });
       if (!current()) return;
       setExecuteState({ status: "done", result });
@@ -454,7 +547,13 @@ export function QueryPanel({
         imagery_requested: includeImagery,
         imagery_error: window?.imagery_error ?? null,
       });
-      onEvidence?.({ scene: shownScene(window), imagery, measurements: [] });
+      onEvidence?.({
+        scene: shownScene(window),
+        imagery,
+        measurements: [],
+        intent: submitted,
+        execution: result,
+      });
     } catch (error) {
       if (!current()) return;
       setExecuteState({ status: "error", message: errorMessage(error) });
@@ -472,6 +571,7 @@ export function QueryPanel({
         ...(includeNdwi
           ? { include_ndwi: true, include_ndwi_overlay: true }
           : {}),
+        ...(sarOn && includeSarBackscatter ? { include_sar_backscatter: true } : {}),
         ...(includeTemporalNdwi ? { include_temporal_ndwi: true } : {}),
         // Omitted when empty, so a request that asks for no extra index is
         // byte-identical to the previous contract.
@@ -485,6 +585,10 @@ export function QueryPanel({
         scene: null,
         imagery: null,
         measurements: analysis.measurements,
+        sar_backscatter: analysis.sar_backscatter ?? null,
+        // Carried whole: status, completeness, per-analysis outcomes and every
+        // warning travel with the numbers rather than beside them.
+        analysis,
       });
       // null when the analysis produced no overlay, so the map never keeps one
       // from an earlier query.
@@ -572,6 +676,36 @@ export function QueryPanel({
     }
   }
 
+  // The window a completed run actually executed, so the summary reports the
+  // run rather than the form once one exists.
+  const executedWindow =
+    executeState.status === "done" ? shownWindow(executeState.result) : null;
+
+  /**
+   * The indices this configuration reports.
+   *
+   * Once an analysis has completed, they are read back from the measurement
+   * names it returned - what was actually computed. Before that, the form's
+   * own selection stands in, exactly as `location` and `window` report what a
+   * run would use until a run reports what it did.
+   *
+   * Without this the summary derived the list from the NDWI flag alone, so a
+   * run that computed all three indices - with their values on screen -
+   * rendered NDVI and NDBI as "supported but not requested for this query".
+   */
+  const summaryIndices: SpectralIndexKey[] =
+    analyzeState.status === "done"
+      ? INDEX_CHOICES.map((choice) => choice.key).filter((key) =>
+          analyzeState.result.measurements.some((measurement) =>
+            measurement.name.toLowerCase().startsWith(`${key}_`),
+          ),
+        )
+      : INDEX_CHOICES.map((choice) => choice.key).filter(
+          (key) =>
+            indices.includes(key) ||
+            (key === "ndwi" && (includeNdwi || includeTemporalNdwi)),
+        );
+
   // The configuration this panel currently describes. Read straight off its own
   // controls - it reports what a run WOULD use, until a real run reports what
   // it did use.
@@ -579,10 +713,19 @@ export function QueryPanel({
     location: resolved?.display_name ?? null,
     centre: resolved?.center ?? null,
     window:
-      temporalMode === "compare" && baselineStart && targetStart
-        ? `${baselineStart} → ${targetEnd || targetStart}`
-        : obsDate ||
-          (startDate && endDate ? `${startDate} → ${endDate}` : null),
+      temporalMode === "timeseries" && seriesWindows !== null
+        ? `${seriesWindows.length} windows · ${seriesWindows[0].start_date} → ` +
+          `${seriesWindows[seriesWindows.length - 1].end_date}`
+        : temporalMode === "compare" && baselineStart && targetStart
+          ? `${baselineStart} → ${targetEnd || targetStart}`
+          : (obsDate && obsEnd && obsEnd !== obsDate
+              ? `${obsDate} → ${obsEnd}`
+              : obsDate) ||
+            (startDate && endDate ? `${startDate} → ${endDate}` : null),
+    threshold:
+      ndwiThreshold === null
+        ? null
+        : `NDWI ${COMPARISON_SYMBOLS[ndwiThreshold.operator]} ${ndwiThreshold.value}`,
     cloudRule: maxCloud === "" ? null : `Cloud cover ≤ ${maxCloud}%`,
     modalities: [
       ...(opticalOn ? (["sentinel-2-optical"] as const) : []),
@@ -590,13 +733,18 @@ export function QueryPanel({
     ],
     task,
     ndwi: includeNdwi || includeTemporalNdwi,
-    scenes: searchState.status === "done" ? searchState.result.scenes : [],
-    selectedSceneId:
-      executeState.status === "done"
-        ? (executeState.result.windows.find(
-            (executed) => executed.selected_scene_id !== null,
-          )?.selected_scene_id ?? null)
-        : null,
+    indices: summaryIndices,
+    // The executed run's own candidates win over a standalone scene search.
+    // `selectedSceneId` already came from the execution, so sourcing the list
+    // anywhere else let the summary report "No scenes discovered yet" beside
+    // the id of the scene that run had just selected and rendered.
+    scenes:
+      executedWindow !== null
+        ? executedWindow.scenes
+        : searchState.status === "done"
+          ? searchState.result.scenes
+          : [],
+    selectedSceneId: executedWindow?.selected_scene_id ?? null,
   };
 
   return (
@@ -659,7 +807,12 @@ export function QueryPanel({
               name="temporal_mode"
               value="single"
               checked={temporalMode === "single"}
-              onChange={() => setTemporalMode("single")}
+              onChange={() => {
+                setTemporalMode("single");
+                // Choosing a single date discards the series deliberately -
+                // an explicit action, unlike the silent collapse this replaced.
+                setSeriesWindows(null);
+              }}
             />
             Single date
           </label>
@@ -669,13 +822,44 @@ export function QueryPanel({
               name="temporal_mode"
               value="compare"
               checked={temporalMode === "compare"}
-              onChange={() => setTemporalMode("compare")}
+              onChange={() => {
+                setTemporalMode("compare");
+                setSeriesWindows(null);
+              }}
             />
             Compare dates
           </label>
+          {/* Only offered once a parse has produced one: the form can review
+              and execute a series, but cannot author one. */}
+          {seriesWindows !== null && (
+            <label>
+              <input
+                type="radio"
+                name="temporal_mode"
+                value="timeseries"
+                checked={temporalMode === "timeseries"}
+                onChange={() => setTemporalMode("timeseries")}
+              />
+              Time series ({seriesWindows.length} windows)
+            </label>
+          )}
         </fieldset>
 
-        {temporalMode === "single" ? (
+        {temporalMode === "timeseries" && seriesWindows !== null ? (
+          <div className="series-windows">
+            <p className="hint">
+              All {seriesWindows.length} parsed windows are sent as they were
+              parsed. Choose Single date to replace them with one date.
+            </p>
+            <ul>
+              {seriesWindows.map((window) => (
+                <li key={`${window.start_date}:${window.end_date}`}>
+                  {window.start_date} → {window.end_date}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : temporalMode === "single" ? (
           <div>
             <label htmlFor="obs-date">Observation date</label>
             <input
@@ -683,7 +867,15 @@ export function QueryPanel({
               name="obs_date"
               type="date"
               value={obsDate}
-              onChange={(event) => setObsDate(event.target.value)}
+              onChange={(event) => {
+                setObsDate(event.target.value);
+                // Typing here states a point date. Any range the parser left
+                // behind is no longer what the user is asking for - and
+                // keeping it could pair a new start with an older end, which
+                // is an inverted window rather than merely a stale one.
+                setObsEnd("");
+                setSeriesWindows(null);
+              }}
             />
           </div>
         ) : (
@@ -803,6 +995,28 @@ export function QueryPanel({
           />
           Compute NDWI index statistics (Sentinel-2)
         </label>
+        <label className="include-sar-backscatter">
+          <input
+            type="checkbox"
+            name="include_sar_backscatter"
+            checked={includeSarBackscatter}
+            disabled={!sarOn}
+            onChange={(event) => {
+              setIncludeSarBackscatter(event.target.checked);
+              invalidateAnalysis();
+            }}
+          />
+          Compute Sentinel-1 RTC backscatter (VV, VH and VV−VH in dB)
+        </label>
+        {sarOn && (
+          <label>
+            SAR display polarization
+            <select value={sarPolarization} onChange={(event) => setSarPolarization(event.target.value as SarPolarization)}>
+              <option value="vv">VV</option>
+              <option value="vh">VH</option>
+            </select>
+          </label>
+        )}
         <fieldset className="index-picker">
           <legend>Spectral indices</legend>
           {INDEX_CHOICES.map((choice) => (
@@ -878,7 +1092,12 @@ export function QueryPanel({
           The Query Plan form below is pre-filled — review or edit it, then click
           Build Query Plan.
           {parseState.result.temporal_mode === "timeseries" &&
-            " (Time-series windows collapsed to the first window in the manual form.)"}
+            Array.isArray(parseState.result.time_windows) &&
+            ` (All ${parseState.result.time_windows.length} time-series windows are kept and will be executed.)`}
+          {parseState.result.ndwi_threshold &&
+            ` (The NDWI threshold ${
+              COMPARISON_SYMBOLS[parseState.result.ndwi_threshold.operator]
+            } ${parseState.result.ndwi_threshold.value} is kept.)`}
         </p>
       )}
 
@@ -1049,12 +1268,29 @@ function PlanView({ plan }: { plan: ResolvedQueryPlan }) {
 }
 
 function ExecutionView({ result }: { result: QueryExecutionResult }) {
+  // A window whose DISCOVERY failed, as opposed to one that searched and
+  // matched nothing. The two look identical without this - both carry no
+  // scenes - and reporting an outage as an empty archive points the reader at
+  // the wrong problem.
+  const failed = result.windows.filter((win) => win.error).length;
+  // Every catalog that answered. A mixed Sentinel-1 + Sentinel-2 run reaches
+  // two different services, and naming only one implies the other's data came
+  // from it.
+  const sources = result.catalogs?.length ? result.catalogs : [result.catalog];
+
   return (
     <div className="result execution-result">
       <p className="hint" role="status">
-        Executed: {result.executed_modalities.join(", ") || "none"} · source:{" "}
-        {result.catalog}
+        Executed: {result.executed_modalities.join(", ") || "none"} · source
+        {sources.length > 1 ? "s" : ""}: {sources.join(", ")}
       </p>
+      {failed > 0 && (
+        <p className="hint hint-limitation" role="status">
+          Partial result: {failed} of {result.windows.length} window
+          {result.windows.length === 1 ? "" : "s"} could not be retrieved. What
+          follows is what did succeed.
+        </p>
+      )}
       {result.skipped_modalities.map((skipped) => (
         <p key={skipped.modality} className="hint hint-limitation">
           Skipped {skipped.modality}: {skipped.reason}
@@ -1100,6 +1336,16 @@ function ExecutionWindowView({ win }: { win: ExecutedWindow }) {
           <dd>{win.selected_scene_id ?? "— none —"}</dd>
         </div>
       </dl>
+      {/* Discovery failed: the catalog could not be asked at all. Said plainly,
+          because "Scenes found: 0" above is otherwise indistinguishable from an
+          archive that genuinely holds nothing for this window. */}
+      {win.error && (
+        <p className="result-error" role="alert">
+          The catalog could not be searched for this window: {win.error} No
+          scenes were examined, so this is not a finding that the archive is
+          empty here.
+        </p>
+      )}
             {win.imagery_error && <ImageryErrorNotice raw={win.imagery_error} />}
       {win.imagery && (
         <figure className="scene-image">
@@ -1212,6 +1458,19 @@ function AnalysisView({ result }: { result: AnalysisResult }) {
         {result.task} · {result.status}
       </p>
       <p className="analysis-answer">{result.answer}</p>
+
+      {/* An analysis that was asked for and not produced. The status above
+          cannot say this - it reports whether the TASK has an engine - so a run
+          that computed nothing still read as "ok". Each is named with the
+          server's own reason. */}
+      {(result.analysis_outcomes ?? [])
+        .filter((outcome) => outcome.status === "unavailable")
+        .map((outcome) => (
+          <p key={outcome.name} className="hint hint-limitation" role="status">
+            {outcome.name.replace(/_/g, " ")} was requested but not produced
+            {outcome.reason ? `: ${outcome.reason}` : "."}
+          </p>
+        ))}
 
       {result.windows_considered.length > 0 && (
         <ul className="analysis-windows">

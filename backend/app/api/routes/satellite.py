@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from app.core.limits import rate_limited, workflow_slot
 from app.services.satellite import (
     ImageryRequest,
     ImageryResponse,
@@ -28,7 +29,13 @@ def get_imagery_service() -> ImageryService:
     return ImageryService()
 
 
-@router.post("/search", response_model=SceneSearchResponse)
+@router.post(
+    "/search",
+    response_model=SceneSearchResponse,
+    # One outbound catalog request per call, so it is rate-limited but does not
+    # hold a workflow slot: discovery is cheap here and expensive there.
+    dependencies=[Depends(rate_limited)],
+)
 async def search_scenes(
     request: SceneSearchRequest,
     service: SatelliteService = Depends(get_satellite_service),
@@ -39,7 +46,12 @@ async def search_scenes(
     return await service.search(request)
 
 
-@router.post("/imagery", response_model=ImageryResponse)
+@router.post(
+    "/imagery",
+    response_model=ImageryResponse,
+    # A windowed COG read plus a PNG encode held in memory - the expensive kind.
+    dependencies=[Depends(rate_limited), Depends(workflow_slot)],
+)
 def retrieve_imagery(
     request: ImageryRequest,
     service: ImageryService = Depends(get_imagery_service),

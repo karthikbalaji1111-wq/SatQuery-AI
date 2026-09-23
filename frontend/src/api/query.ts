@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import { asAnalysisResult, asExecutionResult } from "./validate";
 import type {
   AnalysisRequest,
   AnalysisResult,
@@ -47,15 +48,19 @@ export function buildQueryPlan(
  * collection, and its VV asset is retrieved as a display-normalised greyscale
  * PNG when imagery is requested.
  */
-export function executeQuery(
+export async function executeQuery(
   request: QueryExecutionRequest,
   signal?: AbortSignal,
 ): Promise<QueryExecutionResult> {
-  return apiRequest<QueryExecutionResult>("/api/v1/query/execute", {
-    method: "POST",
-    body: request,
-    signal,
-  });
+  // Checked before it enters state: the map, the analysis request and the
+  // export all index into `plan` and `windows` without asking first.
+  return asExecutionResult(
+    await apiRequest<unknown>("/api/v1/query/execute", {
+      method: "POST",
+      body: request,
+      signal,
+    }),
+  );
 }
 
 /**
@@ -74,13 +79,15 @@ export function executeQuery(
  * returned as {@link AnalysisResult.temporal_comparison}. Each observation is
  * indexed independently; no pixels are compared and nothing is co-registered.
  */
-export function analyzeQuery(
+export async function analyzeQuery(
   request: AnalysisRequest,
   signal?: AbortSignal,
 ): Promise<AnalysisResult> {
-  return apiRequest<AnalysisResult>("/api/v1/query/analyze", {
-    method: "POST",
-    body: request,
-    signal,
-  });
+  return asAnalysisResult(
+    await apiRequest<unknown>("/api/v1/query/analyze", {
+      method: "POST",
+      body: request,
+      signal,
+    }),
+  );
 }

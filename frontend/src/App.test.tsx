@@ -136,10 +136,48 @@ const IMAGERY = {
 };
 
 /** Canned responses by URL substring, mirroring the QueryPanel tests. */
-function stubRouter(routes: Record<string, unknown>) {
+/**
+ * The two endpoints the shell calls on mount, whatever a test is about.
+ *
+ * An unmatched route used to answer `200 {}`, which meant every test silently
+ * received an empty object for the model catalog. Nothing noticed until
+ * responses were checked at the boundary - and an empty object is not a catalog
+ * the application could ever be sent. Defaults belong here rather than in each
+ * test, because no test is ABOUT these two.
+ */
+const SHELL_ROUTES: Record<string, unknown> = {
+  "/health": {
+    status: "ok",
+    service: "SatQuery API",
+    version: "0.1.0",
+    environment: "test",
+  },
+  "/ai/models": {
+    role: "visual",
+    default_provider: "gemini",
+    default_model: "gemini-3.6-flash",
+    models: [],
+  },
+};
+
+function stubRouter(callerRoutes: Record<string, unknown>) {
   const fn = vi.fn((url: string) => {
-    const match = Object.keys(routes).find((key) => String(url).includes(key));
-    const body = match ? routes[match] : {};
+    // A caller's route always wins, and is searched FIRST rather than merged:
+    // matching is by substring, so a test spelling its key differently
+    // ("/api/v1/ai/models") would otherwise lose to a default ("/ai/models")
+    // that also matches - and silently receive the default instead of its own.
+    const caller = Object.keys(callerRoutes).find((key) =>
+      String(url).includes(key),
+    );
+    const fallback = Object.keys(SHELL_ROUTES).find((key) =>
+      String(url).includes(key),
+    );
+    const body =
+      caller !== undefined
+        ? callerRoutes[caller]
+        : fallback !== undefined
+          ? SHELL_ROUTES[fallback]
+          : {};
     return Promise.resolve({
       ok: true,
       status: 200,
@@ -175,12 +213,61 @@ async function runQueryToPreview() {
   fireEvent.click(screen.getByRole("button", { name: /load image/i }));
 }
 
+describe("App - a completed manual result is a completed result", () => {
+  // The defect: export and the answer rail were gated on the AGENT result, so a
+  // successful manual analysis left "Run an analysis" on screen with export
+  // unavailable - while its own measurements sat in the panel beside it.
+
+  it("offers evidence export after a manual run, with no agent run at all", async () => {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/satellite/search": { scenes: [SCENE], scene_count: 1, catalog: "https://example.test/v1" },
+      "/satellite/imagery": IMAGERY,
+    });
+    render(<App />);
+
+    expect(
+      screen.queryByRole("button", { name: /export evidence/i }),
+    ).not.toBeInTheDocument();
+
+    await runQueryToPreview();
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /export evidence/i }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("stops instructing a run once the manual result exists", async () => {
+    stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/geospatial/resolve": CHENNAI,
+      "/satellite/search": { scenes: [SCENE], scene_count: 1, catalog: "https://example.test/v1" },
+      "/satellite/imagery": IMAGERY,
+    });
+    render(<App />);
+
+    await runQueryToPreview();
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /export evidence/i }),
+      ).toBeInTheDocument(),
+    );
+    expect(document.body.textContent).not.toMatch(
+      /Run an analysis to produce an answer/i,
+    );
+  });
+});
+
 describe("App - query to map seam", () => {
   it("passes a successful preview through to the map panel", async () => {
     stubRouter({
       "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
       "/geospatial/resolve": CHENNAI,
-      "/satellite/search": { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      "/satellite/search": { scenes: [SCENE], scene_count: 1, catalog: "https://example.test/v1" },
       "/satellite/imagery": IMAGERY,
     });
     render(<App />);
@@ -197,7 +284,7 @@ describe("App - query to map seam", () => {
     stubRouter({
       "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
       "/geospatial/resolve": CHENNAI,
-      "/satellite/search": { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      "/satellite/search": { scenes: [SCENE], scene_count: 1, catalog: "https://example.test/v1" },
       "/satellite/imagery": IMAGERY,
     });
     render(<App />);
@@ -586,7 +673,7 @@ describe("App - agent question reaches the map", () => {
     const pending = new Promise<Response>((resolve) => { finishPreview = resolve; });
     const router = stubRouter({
       "/geospatial/resolve": CHENNAI,
-      "/satellite/search": { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      "/satellite/search": { scenes: [SCENE], scene_count: 1, catalog: "https://example.test/v1" },
       "/query/agent": AGENT_RESULT,
     });
     const route = router.getMockImplementation()!;
@@ -622,7 +709,13 @@ describe("App - agent question reaches the map", () => {
     fireEvent.click(screen.getByRole("button", { name: /resolve location/i }));
     await screen.findByText(CHENNAI.display_name);
     expect(screen.queryByText(AGENT_RESULT.answer)).not.toBeInTheDocument();
-    expect(within(mapPanelNow()).getByRole("status")).not.toHaveTextContent(AGENT_SCENE);
+    // Assert on the whole panel rather than on one status node. Which hint the
+    // map renders depends on the imagery state it happens to be in, so
+    // getByRole("status") threw whenever that state rendered no hint - passing
+    // alone and failing in a full-file run. The panel-wide assertion is what
+    // this test actually means, and is strictly stronger: the agent's scene
+    // must appear NOWHERE in the map, not merely be absent from one node.
+    expect(mapPanelNow()).not.toHaveTextContent(AGENT_SCENE);
   });
 
   it("shows the resolved query context the server planned", async () => {
@@ -670,12 +763,27 @@ describe("App - AI provider and model selection", () => {
             status: "Ready",
           },
           {
+            // Retired by NVIDIA (410 Gone). Still image-capable, hence
+            // compatible: true - availability is the separate fact that makes
+            // it unselectable.
             provider: "nvidia", model_id: "nvidia/nemotron-nano-12b-v2-vl",
             display_name: "Nemotron Nano 12B v2 VL", modality: "multimodal",
             supports_image: true, supports_text: true, supports_video: false,
             supports_tools: false, supports_structured_output: true,
             endpoint_type: "openai-compatible", configured: true,
-            compatible: true, status: "Ready",
+            compatible: true, available: false,
+            retired_reason: "Retired by NVIDIA on 2026-08-26 (HTTP 410 Gone).",
+            status: "Retired by provider",
+          },
+          {
+            provider: "nvidia",
+            model_id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            display_name: "Nemotron 3 Nano Omni 30B A3B Reasoning",
+            modality: "multimodal",
+            supports_image: true, supports_text: true, supports_video: true,
+            supports_tools: true, supports_structured_output: false,
+            endpoint_type: "openai-compatible", configured: true,
+            compatible: true, available: true, status: "Ready",
           },
           {
             provider: "nvidia", model_id: "nvidia/nemotron-3-super-120b-a12b",
@@ -699,6 +807,107 @@ describe("App - AI provider and model selection", () => {
     status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test",
   };
 
+  const OK_RESULT = {
+    status: "ok",
+    answer: "Water is visible along the eastern shoreline.",
+    failure: null,
+    trace: { plan: null, steps: [], evidence_refs: [], answer_validation: null },
+    evidence: { items: [], execution: null, analysis: null },
+  };
+
+  it("exports the executed question, not a draft edited afterwards", async () => {
+    // Astra P1 #2. The question box stays editable after a run, and the export
+    // read that live input - so typing a new place over a finished result
+    // produced a report pairing the NEW question with the OLD measurements.
+    // Every number in it was real; the record was still false.
+    const blobs: string[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = ((blob: Blob) => {
+      // jsdom Blobs expose their parts synchronously via this internal-free
+      // route: re-read what was handed in.
+      blobs.push((blob as unknown as { _text?: string })._text ?? "");
+      return "blob:stub";
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+
+    // Capture the JSON at construction instead of fighting jsdom's Blob.
+    const OriginalBlob = globalThis.Blob;
+    class CapturingBlob extends OriginalBlob {
+      _text: string;
+      constructor(parts: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options);
+        this._text = parts.map(String).join("");
+      }
+    }
+    globalThis.Blob = CapturingBlob as unknown as typeof Blob;
+
+    try {
+      stubRouter({ "/health": HEALTH, "/query/agent": OK_RESULT });
+      render(<App />);
+
+      fireEvent.change(screen.getByLabelText("Question"), {
+        target: { value: "NDWI Marina Beach January 2025" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+      await screen.findByText(OK_RESULT.answer);
+
+      // Edit the draft WITHOUT submitting.
+      fireEvent.change(screen.getByLabelText("Question"), {
+        target: { value: "NDWI Hussain Sagar February 2025" },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /export evidence/i }));
+
+      expect(blobs.length).toBeGreaterThan(0);
+      const report = JSON.parse(blobs[blobs.length - 1]);
+      expect(report.question).toBe("NDWI Marina Beach January 2025");
+      expect(report.question).not.toMatch(/Hussain Sagar/);
+    } finally {
+      globalThis.Blob = OriginalBlob;
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it("names the provider the run actually used, not the current selector", async () => {
+    // Astra P2 #5. The selector configures the NEXT run. A result already on
+    // screen must keep naming the provider that produced it.
+    stubRouter({
+      "/health": HEALTH,
+      "/ai/models": CATALOG,
+      "/query/agent": OK_RESULT,
+    });
+    render(<App />);
+
+    // The default is only known once the catalog has loaded; submitting before
+    // that would attribute a run whose provider genuinely was not resolved yet.
+    await screen.findByLabelText(/ai provider and model/i);
+
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Is there visible water in Marina Beach?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+    await screen.findByText(OK_RESULT.answer);
+
+    const attribution = await screen.findByTestId("run-attribution");
+    expect(attribution.textContent).toMatch(/Gemini/);
+
+    // Now switch the selector to a DIFFERENT provider without re-running.
+    const select = (await screen.findByLabelText(
+      /ai provider and model/i,
+    )) as HTMLSelectElement;
+    fireEvent.change(select, {
+      target: { value: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning" },
+    });
+
+    // The completed result must still be attributed to Gemini.
+    expect(screen.getByTestId("run-attribution").textContent).toMatch(/Gemini/);
+    expect(screen.getByTestId("run-attribution").textContent).not.toMatch(
+      /NVIDIA/,
+    );
+  });
+
   it("offers the catalogued models and marks the incompatible one", async () => {
     stubRouter({ "/health": HEALTH, "/ai/models": CATALOG });
     render(<App />);
@@ -712,12 +921,166 @@ describe("App - AI provider and model selection", () => {
     expect(options.map((option) => option.value)).toEqual([
       "gemini-3.6-flash",
       "nvidia/nemotron-nano-12b-v2-vl",
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
       "nvidia/nemotron-3-super-120b-a12b",
     ]);
     // A text-only model stays visible but cannot be chosen for a visual run.
-    const textOnly = options[2];
+    const textOnly = options[3];
     expect(textOnly.disabled).toBe(true);
     expect(textOnly.textContent).toMatch(/Unsupported for visual analysis/);
+  });
+
+  it("marks a local model that is not installed as not ready", async () => {
+    // Configured, compatible and not retired used to be enough for a green
+    // dot, so an uninstalled local model read "Not installed" beside the
+    // colour that means ready. Readiness now follows the server's own status.
+    const local = {
+      provider: "local", model_id: "qwen3-vl:4b-instruct",
+      display_name: "Qwen3-VL 4B Instruct (local)", modality: "multimodal",
+      supports_image: true, supports_text: true, supports_video: false,
+      supports_tools: false, supports_structured_output: true,
+      endpoint_type: "ollama-chat", configured: true, compatible: true,
+      available: true, status: "Not installed",
+    };
+    stubRouter({
+      "/health": HEALTH,
+      "/ai/models": {
+        ...CATALOG,
+        default_provider: "local",
+        default_model: "qwen3-vl:4b-instruct",
+        models: [...CATALOG.models, local],
+      },
+    });
+    render(<App />);
+
+    const select = (await screen.findByLabelText(
+      /ai provider and model/i,
+    )) as HTMLSelectElement;
+    expect(select.value).toBe("qwen3-vl:4b-instruct");
+    const option = [...select.options].find(
+      (candidate) => candidate.value === "qwen3-vl:4b-instruct",
+    );
+    expect(option?.textContent).toMatch(/Local · Qwen3-VL 4B Instruct.*Not installed/);
+
+    const badge = document.querySelector(".model-status");
+    expect(badge?.textContent).toBe("Not installed");
+    expect(badge?.getAttribute("data-ready")).toBe("false");
+  });
+
+  it.each(["Ollama not running", "Ollama cannot read models"])(
+    "shows a local model whose Ollama reports %s as not ready",
+    async (status) => {
+      // Two different fixes - start Ollama, or reconnect the drive holding its
+      // models - so the server says which, and neither is ever green.
+      const local = {
+        provider: "local", model_id: "qwen3-vl:4b-instruct",
+        display_name: "Qwen3-VL 4B Instruct (local)", modality: "multimodal",
+        supports_image: true, supports_text: true, supports_video: false,
+        supports_tools: true, supports_structured_output: true,
+        endpoint_type: "ollama-chat", configured: true, compatible: true,
+        available: true, status,
+      };
+      stubRouter({
+        "/health": HEALTH,
+        "/ai/models": {
+          ...CATALOG,
+          default_provider: "local",
+          default_model: "qwen3-vl:4b-instruct",
+          models: [...CATALOG.models, local],
+        },
+      });
+      render(<App />);
+      await screen.findByLabelText(/ai provider and model/i);
+
+      const badge = document.querySelector(".model-status");
+      expect(badge?.textContent).toBe(status);
+      expect(badge?.getAttribute("data-ready")).toBe("false");
+    },
+  );
+
+  it("re-reads model statuses when the window regains focus", async () => {
+    // Statuses are a snapshot: pulling a model or starting Ollama in another
+    // window left the badge reading "Not installed" beside a successful local
+    // answer (observed live). Coming back to the window re-reads them.
+    const catalog = (status: string) => ({
+      ...CATALOG,
+      default_provider: "local",
+      default_model: "qwen3-vl:4b-instruct",
+      models: [
+        ...CATALOG.models,
+        {
+          provider: "local", model_id: "qwen3-vl:4b-instruct",
+          display_name: "Qwen3-VL 4B Instruct (local)", modality: "multimodal",
+          supports_image: true, supports_text: true, supports_video: false,
+          supports_tools: true, supports_structured_output: true,
+          endpoint_type: "ollama-chat", configured: true, compatible: true,
+          available: true, status,
+        },
+      ],
+    });
+    const routes: Record<string, unknown> = {
+      "/health": HEALTH,
+      "/ai/models": catalog("Not installed"),
+    };
+    stubRouter(routes);
+    render(<App />);
+    const badge = () => document.querySelector(".model-status");
+    await waitFor(() => expect(badge()?.textContent).toBe("Not installed"));
+
+    routes["/ai/models"] = catalog("Ready");
+    fireEvent(window, new Event("focus"));
+
+    await waitFor(() => expect(badge()?.textContent).toBe("Ready"));
+    expect(badge()?.getAttribute("data-ready")).toBe("true");
+  });
+
+  it("keeps a ready model's badge green", async () => {
+    stubRouter({ "/health": HEALTH, "/ai/models": CATALOG });
+    render(<App />);
+    await screen.findByLabelText(/ai provider and model/i);
+    expect(document.querySelector(".model-status")?.getAttribute("data-ready")).toBe(
+      "true",
+    );
+  });
+
+  it("never offers a provider-retired model as selectable", async () => {
+    // The defect this guards: the retired model reported compatible AND
+    // configured, so the selector enabled it and the run failed with 410. It
+    // stays LISTED - hiding it would invite someone to re-add it - but it must
+    // never be pickable, and it must say why.
+    stubRouter({ "/health": HEALTH, "/ai/models": CATALOG });
+    render(<App />);
+
+    const select = (await screen.findByLabelText(
+      /ai provider and model/i,
+    )) as HTMLSelectElement;
+    const retired = [...select.options].find(
+      (option) => option.value === "nvidia/nemotron-nano-12b-v2-vl",
+    );
+
+    expect(retired).toBeDefined();
+    expect(retired!.disabled).toBe(true);
+    expect(retired!.textContent).toMatch(/Retired by provider/);
+    expect(retired!.textContent).not.toMatch(/Ready/);
+  });
+
+  it("still offers a live model of the same provider", async () => {
+    // The counter-case. Disabling every NVIDIA option would satisfy the test
+    // above while removing the provider from the product.
+    stubRouter({ "/health": HEALTH, "/ai/models": CATALOG });
+    render(<App />);
+
+    const select = (await screen.findByLabelText(
+      /ai provider and model/i,
+    )) as HTMLSelectElement;
+    const live = [...select.options].find(
+      (option) =>
+        option.value === "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    );
+
+    expect(live).toBeDefined();
+    expect(live!.disabled).toBe(false);
+    expect(live!.textContent).not.toMatch(/Retired/);
   });
 
   it("sends the selected provider and model with the run", async () => {
@@ -776,7 +1139,7 @@ describe("App - AI provider and model selection", () => {
       "/health": HEALTH,
       "/ai/models": CATALOG,
       "/geospatial/resolve": CHENNAI,
-      "/satellite/search": { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+      "/satellite/search": { scenes: [SCENE], scene_count: 1, catalog: "https://example.test/v1" },
       "/satellite/imagery": IMAGERY,
     });
     render(<App />);

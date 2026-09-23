@@ -657,13 +657,27 @@ def test_scene_counts_are_recorded_as_execution_evidence() -> None:
     assert by_id[key].measurement.value == 3.0
 
 
-def test_no_evidence_is_produced_when_discovery_fails() -> None:
+def test_a_discovery_failure_is_explained_by_one_text_item_and_nothing_else() -> None:
+    """Formerly pinned EMPTY evidence here - the documented known limitation.
+
+    With nothing to read, the synthesiser answered "Insufficient evidence", so a
+    catalog outage was presented as a successful abstention (observed live on a
+    Sentinel-1 request). The failure is now one citable text item carrying the
+    service's own message - and still no measurement, no execution result and
+    no analysis, because none was produced.
+    """
+
     outcome, _, _ = run(
         make_plan(),
         query=FakeQueryExecutionService(error=UpstreamServiceError("down")),
     )
 
-    assert outcome.evidence.items == []
+    [item] = outcome.evidence.items
+    assert item.id == "execution.discovery_failure"
+    assert item.source == "execution"
+    assert item.text == "Scene discovery did not complete: down"
+    assert item.measurement is None
+    assert item.visual is None
     assert outcome.evidence.execution is None
     assert outcome.evidence.analysis is None
 

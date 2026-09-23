@@ -6,7 +6,9 @@
 checkable properties and nothing more:
 
 * every number is supported by a cited measurement with the same identity,
-  unit and available observation context, at the precision stated;
+  unit and available observation context, at the precision stated - a
+  sentence repeating a cited engine caveat verbatim is that engine's own
+  statement, not a claim;
 * factual prose is a supported measurement statement or repeats cited evidence;
 * the answer uses none of the phrases that would mischaracterise the system's
   output.
@@ -177,6 +179,7 @@ _NUMERIC_AUTHORITIES: frozenset[str] = frozenset(
         "ndwi",
         "ndbi",
         "temporal_ndwi",
+        "sar_backscatter",
         "compatibility",
     }
 )
@@ -223,6 +226,9 @@ def _acquisition_dates(evidence: AgentEvidence) -> set[str]:
     """
 
     dates: set[str] = set()
+    sar = evidence.analysis.sar_backscatter if evidence.analysis else None
+    if sar is not None and sar.acquired_at is not None:
+        dates.add(sar.acquired_at.isoformat()[:10])
     comparison = evidence.analysis.temporal_comparison if evidence.analysis else None
     if comparison is not None:
         dates.update(
@@ -278,6 +284,9 @@ def _scene_ids(evidence: AgentEvidence) -> set[str]:
     """
 
     ids: set[str] = set()
+    sar = evidence.analysis.sar_backscatter if evidence.analysis else None
+    if sar is not None:
+        ids.add(sar.scene_id)
     comparison = evidence.analysis.temporal_comparison if evidence.analysis else None
     if comparison is not None:
         ids.update((comparison.first.scene_id, comparison.second.scene_id))
@@ -352,7 +361,7 @@ def _mask(text: str, literals: Iterable[str]) -> str:
     return masked
 
 
-_METRIC = re.compile(r"\b(?:ndvi|ndwi|ndbi)\b", re.IGNORECASE)
+_METRIC = re.compile(r"\b(?:ndvi|ndwi|ndbi|vv|vh)\b", re.IGNORECASE)
 _SENTENCES = re.compile(r"(?<=[.!?])\s+(?!\d)|\n+")
 _CLAUSES = re.compile(r";|\b(?:and|with|over|across|but|while)\b", re.IGNORECASE)
 _UNITS = {
@@ -360,6 +369,7 @@ _UNITS = {
     "percent": "%",
     "percentage": "%",
     "index": "index",
+    "db": "dB",
     "pixels": "pixels",
     "pixel": "pixels",
     "scenes": "count",
@@ -414,6 +424,11 @@ _MEASUREMENT_WORDS = frozenset(
         "ndvi",
         "ndwi",
         "ndbi",
+        "vv",
+        "vh",
+        "db",
+        "minus",
+        "backscatter",
         "index",
         "value",
         "valid",
@@ -467,7 +482,7 @@ def _kind(text: str) -> str | None:
         return "paired_pixels" if "paired" in text else "pixels"
     if re.search(r"scene\s+count|\bscenes\b", text):
         return "scenes"
-    if "difference" in text:
+    if "difference" in text or re.search(r"\bvv\s*(?:minus|[-−])\s*vh\b", text):
         return "difference"
     stats = {
         key
@@ -501,6 +516,12 @@ def _observations(item: EvidenceItem, evidence: AgentEvidence) -> list[tuple[str
             (o.scene_id, o.acquired_at.isoformat()[:10] if o.acquired_at else "", o.window_label)
             for o in observations
         ]
+    if item.source == "sar_backscatter":
+        sar = evidence.analysis.sar_backscatter if evidence.analysis else None
+        if sar is None:
+            return []
+        return [(sar.scene_id, sar.acquired_at.isoformat()[:10] if sar.acquired_at else "",
+                 sar.window_label)]
     execution = evidence.execution
     if execution is None:
         return []
@@ -526,6 +547,8 @@ def _scope_matches(item: EvidenceItem, clause: str, evidence: AgentEvidence) -> 
     for platform in _PLATFORM_IDENTIFIER.finditer(clause):
         sar = platform.group().lower().startswith("sentinel-1")
         if sar and item.source in {"ndvi", "ndwi", "ndbi", "temporal_ndwi"}:
+            return False
+        if not sar and item.source == "sar_backscatter":
             return False
         if item.source == "execution":
             modality = "sentinel-1-sar" if sar else "sentinel-2-optical"
@@ -560,6 +583,39 @@ def _scope_matches(item: EvidenceItem, clause: str, evidence: AgentEvidence) -> 
     return True
 
 
+#: A unit stated BEFORE the number and bound to it by the phrasing, as in
+#: "the mean NDWI in dB is 0.2777". Only text between the unit and the number
+#: that is pure linking prose ("is", "was", "of", "about") counts as binding, so
+#: a "dB" mentioned elsewhere in an explanatory sentence is NOT read as a claim
+#: about this measurement.
+_LEADING_UNIT = re.compile(
+    r"\b(?:in|expressed\s+in|measured\s+in|given\s+in|as)\s+(%|[A-Za-z]+[\u00b22]?)\s*"
+    r"(?:\b(?:is|was|are|were|of|at|the|a|an|about|approximately|roughly|"
+    r"around|equal|to|value|values)\b\s*)*$",
+    re.IGNORECASE,
+)
+
+
+def _leading_unit(before: str) -> str | None:
+    """The unit a clause claims BEFORE stating the number, if it states one.
+
+    `_supporting_measurements` used to read only the text AFTER the literal, so
+    "the mean NDWI in dB is 0.2777" bound to an `index` measurement and passed:
+    every number was real, and the sentence still asserted a decibel figure the
+    evidence never contained. Reading only one side of the number checked half
+    the claim.
+
+    Returns None for an unrecognised word, which keeps ordinary prose
+    unaffected - "NDWI in the bay is 0.2777" states no unit, and inventing one
+    from "bay" would reject a sentence that is perfectly well grounded.
+    """
+
+    match = _LEADING_UNIT.search(before)
+    if match is None:
+        return None
+    return _UNITS.get(match.group(1).lower())
+
+
 def _supporting_measurements(
     clause: str, sentence: str, literal: str, evidence: AgentEvidence
 ) -> list[EvidenceItem]:
@@ -580,7 +636,7 @@ def _supporting_measurements(
         return []
     if len(list(_NUMBER.finditer(numeric_text))) != 1:
         return []  # use separate clauses for separate measurements
-    _, after = clause.split(literal, 1)
+    before, after = clause.split(literal, 1)
     kind = _kind(clause)
     # Read an explicit unit adjacent to this number, including unsupported
     # attached suffixes. An index value can never authorize metres or ratios.
@@ -591,6 +647,14 @@ def _supporting_measurements(
         unit = _UNITS.get(token)
         if not suffix.group(1) and unit is None:
             return []
+    # A unit may also be stated ahead of the number. Both sides are checked
+    # against the same measurement, and a clause that names two different units
+    # for one value contradicts itself and is refused outright.
+    leading = _leading_unit(before)
+    if leading is not None:
+        if unit is not None and unit != leading:
+            return []
+        unit = leading
     if kind is None and re.search(r"\bvalid\s+pixels?\b", after, re.IGNORECASE):
         kind = "pixels"
     candidates = []
@@ -609,10 +673,19 @@ def _supporting_measurements(
             item_metrics
             and item.source not in item_metrics
             and not (item.source == "temporal_ndwi" and item_metrics == {"ndwi"})
+            and not (item.source == "sar_backscatter" and item_metrics <= {"vv", "vh"})
         ):
             continue
         if measurement.name == "paired_valid_pixel_count" and item.source == "temporal_ndwi":
             item_metrics = {"ndwi"}
+        if item.source == "sar_backscatter" and (
+            not metrics or measurement.name not in {
+                "vv_mean_db", "vv_min_db", "vv_max_db", "vv_valid_pixel_count",
+                "vh_mean_db", "vh_min_db", "vh_max_db", "vh_valid_pixel_count",
+                "vv_minus_vh_mean_db",
+            }
+        ):
+            continue
         if metrics and metrics != item_metrics:
             continue
         if kind is None or kind != _kind(measurement.name):
@@ -622,7 +695,7 @@ def _supporting_measurements(
             "pixels": "pixels",
             "paired_pixels": "pixels",
             "scenes": "count",
-        }.get(kind, "index")
+        }.get(kind, "dB" if item.source == "sar_backscatter" else "index")
         if measurement.unit != expected_unit:
             continue
         if unit is not None and unit != measurement.unit:
@@ -725,10 +798,58 @@ def _numeric_text(summary: str, evidence: AgentEvidence) -> tuple[list[str], str
     return invented, text
 
 
+#: Evidence ids that carry a deterministic engine's own caveat: a warning or a
+#: limitation it attached to its result.
+_CAVEAT_ID = re.compile(r"\.(?:warning|limitation)\.\d+$")
+
+
+def _verbatim(text: str) -> str:
+    """Whitespace, case and closing punctuation only.
+
+    Digits, signs and decimal points are kept exactly - unlike ``_words`` - so
+    a copy with any figure altered is a different sentence.
+    """
+
+    return " ".join(text.split()).casefold().rstrip(".!?")
+
+
+def _repeated_caveats(evidence: AgentEvidence) -> set[str]:
+    """Sentences of the cited evidence's own caveats, for verbatim repetition.
+
+    An engine writes these, never a model and never from the question or the
+    plan, so repeating one exactly asserts nothing the system did not already
+    assert. Observed live: the NDBI caveat "NDBI uses a 20 m band, so it is
+    sampled on the 10 m grid but resolves detail no finer than 20 m." quoted
+    beside a correct NDBI value withheld the whole answer - 20 and 10 matched
+    no measurement - while ``_prose_supported`` accepted the same sentence as a
+    repetition of cited evidence.
+
+    Only warnings and limitations from a numeric authority qualify. Model
+    observations are excluded by source, and the executor's failure notes by
+    id: those relay an error message rather than an engine's caveat.
+    """
+
+    return {
+        _verbatim(sentence)
+        for item in evidence.items
+        if item.source in _NUMERIC_AUTHORITIES and item.text and _CAVEAT_ID.search(item.id)
+        for sentence in _SENTENCES.split(item.text)
+        if sentence.strip()
+    }
+
+
 def _ungrounded_claims(summary: str, evidence: AgentEvidence) -> list[str]:
-    """Unmatched numbers, checked against identity-bound evidence, not a pool."""
+    """Unmatched numbers, checked against identity-bound evidence, not a pool.
+
+    A sentence repeating a cited caveat exactly is not read for claims: its
+    figures are the engine's own, cited and unaltered. They authorise nothing
+    elsewhere - the whole sentence must match, every digit included.
+    """
+    caveats = _repeated_caveats(evidence)
     failures: list[str] = []
     for sentence, clause in _parts(summary):
+        if _verbatim(sentence) in caveats:
+            continue
         invented, text = _numeric_text(clause, evidence)
         failures.extend(invented)
         failures.extend(

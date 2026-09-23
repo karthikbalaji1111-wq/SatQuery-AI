@@ -8,6 +8,7 @@ in memory; the route is exercised through ``dependency_overrides``.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import pathlib
 from datetime import UTC, datetime
 from typing import Any
@@ -119,7 +120,16 @@ def make_window(
         label=label,
         time_range=TimeRange.model_validate({"start_date": start, "end_date": end}),
         scene_count=scene_count,
-        scenes=scenes_override or [],
+        # A window that selected a scene carries that scene. The default used
+        # to be an empty list, which made every fixture describe an impossible
+        # discovery - a selection from nothing - and the analysis then read
+        # bands for a scene the result never returned. `/query/analyze` now
+        # refuses that relation, so the fixture states what it always meant.
+        scenes=(
+            scenes_override
+            if scenes_override is not None
+            else ([make_scene(selected_scene_id)] if selected_scene_id else [])
+        ),
         selected_scene_id=selected_scene_id,
         imagery=imagery,
         imagery_error=imagery_error,
@@ -134,13 +144,25 @@ def make_execution(
     skipped_modalities: list[SkippedModality] | None = None,
     catalog: str = CATALOG,
 ) -> QueryExecutionResult:
-    intent = intent if intent is not None else make_intent()
+    resolved = windows if windows is not None else [make_window()]
+    if intent is None:
+        # The intent must REQUEST what the windows executed. `/query/analyze`
+        # refuses a result whose windows name a modality the intent never asked
+        # for, and a fixture that pairs a Sentinel-1 window with an
+        # optical-only intent describes a run that could not have happened.
+        # Derived from the windows, in order of first appearance, so a SAR
+        # fixture does not have to state its modality twice to stay coherent.
+        ordered: list[str] = []
+        for window in resolved:
+            if window.modality not in ordered:
+                ordered.append(window.modality)
+        intent = make_intent(modalities=ordered) if ordered else make_intent()
     return QueryExecutionResult(
         plan=ResolvedQueryPlan(intent=intent, bbox=DEFAULT_BBOX),
         executed_modalities=executed_modalities  # type: ignore[arg-type]
         or list(intent.modalities),
         skipped_modalities=skipped_modalities or [],
-        windows=windows if windows is not None else [make_window()],
+        windows=resolved,
         catalog=catalog,
     )
 
@@ -359,7 +381,18 @@ def test_multiple_windows_are_represented_in_order() -> None:
         ),
         windows=[
             make_window(label="baseline", start="2023-01-01", end="2023-03-31"),
-            make_window(label="target", selected_scene_id="scene-b"),
+            # The target windows carry the target PERIOD. They used to fall back
+            # to this builder's default January dates while the intent above
+            # requested January to March, so the fixture described windows for a
+            # period it never asked about - which `/query/analyze` now refuses.
+            # The subject of this test, the ORDER windows are reported in, is
+            # unchanged.
+            make_window(
+                label="target",
+                start="2024-01-01",
+                end="2024-03-31",
+                selected_scene_id="scene-b",
+            ),
             make_window(
                 modality="sentinel-1-sar",
                 label="baseline",
@@ -368,7 +401,11 @@ def test_multiple_windows_are_represented_in_order() -> None:
                 selected_scene_id="s1-a",
             ),
             make_window(
-                modality="sentinel-1-sar", label="target", selected_scene_id="s1-b"
+                modality="sentinel-1-sar",
+                label="target",
+                start="2024-01-01",
+                end="2024-03-31",
+                selected_scene_id="s1-b",
             ),
         ],
     )
@@ -440,10 +477,25 @@ def test_analyze_endpoint_returns_the_expected_contract() -> None:
         # Phase 17.2, additive: null unless the intent stated a threshold and
         # there were valid pixels to count.
         "spatial_measurement",
+        # Sentinel-1 quantitative backscatter, additive on the same principle:
+        # always serialized, null unless SAR statistics were requested.
+        "sar_backscatter",
+        # Completeness, additive: what was ASKED FOR and what came of it.
+        # `status` reports whether the task has an engine, which is a different
+        # question, so it kept its exact previous values and meaning.
+        "analysis_outcomes",
+        "completeness",
+        # Stage 3, additive: the pixel quality of each optical index grid.
+        "pixel_quality",
+        # Stage 4, additive: the radiometric state of each analysis assessed.
+        "radiometry",
     }
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
     assert body["measurements"] == []
+    # This request asked for no analysis, so there is none to be incomplete.
+    assert body["analysis_outcomes"] == []
+    assert body["completeness"] == "not_requested"
     assert body["temporal_comparison"] is None
     window = body["windows_considered"][0]
     assert set(window) == {"modality", "label", "time_range", "selected_scene_id"}
@@ -736,8 +788,27 @@ def test_ndwi_rejects_mismatched_window_shapes() -> None:
 # =========================================================================== #
 
 
+def clear_scl(like: BandWindow, value: int = 4) -> BandWindow:
+    """A Scene Classification Layer on ``like``'s grid, every pixel one class.
+
+    Class 4 (vegetation) is a usable surface class, so a fake that serves this
+    by default leaves every pixel's validity to the spectral bands - which is
+    what tests written before pixel quality control expect. Tests of masking
+    supply their own SCL.
+    """
+
+    values = np.full(like.values.shape, value, dtype=np.uint8)
+    return dataclasses.replace(
+        like, values=values, valid=values != 0, nodata=0.0
+    )
+
+
 class FakeImageryService:
-    """Records read_band calls; returns canned bands or raises."""
+    """Records read_band calls; returns canned bands or raises.
+
+    ``scl`` is served as :func:`clear_scl` on the finest band's grid unless the
+    test supplies its own - every optical analysis now reads it (Stage 3).
+    """
 
     def __init__(
         self,
@@ -767,6 +838,9 @@ class FakeImageryService:
         )
         if self._error is not None:
             raise self._error
+        if asset == "scl" and "scl" not in self._bands:
+            finest = min(self._bands.values(), key=lambda b: b.resolution or 0.0)
+            return clear_scl(finest)
         return self._bands[asset]
 
 
@@ -824,7 +898,8 @@ def test_ndwi_is_not_computed_unless_requested() -> None:
 def test_ndwi_dispatch_reads_green_and_nir_and_returns_scalars() -> None:
     result, imagery = analyze_ndwi(ndwi_execution())
 
-    assert [c["asset"] for c in imagery.calls] == ["green", "nir"]
+    # The scene classification layer is read first (Stage 3 pixel quality).
+    assert [c["asset"] for c in imagery.calls] == ["scl", "green", "nir"]
     values = named(result.measurements)
     assert values["ndwi_valid_pixel_count"] == 3
     assert values["ndwi_mean"] == pytest.approx((0.5 + 1 / 3 + 0.0) / 3)
@@ -841,11 +916,21 @@ def test_ndwi_propagates_the_selected_scene_id_and_collection() -> None:
 
 
 def test_ndwi_collection_falls_back_to_none_when_the_scene_is_unknown() -> None:
-    window = make_window(scenes_override=[make_scene("other-scene")])
-    _, imagery = analyze_ndwi(make_execution(windows=[window]))
+    """The fallback itself, asked of the helper that implements it.
 
-    # No matching Scene -> None -> ImageryService uses its configured default.
-    assert {c["collection"] for c in imagery.calls} == {None}
+    This used to run a whole analysis over a window whose selected scene was
+    absent from its own scene list. ``/query/analyze`` now refuses such a body -
+    a selection from nothing is not a discovery that could have happened - so
+    the impossible object is no longer routed through the boundary to reach the
+    branch. The behaviour under test is unchanged and still pinned: no matching
+    Scene -> ``None`` -> ``ImageryService`` uses its configured default.
+    """
+
+    from app.services.analysis.service import _scene_collection
+
+    window = make_window(scenes_override=[make_scene("other-scene")])
+
+    assert _scene_collection(window) is None
 
 
 def test_ndwi_skips_sar_windows() -> None:
@@ -914,7 +999,7 @@ def test_ndwi_runs_for_an_unimplemented_task_without_claiming_it() -> None:
 
     assert result.status == "not_implemented"  # the TASK is still unimplemented
     assert "not implemented" in result.answer.lower()
-    assert len(imagery.calls) == 2  # but the opt-in index still ran
+    assert len(imagery.calls) == 3  # scl + green + nir: the opt-in index still ran
     assert named(result.measurements)["ndwi_valid_pixel_count"] == 3
 
 
@@ -1261,7 +1346,8 @@ def test_the_overlay_reuses_the_analysis_band_reads() -> None:
 
     _, imagery = analyze_with_overlay(ndwi_execution())
 
-    assert [c["asset"] for c in imagery.calls] == ["green", "nir"]
+    # The scene classification layer is read first (Stage 3 pixel quality).
+    assert [c["asset"] for c in imagery.calls] == ["scl", "green", "nir"]
 
 
 def test_the_overlay_does_not_disturb_the_measurements() -> None:
@@ -1658,7 +1744,8 @@ def test_a_threshold_in_the_intent_produces_the_measurement() -> None:
 
 def test_the_measurement_reuses_the_same_two_band_reads() -> None:
     _, imagery = analyze_threshold(threshold_execution())
-    assert [c["asset"] for c in imagery.calls] == ["green", "nir"]
+    # The scene classification layer is read first (Stage 3 pixel quality).
+    assert [c["asset"] for c in imagery.calls] == ["scl", "green", "nir"]
 
 
 def test_the_threshold_does_not_change_the_statistics() -> None:

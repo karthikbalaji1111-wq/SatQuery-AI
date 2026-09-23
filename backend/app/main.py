@@ -6,9 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.router import api_router
+from app.api.router import build_api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
+from app.core.limits import install_request_limits
 from app.core.logging import configure_logging, get_logger
 
 
@@ -25,6 +26,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         summary="Natural-language satellite query platform - foundation build.",
     )
 
+    # Order matters, and it is the reverse of the reading order: Starlette runs
+    # the most recently added middleware OUTERMOST. The size guard is installed
+    # first so that CORS ends up outside it - otherwise a 413 would be returned
+    # without CORS headers, and a browser would report it as a network failure
+    # rather than as the refusal it is.
+    install_request_limits(app, settings)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -34,7 +41,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(app)
-    app.include_router(api_router)
+    # Built from THIS application's settings, not from an import-time singleton.
+    app.include_router(build_api_router(settings))
 
     logger.info(
         "SatQuery API initialised (env=%s, version=%s)",

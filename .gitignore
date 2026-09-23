@@ -34,3 +34,11 @@ logs/
 
 # --- Build / misc ---
 *.local
+
+# Playwright MCP writes page snapshots and console logs into the working
+# directory; they are run artefacts, not part of the project.
+.playwright-mcp/
+
+# Local MCP client configuration. It carries per-developer API keys
+# (e.g. an x-api-key header), so it must never be committed.
+.mcp.json

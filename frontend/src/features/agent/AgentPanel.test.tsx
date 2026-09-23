@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentPanel } from "./AgentPanel";
+import { AgentAnswerPanel, AgentEvidencePanel, AgentPanel } from "./AgentPanel";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -366,6 +366,85 @@ describe("AgentPanel - successful result", () => {
     ).toBeInTheDocument();
   });
 
+  it("headlines a temporal comparison by the comparison, not one observation", async () => {
+    // Observed live: both observations' means are named "ndwi_mean", so the
+    // headline set the EARLIER one large as "ndwi mean" beside an answer about
+    // change. A comparison is headlined by the measurements that name it.
+    const item = (id: string, name: string, value: number, unit = "index") => ({
+      id,
+      source: "temporal_ndwi",
+      measurement: { name, value, unit },
+      text: null,
+      produced_by: "analysis.engines.compare_ndwi_observations",
+    });
+    stubAgent({
+      body: agentResult({
+        answer: "The earlier mean NDWI was 0.02665 index.",
+        evidence: {
+          items: [
+            item("temporal_ndwi.first.ndwi_mean", "ndwi_mean", 0.02665),
+            item(
+              "temporal_ndwi.first.ndwi_percent_above_index_threshold_0.3",
+              "ndwi_percent_above_index_threshold_0.3",
+              14.07,
+              "%",
+            ),
+            item("temporal_ndwi.second.ndwi_mean", "ndwi_mean", 0.1464),
+            item(
+              "temporal_ndwi.difference.mean_ndwi_difference",
+              "mean_ndwi_difference",
+              0.1197,
+            ),
+            item("temporal_ndwi.change.ndwi_change_mean", "ndwi_change_mean", 0.1197),
+          ],
+          execution: null,
+          analysis: null,
+        },
+      }),
+    });
+    render(<AgentPanel />);
+
+    await askAndWait();
+
+    const answer = screen.getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
+    const labels = [...answer.querySelectorAll(".metric-pair dt")].map(
+      (node) => node.textContent,
+    );
+    expect(labels).toEqual(["mean ndwi difference", "ndwi change mean"]);
+    expect(labels).not.toContain("ndwi mean");
+  });
+
+  it("shows no headline when a comparison's difference was suppressed", async () => {
+    const mean = (id: string, value: number) => ({
+      id,
+      source: "temporal_ndwi",
+      measurement: { name: "ndwi_mean", value, unit: "index" },
+      text: null,
+      produced_by: "analysis.engines.compare_ndwi_observations",
+    });
+    stubAgent({
+      body: agentResult({
+        answer: "The earlier mean NDWI was 0.02665 index.",
+        evidence: {
+          items: [
+            mean("temporal_ndwi.first.ndwi_mean", 0.02665),
+            mean("temporal_ndwi.second.ndwi_mean", 0.1464),
+          ],
+          execution: null,
+          analysis: null,
+        },
+      }),
+    });
+    render(<AgentPanel />);
+
+    await askAndWait();
+
+    const answer = screen.getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
+    expect(answer.querySelector(".metric-pair")).toBeNull();
+  });
+
   it("shows a compact empty state when there is no evidence", async () => {
     stubAgent({
       body: agentResult({
@@ -642,6 +721,58 @@ describe("AgentPanel - visual observation", () => {
     await askWith(visualResult());
     expect(screen.getByText(/^Model observation · /)).toBeInTheDocument();
     expect(screen.getByText(/gemini-3\.6-flash/)).toBeInTheDocument();
+  });
+
+  it("attributes an Anthropic observation to Claude by its own model id", async () => {
+    // The label is display casing only; the model id comes from the response,
+    // so a run answered by Claude is as attributable as one answered by Gemini.
+    await askWith(
+      visualResult({
+        evidence: {
+          items: [
+            {
+              ...VISUAL_ITEM,
+              visual: {
+                ...VISUAL_ITEM.visual,
+                provider: "anthropic",
+                model: "claude-opus-5",
+              },
+              produced_by: "claude-opus-5",
+            },
+          ],
+          execution: null,
+          analysis: null,
+        },
+      }),
+    );
+    expect(screen.getByText(/Claude/)).toBeInTheDocument();
+    expect(screen.getByText(/claude-opus-5/)).toBeInTheDocument();
+  });
+
+  it("attributes a local observation to the local model by its own id", async () => {
+    // A run answered on this machine is as attributable as a cloud one: the
+    // provider reads "Local" and the model id is the Ollama tag that ran.
+    await askWith(
+      visualResult({
+        evidence: {
+          items: [
+            {
+              ...VISUAL_ITEM,
+              visual: {
+                ...VISUAL_ITEM.visual,
+                provider: "local",
+                model: "qwen3-vl:4b-instruct",
+              },
+              produced_by: "qwen3-vl:4b-instruct",
+            },
+          ],
+          execution: null,
+          analysis: null,
+        },
+      }),
+    );
+    expect(screen.getByText(/Local/)).toBeInTheDocument();
+    expect(screen.getByText(/qwen3-vl:4b-instruct/)).toBeInTheDocument();
   });
 
   it("splits the observation and the evidence, observation first", async () => {
@@ -1053,5 +1184,219 @@ describe("AgentPanel provider failures", () => {
     }));
     expect(screen.getByText(/written summary is missing/)).toBeInTheDocument();
     expect(screen.queryByText(/analysis succeeded|complete and valid|answered from measured values alone/i)).not.toBeInTheDocument();
+  });
+});
+
+// ===========================================================================
+// Deterministic evidence: one index's numbers never stand under another's name
+// ===========================================================================
+
+const THREE_INDEX_MEASUREMENTS = [
+  { name: "ndvi_valid_pixel_count", value: 33600, unit: "pixels" },
+  { name: "ndvi_mean", value: -0.0614, unit: "index" },
+  { name: "ndbi_valid_pixel_count", value: 33600, unit: "pixels" },
+  { name: "ndbi_mean", value: 0.0118, unit: "index" },
+  { name: "ndwi_valid_pixel_count", value: 33600, unit: "pixels" },
+  { name: "ndwi_mean", value: 0.1464, unit: "index" },
+  {
+    name: "ndwi_percent_above_index_threshold_0.3",
+    value: 45.41,
+    unit: "%",
+  },
+];
+
+/** An agent result that ran nothing at all - the rate-limited planner case. */
+function plannerUnavailable() {
+  return agentResult({
+    status: "planner_unavailable",
+    answer: null,
+    trace: { plan: null, steps: [], evidence_refs: [], answer_validation: null },
+    evidence: { items: [], execution: null, analysis: null },
+  });
+}
+
+describe("AgentEvidencePanel - measurements are attributed to their own index", () => {
+  function renderWithManual(measurements: unknown[]) {
+    return render(
+      <AgentEvidencePanel
+        evidence={null}
+        manual={{
+          scene: null,
+          imagery: null,
+          measurements: measurements as never,
+        }}
+        bbox={null}
+      />,
+    );
+  }
+
+  it("renders one readout per index that reported a mean", () => {
+    const { container } = renderWithManual(THREE_INDEX_MEASUREMENTS);
+    const readouts = container.querySelectorAll(".index-readout");
+    expect(readouts).toHaveLength(3);
+    expect(screen.getByText("ndvi mean")).toBeInTheDocument();
+    expect(screen.getByText("ndwi mean")).toBeInTheDocument();
+    expect(screen.getByText("ndbi mean")).toBeInTheDocument();
+  });
+
+  it("shows each index's own value, not only the first one returned", () => {
+    const { container } = renderWithManual(THREE_INDEX_MEASUREMENTS);
+    const values = [...container.querySelectorAll(".index-value")].map(
+      (node) => node.textContent,
+    );
+    expect(values).toEqual(["-0.0614", "+0.1464", "+0.0118"]);
+  });
+
+  it("attaches the NDWI threshold percentage to NDWI and to nothing else", () => {
+    const { container } = renderWithManual(THREE_INDEX_MEASUREMENTS);
+    const readouts = [...container.querySelectorAll(".index-readout")];
+    const withNote = readouts.filter(
+      (node) => node.querySelector(".index-note") !== null,
+    );
+    // Exactly one readout carries a percentage, and it is the NDWI one - the
+    // percentage is an NDWI threshold count and belongs to no other index.
+    expect(withNote).toHaveLength(1);
+    expect(withNote[0].textContent).toContain("ndwi mean");
+    expect(withNote[0].textContent).toContain("45.4");
+  });
+
+  it("captions each index with what THAT index is not a classification of", () => {
+    const { container } = renderWithManual(THREE_INDEX_MEASUREMENTS);
+    const readouts = [...container.querySelectorAll(".index-readout")];
+    const ndvi = readouts.find((node) =>
+      node.textContent?.includes("ndvi mean"),
+    );
+    const ndwi = readouts.find((node) =>
+      node.textContent?.includes("ndwi mean"),
+    );
+    // An NDVI mean captioned "not a validated water classification" is a
+    // statement about the wrong index.
+    expect(ndvi?.querySelector(".index-caveat")?.textContent).not.toMatch(
+      /water/i,
+    );
+    expect(ndvi?.querySelector(".index-caveat")?.textContent).toMatch(
+      /vegetation|land-cover/i,
+    );
+    expect(ndwi?.querySelector(".index-caveat")?.textContent).toMatch(/water/i);
+  });
+
+  it("states the shared valid-pixel count once when every index agrees", () => {
+    renderWithManual(THREE_INDEX_MEASUREMENTS);
+    expect(screen.getByText("Valid pixels")).toBeInTheDocument();
+    expect(screen.getByText("33,600 px")).toBeInTheDocument();
+  });
+
+  it("states each index's own pixel count when the counts differ", () => {
+    const { container } = renderWithManual([
+      { name: "ndwi_valid_pixel_count", value: 33600, unit: "pixels" },
+      { name: "ndwi_mean", value: 0.1464, unit: "index" },
+      { name: "ndbi_valid_pixel_count", value: 8400, unit: "pixels" },
+      { name: "ndbi_mean", value: 0.0118, unit: "index" },
+    ]);
+    // No single count stands for both, so the field grid must not print one.
+    expect(screen.queryByText("Valid pixels")).not.toBeInTheDocument();
+    const perIndex = [...container.querySelectorAll(".index-pixels")].map(
+      (node) => node.textContent,
+    );
+    expect(perIndex).toEqual([
+      "33,600 valid pixels",
+      "8,400 valid pixels",
+    ]);
+  });
+
+  it("still renders a measurement whose name matches no known index", () => {
+    const { container } = renderWithManual([
+      { name: "mystery_mean", value: 0.5, unit: "index" },
+    ]);
+    expect(container.querySelectorAll(".index-readout")).toHaveLength(1);
+    expect(screen.getByText("+0.5000")).toBeInTheDocument();
+  });
+});
+
+describe("AgentEvidencePanel - a run that measured nothing hides nothing", () => {
+  it("keeps manual measurements when the agent result carries none", () => {
+    // The rate-limited planner returns a result with zero evidence items.
+    // Selecting the measurement source on `evidence === null` threw the
+    // manual path's real measurements away while its scene fields still
+    // rendered - the panel reporting no evidence with the evidence in hand.
+    render(
+      <AgentEvidencePanel
+        evidence={plannerUnavailable().evidence as never}
+        manual={{
+          scene: null,
+          imagery: null,
+          measurements: THREE_INDEX_MEASUREMENTS as never,
+        }}
+        bbox={null}
+      />,
+    );
+    expect(screen.getByText("ndwi mean")).toBeInTheDocument();
+    expect(screen.getByText("+0.1464")).toBeInTheDocument();
+    expect(screen.queryByText(/No evidence was collected/)).not.toBeInTheDocument();
+  });
+
+  it("prefers the agent's own measurements when it has them", () => {
+    render(
+      <AgentEvidencePanel
+        evidence={EVIDENCE as never}
+        manual={{
+          scene: null,
+          imagery: null,
+          measurements: [
+            { name: "ndwi_mean", value: -0.9, unit: "index" },
+          ] as never,
+        }}
+        bbox={null}
+      />,
+    );
+    // 0.2777 is the agent's; -0.9 is the stale manual value it must not show.
+    expect(screen.getByText("+0.2777")).toBeInTheDocument();
+    expect(screen.queryByText("-0.9000")).not.toBeInTheDocument();
+  });
+});
+
+
+// =========================================================================== #
+// A completed result is a completed result, whichever workflow produced it.
+//
+// The defect: the answer rail and the evidence export were gated on the AGENT
+// result. A successful manual analysis therefore left "Run an analysis to
+// produce an answer" on screen with export unavailable, while its own
+// measurements sat in the panel directly beside it - the UI instructing the
+// user to do the thing they had just done.
+//
+// The manual path still produces no written answer, and none is invented here.
+// What changes is that an instruction is replaced by a statement of fact.
+// =========================================================================== #
+
+describe("AgentAnswerPanel - completed result is origin-independent", () => {
+  it("invites a run when nothing has happened", () => {
+    render(<AgentAnswerPanel result={null} />);
+
+    expect(screen.getByRole("status").textContent).toMatch(/Run an analysis/i);
+  });
+
+  it("does not instruct a run after a manual analysis completed", () => {
+    render(<AgentAnswerPanel result={null} manualComplete />);
+
+    const status = screen.getByRole("status").textContent ?? "";
+    expect(status).not.toMatch(/Run an analysis/i);
+    expect(status).toMatch(/complete/i);
+  });
+
+  it("does not invent a written answer for the manual path", () => {
+    // The honest half: manual runs have no question, so there is nothing to
+    // answer. Saying so is the point; fabricating prose would not be.
+    render(<AgentAnswerPanel result={null} manualComplete />);
+
+    const status = screen.getByRole("status").textContent ?? "";
+    expect(status).toMatch(/no written answer/i);
+    expect(status).toMatch(/evidence/i);
+  });
+
+  it("still says it is working while a run is in flight", () => {
+    render(<AgentAnswerPanel result={null} manualComplete busy />);
+
+    expect(screen.getByRole("status").textContent).toMatch(/Analysing/i);
   });
 });

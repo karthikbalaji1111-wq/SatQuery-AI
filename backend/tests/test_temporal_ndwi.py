@@ -97,6 +97,17 @@ FORBIDDEN_PHRASES = (
 # --------------------------------------------------------------------------- #
 
 
+def clear_scl(like: BandWindow) -> BandWindow:
+    """Every pixel SCL class 4 (vegetation, usable) on ``like``'s grid.
+
+    The default quality layer for tests written before pixel quality control:
+    it masks nothing, so their pixels stay governed by the spectral bands.
+    """
+
+    values = np.full(like.values.shape, 4, dtype=np.uint8)
+    return dataclasses.replace(like, values=values, valid=values != 0, nodata=0.0)
+
+
 def band(
     values: list[float] | np.ndarray,
     *,
@@ -243,18 +254,26 @@ def make_window(
 def make_execution(
     *, windows: list[ExecutedWindow], task: str = "visualize"
 ) -> QueryExecutionResult:
+    # The intent requests whatever the windows executed, in order of first
+    # appearance: `/query/analyze` refuses a result whose windows name a
+    # modality the intent never asked for, and a SAR window under an
+    # optical-only intent describes a run that could not have happened.
+    modalities: list[str] = []
+    for window in windows:
+        if window.modality not in modalities:
+            modalities.append(window.modality)
     intent = SatQueryIntent.model_validate(
         {
             "location_query": "Chennai",
             "temporal_mode": "single",
             "time_windows": [{"start_date": "2024-01-01", "end_date": "2024-01-31"}],
-            "modalities": [S2],
+            "modalities": modalities or [S2],
             "task": task,
         }
     )
     return QueryExecutionResult(
         plan=ResolvedQueryPlan(intent=intent, bbox=DEFAULT_BBOX),
-        executed_modalities=[S2],
+        executed_modalities=list(intent.modalities),
         skipped_modalities=[],
         windows=windows,
         catalog=CATALOG,
@@ -317,8 +336,13 @@ class FakeImageryService:
         ):
             raise self._error
         if self._bands is not None:
-            return self._bands[scene_id][asset]
+            scene = self._bands[scene_id]
+            if asset == "scl" and "scl" not in scene:
+                return clear_scl(scene["green"])
+            return scene[asset]
         # scene-a -> NDWI 0.5 ; scene-b -> NDWI 0.0
+        if asset == "scl":
+            return clear_scl(band([1]))
         if scene_id == "scene-a":
             return band([3]) if asset == "green" else band([1])
         return band([5]) if asset == "green" else band([5])
@@ -547,11 +571,17 @@ def test_two_optical_observations_produce_one_comparison() -> None:
 def test_exactly_four_band_reads_two_per_observation() -> None:
     _, imagery = analyze_temporal(two_window_execution())
 
-    assert len(imagery.calls) == 4
-    assert [c["asset"] for c in imagery.calls] == ["green", "nir", "green", "nir"]
+    # Three per observation: the scene classification layer (Stage 3 pixel
+    # quality), then the two bands. Still no batching and no caching.
+    assert len(imagery.calls) == 6
+    assert [c["asset"] for c in imagery.calls] == [
+        "scl", "green", "nir", "scl", "green", "nir"
+    ]
     assert [c["scene_id"] for c in imagery.calls] == [
         "scene-a",
         "scene-a",
+        "scene-a",
+        "scene-b",
         "scene-b",
         "scene-b",
     ]
@@ -634,7 +664,7 @@ def test_three_observations_analyse_the_first_pair_and_warn_about_the_rest() -> 
         "scene-a",
         "scene-b",
     )
-    assert len(imagery.calls) == 4  # only the first pair is read
+    assert len(imagery.calls) == 6  # only the first pair is read (3 reads each)
     assert any("not analysed" in w for w in result.warnings)
 
 
@@ -756,7 +786,7 @@ def test_the_two_ndwi_flags_are_independent() -> None:
 
     assert result.measurements  # single-scene NDWI still produced
     assert result.temporal_comparison is not None
-    assert len(imagery.calls) == 6  # 2 single-scene + 4 temporal
+    assert len(imagery.calls) == 9  # 3 single-scene + 6 temporal (scl included)
 
 
 def test_computed_temporal_change_reports_success() -> None:
@@ -915,9 +945,22 @@ def test_flag_off_keeps_every_existing_field_and_adds_a_null_comparison() -> Non
         # Phase 17.2, additive: null unless the intent stated a threshold and
         # there were valid pixels to count.
         "spatial_measurement",
+        # Sentinel-1 quantitative backscatter, additive on the same principle:
+        # always serialized, null unless SAR statistics were requested.
+        "sar_backscatter",
+        # Completeness, additive: what was ASKED FOR and what came of it.
+        # `status` answers a different question and is unchanged.
+        "analysis_outcomes",
+        "completeness",
+        # Stage 3, additive: empty when no single-scene optical index ran.
+        "pixel_quality",
+        # Stage 4, additive: the radiometric state of each analysis assessed.
+        "radiometry",
     }
     # The only intentional serialized differences, both null when unrequested.
     assert body["temporal_comparison"] is None
+    assert body["pixel_quality"] == []
+    assert body["radiometry"] == []
     assert body["ndwi_overlay"] is None
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
@@ -1612,8 +1655,12 @@ def test_the_change_uses_the_same_four_band_reads() -> None:
 
     _, imagery = analyze_change(two_window_execution(), paired_imagery())
 
-    assert len(imagery.calls) == 4
-    assert [c["asset"] for c in imagery.calls] == ["green", "nir", "green", "nir"]
+    # Three per observation: the scene classification layer (Stage 3 pixel
+    # quality), then the two bands. Still no batching and no caching.
+    assert len(imagery.calls) == 6
+    assert [c["asset"] for c in imagery.calls] == [
+        "scl", "green", "nir", "scl", "green", "nir"
+    ]
 
 
 def test_an_incompatible_grid_produces_no_change_but_keeps_the_statistics() -> None:
@@ -1825,3 +1872,17 @@ def test_no_change_evidence_when_the_grids_were_refused() -> None:
     assert result.temporal_comparison.change is None
     ids = {item.id for item in _analysis_items(result)}
     assert not any(i.startswith("temporal_ndwi.change.") for i in ids)
+
+
+def test_the_aggregate_warning_is_scoped_to_its_own_value() -> None:
+    """It ships beside the paired-pixel change, so it must not read as a claim
+    about the whole result. Observed live: "No pixels were compared against one
+    another" sat next to a change computed over 33,600 paired pixels."""
+
+    from app.services.agent.grounding import find_forbidden_phrases
+    from app.services.analysis.engines import _WARN_AGGREGATE
+
+    assert _WARN_AGGREGATE.startswith("mean_ndwi_difference ")
+    assert "No pixels were compared" not in _WARN_AGGREGATE
+    assert "This value compares no pixel" in _WARN_AGGREGATE
+    assert find_forbidden_phrases(_WARN_AGGREGATE) == []

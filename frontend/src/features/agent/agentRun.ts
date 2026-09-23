@@ -41,15 +41,52 @@ export interface AgentRunHandlers {
   provider?: AiProvider | null;
   /** Which model that provider uses. `null` uses the server's default. */
   model?: string | null;
+  /**
+   * The deployment default, as the server reported it. Used ONLY to attribute
+   * a run that named no provider of its own - it is never sent, so the server
+   * stays the authority on what its default actually is.
+   */
+  defaultProvider?: string | null;
+  defaultModel?: string | null;
   onImagery?: (imagery: ImageryResponse | null) => void;
   onNdwi?: (overlay: NdwiOverlay | null) => void;
   onChange?: (overlay: NdwiOverlay | null) => void;
   onAoi?: (aoi: MapAoi | null) => void;
 }
 
+/**
+ * What a run was actually asked, captured when it was submitted.
+ *
+ * The question box stays editable after a run completes - useful, and also a
+ * provenance bug: the evidence export read the LIVE input, so typing a new
+ * question over a finished Marina Beach result produced a report pairing the
+ * new question with the old measurements. Nothing in it was fabricated, and it
+ * was still a false record.
+ *
+ * Provider and model are captured for the same reason. The selector is
+ * configuration for the NEXT run; switching it while a request is in flight
+ * must not relabel the result already on its way back.
+ */
+export interface AskedRequest {
+  question: string;
+  /**
+   * Display provenance, so a plain string: it may be the provider the request
+   * named, or the deployment default the server reported. Both are things to
+   * show a reader, not values to send.
+   */
+  provider: string | null;
+  model: string | null;
+}
+
 export interface AgentRun {
+  /** The editable draft in the question box. */
   question: string;
   setQuestion: (question: string) => void;
+  /**
+   * What the displayed result was actually asked, or null before a run.
+   * Immutable once set; every provenance surface reads THIS, never the draft.
+   */
+  asked: AskedRequest | null;
   askState: AskState;
   result: AgentResult | null;
   busy: boolean;
@@ -71,12 +108,15 @@ export function useAgentRun({
   onStart,
   provider = null,
   model = null,
+  defaultProvider = null,
+  defaultModel = null,
   onImagery,
   onNdwi,
   onChange,
   onAoi,
 }: AgentRunHandlers = {}): AgentRun {
   const [question, setQuestion] = useState("");
+  const [asked, setAsked] = useState<AskedRequest | null>(null);
   const [askState, setAskState] = useState<AskState>({ status: "idle" });
 
   /**
@@ -127,8 +167,19 @@ export function useAgentRun({
     // own, so this is labelled as what it is - the request - and never split
     // into per-stage figures the server did not produce.
     const startedAt = Date.now();
+    // Frozen at the moment of submission, from the values this request actually
+    // uses. Every provenance surface reads the snapshot from here on.
+    const submitted: AskedRequest = {
+      question: question.trim(),
+      // The EFFECTIVE provider: what the request names, or the deployment
+      // default it will fall through to. Either way it is what produced this
+      // result, which is what attribution has to say.
+      provider: provider ?? defaultProvider ?? null,
+      model: model ?? defaultModel ?? null,
+    };
+    setAsked(submitted);
     try {
-      const answer = await askAgent(question.trim(), {
+      const answer = await askAgent(submitted.question, {
         provider,
         model,
         signal: controller.signal,
@@ -180,12 +231,16 @@ export function useAgentRun({
     abortRef.current?.abort();
     abortRef.current = null;
     setQuestion("");
+    // The snapshot goes with the result it described. Leaving it would let a
+    // cleared screen still name a question no longer shown.
+    setAsked(null);
     setAskState({ status: "idle" });
     reset();
   }
 
   return {
     question,
+    asked,
     setQuestion,
     askState,
     result,

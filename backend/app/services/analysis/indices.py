@@ -10,17 +10,38 @@ WHY RAW DIGITAL NUMBERS ARE SAFE HERE
 The catalog advertises ``scale = 0.0001`` and ``offset = -0.1`` on every
 spectral band, and this project deliberately does not apply them (see
 ``engines.STAC_SCALE_OFFSET_APPLIED`` for the measurement that settled it).
-For a normalised difference that decision is exact rather than convenient: with
-a COMMON multiplicative scale ``s`` and no offset,
+Two separate facts justify that, and only one of them is algebra.
+
+**A common multiplicative scale cancels exactly.** For a shared scale ``s``:
 
     (a*s - b*s) / (a*s + b*s) == (a - b) / (a + b)
 
-so the scale cancels identically. This holds only while both bands of a pair
-share the same scale. Verified against the live catalog (2026-09): ``red``,
-``green``, ``nir``, ``swir16`` and ``swir22`` all advertise scale 0.0001 and
-offset -0.1, so every pair below cancels. A future band with a DIFFERENT scale
-would silently break this, which is why the pairs are declared here rather than
-assembled ad hoc at the call site.
+This is an identity, and it holds for every pair below because all five bands
+advertise the same scale - verified against the live catalog (2026-09): ``red``,
+``green``, ``nir``, ``swir16`` and ``swir22`` all advertise scale 0.0001. A
+future band with a DIFFERENT scale would silently break it, which is why the
+pairs are declared here rather than assembled ad hoc at the call site.
+
+**An additive offset does NOT cancel.** For a shared offset ``c``:
+
+    ((a + c) - (b + c)) / ((a + c) + (b + c)) == (a - b) / (a + b + 2c)
+
+The numerator survives, but the denominator does not: the result differs from
+``(a - b) / (a + b)`` for any non-zero ``c``. So the advertised
+``offset = -0.1`` is NOT disposed of by algebra, and an earlier version of this
+note implied it was.
+
+What actually settles it is a measurement, not a derivation. Applying the
+advertised scale AND offset produced impossible values on real pixels - NDVI
+above 1 over SCL-classified vegetation, which cannot happen for non-negative
+operands - while raw DN gave physically sensible results on the same pixels.
+The advertised offset does not describe these pixels, so it is not applied. See
+``engines.STAC_SCALE_OFFSET_APPLIED`` for the measurement that settled it.
+
+The consequence is worth stating plainly: these indices are computed from a
+quantity that is proportional to reflectance, not from absolute reflectance.
+For a normalised difference that is sufficient. It would NOT be sufficient for
+any quantity where the additive term matters.
 
 These are INDICES, not classifications. A high NDWI is not "water", a high
 NDBI is not "a building", and a high NDVI is not "healthy vegetation". The

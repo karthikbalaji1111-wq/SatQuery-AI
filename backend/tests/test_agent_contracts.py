@@ -175,6 +175,10 @@ def test_execute_query_exposes_only_analytical_decisions() -> None:
         "intent",
         "include_imagery",
         "max_cloud_cover",
+        # Which Sentinel-1 polarization to retrieve IS an analytical decision -
+        # it selects what gets measured - so unlike `limit` it belongs to the
+        # planner. `limit` remains excluded below.
+        "sar_polarization",
     }
     assert "limit" not in ExecuteQueryParams.model_fields
 

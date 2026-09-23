@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.core.errors import AppError
+from app.core.limits import rate_limited, workflow_slot
+from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
 from app.services.agent.providers.factory import (
     get_agent_providers,
@@ -121,7 +123,12 @@ def get_agent_service() -> AgentService | None:
         return None
 
 
-@router.post("/parse", response_model=SatQueryIntent)
+@router.post(
+    "/parse",
+    response_model=SatQueryIntent,
+    # One provider call, which may be metered.
+    dependencies=[Depends(rate_limited), Depends(workflow_slot)],
+)
 async def parse_intent(
     request: ParsePromptRequest,
     service: AiService = Depends(get_ai_service),
@@ -134,7 +141,12 @@ async def parse_intent(
     return await service.parse_intent(request.prompt)
 
 
-@router.post("/build-plan", response_model=ResolvedQueryPlan)
+@router.post(
+    "/build-plan",
+    response_model=ResolvedQueryPlan,
+    # Geocoding only; the geocoder has its own application-wide budget.
+    dependencies=[Depends(rate_limited)],
+)
 async def build_plan(
     intent: SatQueryIntent,
     service: QueryService = Depends(get_query_service),
@@ -148,7 +160,11 @@ async def build_plan(
     return await service.build_plan(intent)
 
 
-@router.post("/execute", response_model=QueryExecutionResult)
+@router.post(
+    "/execute",
+    response_model=QueryExecutionResult,
+    dependencies=[Depends(rate_limited), Depends(workflow_slot)],
+)
 async def execute_query(
     request: QueryExecutionRequest,
     service: QueryExecutionService = Depends(get_query_execution_service),
@@ -164,7 +180,11 @@ async def execute_query(
     return await service.execute(request)
 
 
-@router.post("/analyze", response_model=AnalysisResult)
+@router.post(
+    "/analyze",
+    response_model=AnalysisResult,
+    dependencies=[Depends(rate_limited), Depends(workflow_slot)],
+)
 async def analyze_query(
     request: AnalysisRequest,
     service: AnalysisService = Depends(get_analysis_service),
@@ -183,7 +203,13 @@ async def analyze_query(
     return await service.analyze(request)
 
 
-@router.post("/agent", response_model=AgentResult)
+@router.post(
+    "/agent",
+    response_model=AgentResult,
+    # The most expensive route in the system: planning, discovery, raster
+    # reads, a visual call and synthesis, all inside one HTTP request.
+    dependencies=[Depends(rate_limited), Depends(workflow_slot)],
+)
 async def answer_question(
     request: AgentQuestionRequest,
     service: AgentService = Depends(get_agent_service),
@@ -212,12 +238,21 @@ async def answer_question(
     model that cannot accept an image is refused before the request is made
     rather than being asked to describe a picture it never received."""
 
-    if request.provider is not None or request.model is not None:
-        # The request names its own backend, so the configured default is
-        # irrelevant to this run - including whether it could be built at all.
-        service = build_agent_service(request.provider, request.model)
-    elif service is None:
-        # No override, and the default could not be built: surface that now,
-        # with the message naming the provider actually selected.
-        service = build_agent_service()
-    return await service.answer(request)
+    # One correlated scope for the whole run. Every line any layer emits while
+    # it is open carries the same id, which is what makes an interleaved log
+    # readable - and the provider is recorded here because this is the only
+    # layer that knows which one was selected.
+    with workflow(
+        "agent",
+        provider=request.provider or "configured-default",
+        model=request.model or "configured-default",
+    ):
+        if request.provider is not None or request.model is not None:
+            # The request names its own backend, so the configured default is
+            # irrelevant to this run - including whether it could be built at all.
+            service = build_agent_service(request.provider, request.model)
+        elif service is None:
+            # No override, and the default could not be built: surface that now,
+            # with the message naming the provider actually selected.
+            service = build_agent_service()
+        return await service.answer(request)

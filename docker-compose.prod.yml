@@ -1,0 +1,96 @@
+# SatQuery - production stack.
+#
+#   docker compose -f docker-compose.prod.yml up --build -d
+#
+# Deliberately a SEPARATE file from docker-compose.yml rather than an override
+# of it. The development stack bind-mounts the source and reloads on change,
+# which is exactly what a developer wants and exactly what must not ship; an
+# override that has to un-say those things is one forgotten line away from
+# shipping them.
+#
+# Secrets are read from the HOST environment and are never written here, never
+# baked into an image, and never committed. A deployment sets what it holds:
+#
+#   export GEMINI_API_KEY=...        # or NVIDIA_API_KEY / ANTHROPIC_API_KEY
+#   export SATQUERY_AI_PROVIDER=gemini
+#   docker compose -f docker-compose.prod.yml up --build -d
+#
+# An unset provider credential is not a build error: the service starts, /health
+# answers, and /ready reports exactly which capability is missing.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    # No source mount. The running code is the built code.
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      SATQUERY_ENVIRONMENT: production
+      SATQUERY_LOG_LEVEL: INFO
+      # The browser origin this API accepts. Change it with the deployment.
+      SATQUERY_CORS_ORIGINS: "${SATQUERY_CORS_ORIGINS:?Set explicit HTTPS browser origins}"
+
+      # Which catalogs' rasters this server may open. Empty would still refuse
+      # private and loopback addresses; naming them refuses everything else,
+      # which is what a deployment that knows its sources should do.
+      SATQUERY_TRUSTED_ASSET_HOSTS: >-
+        sentinel-cogs.s3.us-west-2.amazonaws.com,
+        .blob.core.windows.net,
+        earth-search.aws.element84.com,
+        planetarycomputer.microsoft.com
+
+      # Admission control. These are PER PROCESS and the image runs one worker;
+      # see the note in backend/Dockerfile.prod before raising either.
+      SATQUERY_RATE_LIMIT_REQUESTS: "120"
+      SATQUERY_RATE_LIMIT_WINDOW_SECONDS: "60"
+      SATQUERY_MAX_CONCURRENT_WORKFLOWS: "4"
+      SATQUERY_MAX_CONCURRENT_RASTER_READS: "2"
+      SATQUERY_MAX_REQUEST_BYTES: "1000000"
+      SATQUERY_WORKFLOW_BUDGET_SECONDS: "900"
+
+      # OpenStreetMap's usage policy. Application-wide within this process.
+      SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS: "1"
+      SATQUERY_NOMINATIM_USER_AGENT: >-
+        SatQuery/0.1 (production deployment; set a real contact here)
+
+      # Passed through from the host if set; absent is a valid state.
+      AI_PROVIDER: "${SATQUERY_AI_PROVIDER:-gemini}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      NVIDIA_API_KEY: "${NVIDIA_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # A local Ollama would run on the host, not in this network.
+      LOCAL_AI_BASE_URL: "${LOCAL_AI_BASE_URL:-http://host.docker.internal:11434}"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        # Where the BROWSER reaches the API - a public URL, not the compose
+        # service name, because this is resolved by the user's browser.
+        VITE_API_BASE_URL: "${SATQUERY_PUBLIC_API_URL:?Set the public HTTPS API URL}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/index.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -153,19 +153,50 @@ _SAR_NORMALIZATION = (
     "2nd-98th percentile clip -> min-max to 8-bit grayscale (display only, "
     "not calibrated)"
 )
+#: Used when every valid sample is strictly positive, i.e. the band holds a
+#: power/amplitude quantity (Sentinel-1 RTC gamma naught is linear power).
+#:
+#: WHY: a linear percentile stretch of SAR power is a poor rendering, because
+#: the distribution is heavily right-skewed - a handful of bright scatterers
+#: occupy the top of the range and the entire land surface collapses into the
+#: bottom of it. Measured on a live Chennai RTC VV window (872x1109 native,
+#: EPSG:32644): under the linear stretch 75.1% of pixels landed in the darkest
+#: 10% of the output range and the MEDIAN pixel rendered at level 3/255; in
+#: decibels the same window puts 13.8% there with a median of 75/255.
+#:
+#: This is a DISPLAY stretch and nothing more. It is monotonic, so it reorders
+#: nothing; it is applied to the rendered PNG only, never to the quantitative
+#: path; and it is not a radiometric calibration - the provider's gamma naught
+#: values are untouched. The chosen domain is always reported in the response's
+#: ``normalization`` field so a reader is never left to guess.
+_SAR_DB_NORMALIZATION = (
+    "10*log10 to decibels -> 2nd-98th percentile clip -> min-max to 8-bit "
+    "grayscale (display only, not calibrated)"
+)
 # Deterministic level for a degenerate (constant) window: mid-grey, so a
 # uniform-return scene is visibly distinct from a no-data (black) one.
 _SAR_DEGENERATE_LEVEL = 128
 
 
-def _normalize_sar_band(band: np.ndarray, *, nodata: float | None) -> np.ndarray:
+def normalize_sar_display(
+    band: np.ndarray, *, nodata: float | None
+) -> tuple[np.ndarray, str]:
     """Deterministic *display* normalization of one SAR band to ``uint8``.
 
-    Percentile-clip (2nd..98th) of the finite, non-nodata pixels, then min-max
-    scale to 0..255. NaN, +/-Inf and nodata pixels are excluded from the
-    statistics and rendered black (0). A constant/degenerate window (``upper``
-    <= ``lower``, e.g. one valid pixel) yields a flat mid-grey rather than
-    dividing by zero. This is not a calibrated or quantitative transform.
+    Returns the grayscale array and the exact description of the transform
+    applied, so the caller never has to assume which branch ran.
+
+    When every valid sample is strictly positive the band is a power quantity
+    and is stretched in **decibels** (``10*log10``); otherwise - a band already
+    in dB, or one carrying zero/negative samples, where a logarithm is
+    undefined or meaningless - the values are stretched as they stand. Either
+    way the stretch is a percentile clip (2nd..98th) of the finite, non-nodata
+    pixels followed by a min-max scale to 0..255.
+
+    NaN, +/-Inf and nodata pixels are excluded from the statistics and rendered
+    black (0). A constant/degenerate window (``upper`` <= ``lower``, e.g. one
+    valid pixel) yields a flat mid-grey rather than dividing by zero. Neither
+    branch is a calibrated or quantitative transform.
 
     Raises :class:`ImageryError` when there is no finite, non-nodata pixel.
     """
@@ -181,12 +212,22 @@ def _normalize_sar_band(band: np.ndarray, *, nodata: float | None) -> np.ndarray
             "The Sentinel-1 window contains no valid (finite) pixels to display."
         )
 
+    if float(valid.min()) > 0.0:
+        # Every valid sample is positive, so the logarithm is defined on all of
+        # them. Invalid pixels are substituted with 1.0 purely to keep log10
+        # defined; they are forced to black at the end regardless.
+        values = 10.0 * np.log10(np.where(finite, values, 1.0))
+        valid = values[finite]
+        normalization = _SAR_DB_NORMALIZATION
+    else:
+        normalization = _SAR_NORMALIZATION
+
     lower, upper = (float(x) for x in np.percentile(valid, _SAR_CLIP_PERCENTILES))
 
     if not (math.isfinite(lower) and math.isfinite(upper)) or upper <= lower:
         out = np.full(values.shape, _SAR_DEGENERATE_LEVEL, dtype=np.uint8)
         out[~finite] = 0
-        return out
+        return out, normalization
 
     scaled = (np.clip(values, lower, upper) - lower) / (upper - lower)
     # Any NaN/Inf that survived clipping (they cannot reach [0, 1]) is forced
@@ -194,7 +235,13 @@ def _normalize_sar_band(band: np.ndarray, *, nodata: float | None) -> np.ndarray
     scaled = np.nan_to_num(scaled, nan=0.0, posinf=1.0, neginf=0.0)
     out = np.rint(scaled * 255.0).astype(np.uint8)
     out[~finite] = 0  # NaN / Inf / nodata -> black
-    return out
+    return out, normalization
+
+
+def _normalize_sar_band(band: np.ndarray, *, nodata: float | None) -> np.ndarray:
+    """The grayscale array from :func:`normalize_sar_display`, without the label."""
+
+    return normalize_sar_display(band, nodata=nodata)[0]
 
 
 def _clamp_window_to_source(raw: Window, src_width: int, src_height: int) -> Window:
@@ -268,10 +315,13 @@ def _extract_window(
             raise UpstreamServiceError(
                 "Failed to read the requested raster window."
             ) from exc
-        gray = _normalize_sar_band(band, nodata=src.nodata)
+        gray, normalization = normalize_sar_display(band, nodata=src.nodata)
         rgb = np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))
+        # This layer is handed an href, never an asset key, so it cannot know
+        # which polarization it read; "vv" here is a placeholder for "the one
+        # SAR band in this file". ``ImageryService.retrieve`` replaces it with
+        # the polarization actually requested, which is what reaches a client.
         bands = ["vv", "vv", "vv"]
-        normalization = _SAR_NORMALIZATION
 
     resolution = abs(float(src.transform.a)) if src.transform.a else None
 
@@ -376,6 +426,9 @@ class BandWindow:
     nodata: float | None
     window: dict[str, int]
     source_shape: list[int]  # [height, width] of the full source raster
+    source_scale: float = 1.0
+    source_offset: float = 0.0
+    source_unit: str | None = None
 
 
 def _band_validity(values: np.ndarray, nodata: float | None) -> np.ndarray:
@@ -457,6 +510,9 @@ def _extract_band_window(
     return BandWindow(
         values=values,
         valid=_band_validity(values, nodata),
+        source_scale=float(src.scales[0]),
+        source_offset=float(src.offsets[0]),
+        source_unit=src.units[0],
         width=native_w,
         height=native_h,
         crs=src.crs.to_string() if src.crs else None,

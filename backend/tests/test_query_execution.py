@@ -813,7 +813,21 @@ def test_s1_upstream_failure_propagates() -> None:
         )
 
 
-def test_mixed_s1_s2_failure_propagates_not_soft_fail() -> None:
+def test_mixed_s1_s2_failure_is_partial_rather_than_total() -> None:
+    """One modality's outage must not discard the other's results.
+
+    DELIBERATE CHANGE OF CONTRACT. This case previously raised, on the
+    principle that a soft failure might be mistaken for a complete answer. The
+    cost was that a working Sentinel-2 observation - already retrieved, already
+    paid for - was thrown away because a second catalog was unreachable, and
+    the caller could not tell an outage from an empty archive.
+
+    The mistaken-for-complete risk is answered directly instead: the result
+    carries ``status == "partial"``, and the failed window says why it is empty.
+    A run where NOTHING succeeded still raises (see the test below), so a total
+    outage is never dressed up as a result.
+    """
+
     satellite = FakeSatelliteService(
         by_collection={
             None: make_search_response(make_scene("s2", cloud_cover=5.0)),
@@ -821,6 +835,41 @@ def test_mixed_s1_s2_failure_propagates_not_soft_fail() -> None:
         }
     )
     service = build_service(satellite=satellite)
+
+    result = run(
+        service.execute(
+            QueryExecutionRequest(
+                intent=make_intent(modalities=["sentinel-2-optical", "sentinel-1-sar"])
+            )
+        )
+    )
+
+    assert result.status == "partial"
+    optical, sar = result.windows
+    # The completed work survived, in full.
+    assert optical.modality == "sentinel-2-optical"
+    assert optical.selected_scene_id == "s2"
+    assert optical.error is None
+    # The failure is recorded against the window it belongs to, with its cause.
+    assert sar.modality == "sentinel-1-sar"
+    assert sar.selected_scene_id is None
+    assert sar.error == "S1 catalog down"
+    # An empty window from an outage must not read like an empty archive.
+    assert sar.scene_count == 0
+    assert sar.scenes == []
+
+
+def test_a_total_failure_still_raises_rather_than_returning_an_empty_result() -> None:
+    """Nothing succeeded, so there is no partial result to preserve."""
+
+    satellite = FakeSatelliteService(
+        by_collection={
+            None: UpstreamServiceError("S2 catalog down"),
+            "sentinel-1-grd": UpstreamServiceError("S1 catalog down"),
+        }
+    )
+    service = build_service(satellite=satellite)
+
     with pytest.raises(UpstreamServiceError):
         run(
             service.execute(
@@ -1089,7 +1138,13 @@ def test_execute_endpoint_with_dependency_override() -> None:
         "windows",
         "catalog",
         "observations",  # Phase 12: derived from windows, additive
+        # Both derived from the windows, both additive: existing fields keep
+        # their values and their meaning.
+        "catalogs",
+        "status",
     }
+    assert body["status"] == "completed"
+    assert body["catalogs"] == [CATALOG]
     assert body["plan"]["bbox"] == {
         "west": pytest.approx(80.10),
         "south": pytest.approx(12.90),

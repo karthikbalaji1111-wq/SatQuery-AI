@@ -36,6 +36,7 @@ from fastapi.testclient import TestClient
 #: like a real NVIDIA key so a naive redactor would not special-case it.
 NVIDIA_SENTINEL = "nvapi-SENTINEL-must-never-be-disclosed-0123456789"
 GEMINI_SENTINEL = "AIza-SENTINEL-must-never-be-disclosed-0123456789"
+ANTHROPIC_SENTINEL = "sk-ant-SENTINEL-must-never-be-disclosed-0123456789"
 
 #: RFC 863 discard port: refused immediately, so "unavailable" needs no network.
 UNREACHABLE = "http://127.0.0.1:9/v1"
@@ -49,6 +50,7 @@ def _settings(**overrides: object) -> Settings:
         "_env_file": None,
         "GEMINI_API_KEY": GEMINI_SENTINEL,
         "NVIDIA_API_KEY": NVIDIA_SENTINEL,
+        "ANTHROPIC_API_KEY": ANTHROPIC_SENTINEL,
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -59,9 +61,12 @@ def _assert_clean(text: str, where: str) -> None:
 
     assert NVIDIA_SENTINEL not in text, f"NVIDIA key disclosed in {where}"
     assert GEMINI_SENTINEL not in text, f"Gemini key disclosed in {where}"
+    assert ANTHROPIC_SENTINEL not in text, f"Anthropic key disclosed in {where}"
     lowered = text.lower()
     assert "nvapi-" not in lowered, f"key-shaped material in {where}"
+    assert "sk-ant-" not in lowered, f"key-shaped material in {where}"
     assert "authorization" not in lowered, f"auth header echoed in {where}"
+    assert "x-api-key" not in lowered, f"auth header echoed in {where}"
 
 
 # --------------------------------------------------------------------------- #
@@ -376,3 +381,70 @@ def test_an_unconfigured_explicit_provider_names_itself_not_the_default(
     assert "NVIDIA_API_KEY" in response.text
     assert "GEMINI_API_KEY" not in response.text
     _assert_clean(response.text, "the unconfigured-override error")
+
+
+# --------------------------------------------------------------------------- #
+# Anthropic
+# --------------------------------------------------------------------------- #
+#
+# The same three surfaces as the NVIDIA cases above - the unconfigured error,
+# the response, and the log - because a third provider is a third chance to
+# publish a key. Its credential travels in `x-api-key` rather than
+# `Authorization`, which is why `_assert_clean` checks both header names.
+
+
+def test_unconfigured_anthropic_names_the_variable_not_a_value(
+    monkeypatch: Any,
+) -> None:
+    settings = _settings(AI_PROVIDER="anthropic", ANTHROPIC_API_KEY=None)
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+
+    app.dependency_overrides.clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/query/agent",
+            json={"question": QUESTION, "provider": "anthropic"},
+        )
+
+    body = response.text
+    # Names the variable, so an operator can fix it...
+    assert "ANTHROPIC_API_KEY" in body
+    # ...but discloses nothing, including the OTHER providers' keys, which are
+    # configured in this fixture and must not travel with an unrelated error.
+    _assert_clean(body, "the unconfigured-anthropic error")
+
+
+def test_an_unreachable_anthropic_never_echoes_its_credential(
+    monkeypatch: Any,
+) -> None:
+    settings = _settings(AI_PROVIDER="anthropic", ANTHROPIC_BASE_URL=UNREACHABLE)
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+
+    app.dependency_overrides.clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/query/agent",
+            json={"question": QUESTION, "provider": "anthropic"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "planner_unavailable"
+    _assert_clean(response.text, "the unreachable-anthropic response")
+
+
+def test_an_unreachable_anthropic_logs_no_credential(
+    monkeypatch: Any, caplog: Any
+) -> None:
+    """Logs outlive responses, so they are the more dangerous surface."""
+
+    settings = _settings(AI_PROVIDER="anthropic", ANTHROPIC_BASE_URL=UNREACHABLE)
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+
+    app.dependency_overrides.clear()
+    with caplog.at_level(logging.DEBUG), TestClient(app) as client:
+        client.post(
+            "/api/v1/query/agent",
+            json={"question": QUESTION, "provider": "anthropic"},
+        )
+
+    _assert_clean(caplog.text, "the application log")

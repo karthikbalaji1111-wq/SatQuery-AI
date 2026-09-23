@@ -1,9 +1,10 @@
 """Analysis boundary over an already-computed query execution.
 
 Implemented so far: the contract itself (:class:`AnalysisRequest` ->
-:class:`AnalysisResult`), a deterministic ``visualize`` summary, and one pure
-engine - opt-in single-scene Sentinel-2 NDWI statistics, and opt-in Temporal
-NDWI Statistics for one deterministic Sentinel-2 observation pair
+:class:`AnalysisResult`), a deterministic ``visualize`` summary, and pure
+engines - opt-in single-scene Sentinel-2 NDWI statistics, opt-in Sentinel-1 RTC
+backscatter statistics in decibels (:mod:`app.services.analysis.sar`), and
+opt-in Temporal NDWI Statistics for one deterministic Sentinel-2 observation pair
 (:mod:`app.services.analysis.engines`). ``multimodal`` (fusion) and ``temporal``
 (change detection) remain the future homes for engines needing more than one
 scene.
@@ -19,6 +20,9 @@ from app.services.analysis.schemas import (
     AnalysisWindowRef,
     Measurement,
     ObservationIndexResult,
+    SarBackscatterResult,
+    SarPolarizationDifference,
+    SarPolarizationStatistics,
     TemporalIndexComparison,
 )
 from app.services.analysis.service import AnalysisService
@@ -31,5 +35,8 @@ __all__ = [
     "AnalysisWindowRef",
     "Measurement",
     "ObservationIndexResult",
+    "SarBackscatterResult",
+    "SarPolarizationDifference",
+    "SarPolarizationStatistics",
     "TemporalIndexComparison",
 ]

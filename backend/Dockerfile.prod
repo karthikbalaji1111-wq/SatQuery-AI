@@ -1,0 +1,70 @@
+# SatQuery backend - production image.
+#
+# Kept beside the development Dockerfile rather than replacing it: the
+# development image exists to give a fast edit-run loop (source bind-mounted,
+# --reload watching it), and every property that makes it good at that makes it
+# unfit to ship - it installs unpinned, runs as root, and restarts itself when a
+# file changes underneath it.
+#
+# What this image does differently, and why each matters:
+#
+#   * installs from uv.lock with --frozen, so a build cannot quietly resolve a
+#     version nobody tested;
+#   * copies the application in rather than mounting it, so the running code is
+#     the code that was built and scanned;
+#   * runs as a non-root user that owns nothing it needs to write;
+#   * no --reload: the watcher holds the source tree open and doubles as a
+#     remote-restart primitive nobody wants in production;
+#   * a healthcheck that asks /health - LIVENESS. Readiness is /ready, and it is
+#     deliberately not wired here, because "cannot reach the AI provider" must
+#     not make an orchestrator kill a process that is running perfectly.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+WORKDIR /app
+
+# Dependencies first, and from the LOCKFILE: --frozen fails the build if
+# uv.lock and pyproject.toml disagree, rather than silently resolving something
+# new. --no-dev leaves pytest and ruff out of the runtime image.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Rasterio's Linux wheel requires libexpat, absent from python:slim.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV SATQUERY_ENVIRONMENT=production
+
+# Only what the service runs. Tests, fixtures and scripts are not shipped.
+COPY app ./app
+
+# A non-root user with no write access to the application it runs.
+RUN useradd --system --uid 10001 --create-home --home-dir /home/satquery satquery \
+    && chown -R satquery:satquery /app
+USER satquery
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"
+
+# ONE worker on purpose. The admission controls in app/core/limits.py - the rate
+# limiter, the workflow slots, the raster gate - and the geocoder's throttle are
+# all PER PROCESS. Two workers admit twice as much and make one request per
+# second to Nominatim into two. Raising this is a legitimate choice; it means
+# dividing SATQUERY_RATE_LIMIT_REQUESTS, SATQUERY_MAX_CONCURRENT_WORKFLOWS and
+# SATQUERY_MAX_CONCURRENT_RASTER_READS by the worker count, and accepting that
+# the geocoder budget is no longer application-wide.
+CMD ["uv", "run", "--no-dev", "uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--workers", "1", \
+     "--timeout-graceful-shutdown", "20", \
+     "--no-server-header"]

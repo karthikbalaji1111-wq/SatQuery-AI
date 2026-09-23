@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 
+import { SarBackscatterPanel } from "./SarBackscatterPanel";
 import type {
   AgentResult,
   AgentStatus,
@@ -11,7 +12,9 @@ import type {
   Modality,
   QueryTask,
   SatelliteScene,
+  SarBackscatterResult,
   SatQueryIntent,
+  SpectralIndexKey,
   TimeRange,
 } from "../../api/types";
 import {
@@ -76,6 +79,7 @@ const TOOL_STAGES: Record<AgentToolName, string> = {
   execute_query: "stac_search",
   spectral_indices: "index_compute",
   ndwi_statistics: "ndwi_compute",
+  sar_backscatter_statistics: "sar_backscatter",
   temporal_ndwi_statistics: "ndwi_temporal",
   rs_model_analysis: "vlm_observe",
 };
@@ -84,6 +88,7 @@ const TOOL_KINDS: Record<AgentToolName, string> = {
   execute_query: "geo",
   spectral_indices: "index",
   ndwi_statistics: "index",
+  sar_backscatter_statistics: "index",
   temporal_ndwi_statistics: "index",
   rs_model_analysis: "model",
 };
@@ -148,6 +153,8 @@ const STATUS_NOTICES: Record<Exclude<AgentStatus, "ok">, StatusNotice> = {
 const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   nvidia: "NVIDIA",
+  anthropic: "Claude",
+  local: "Local",
   mock: "Mock",
 };
 
@@ -196,20 +203,128 @@ function formatWindows(windows: SatQueryIntent["time_windows"]): string {
 }
 
 /**
+ * The spectral indices the backend names its measurements after.
+ *
+ * The backend prefixes every measurement with the index that produced it
+ * (`ndwi_mean`, `ndvi_valid_pixel_count`, `ndbi_min`), which is the ONLY
+ * reliable way to tell them apart: they all share the unit `index`, so unit
+ * alone cannot say which index a number belongs to.
+ *
+ * Each caveat names the classification this index is NOT. One shared sentence
+ * would have to be either wrong or vague, and an NDVI mean captioned "not a
+ * validated water classification" is a statement about the wrong index.
+ */
+const INDEX_FAMILIES: { key: SpectralIndexKey; label: string; caveat: string }[] =
+  [
+    {
+      key: "ndvi",
+      label: "NDVI",
+      caveat:
+        "Spectral index only — not a validated vegetation or land-cover classification.",
+    },
+    {
+      key: "ndwi",
+      label: "NDWI",
+      caveat: "Spectral index only — not a validated water classification.",
+    },
+    {
+      key: "ndbi",
+      label: "NDBI",
+      caveat:
+        "Spectral index only — not a validated built-up or bare-ground classification.",
+    },
+  ];
+
+/**
+ * One index's own measurements, kept together.
+ *
+ * Grouping by name prefix rather than by unit is the whole point. Selecting
+ * "the first measurement whose unit is `index`" and "the first whose unit is
+ * `%`" picks from whatever the backend happened to return first: with three
+ * indices computed that paired an NDVI mean with an NDWI threshold percentage
+ * and printed them as one reading. Every field here comes from the same index
+ * or is absent.
+ */
+interface IndexGroup {
+  key: SpectralIndexKey;
+  label: string;
+  caveat: string;
+  mean: Measurement;
+  percent: Measurement | undefined;
+  validPixels: Measurement | undefined;
+}
+
+function belongsTo(measurement: Measurement, key: SpectralIndexKey): boolean {
+  return measurement.name.toLowerCase().startsWith(`${key}_`);
+}
+
+/**
+ * Every index that reported a mean, in a fixed order.
+ *
+ * An index the run did not compute is absent rather than zeroed, and a
+ * measurement whose name matches no known index is left for the caller: this
+ * never invents a family to put a stray number in.
+ */
+function indexGroups(measurements: Measurement[]): IndexGroup[] {
+  const groups: IndexGroup[] = [];
+  for (const family of INDEX_FAMILIES) {
+    const own = measurements.filter((measurement) =>
+      belongsTo(measurement, family.key),
+    );
+    const mean =
+      own.find(
+        (measurement) =>
+          measurement.unit === "index" &&
+          measurement.name.toLowerCase().endsWith("_mean"),
+      ) ?? own.find((measurement) => measurement.unit === "index");
+    if (mean === undefined) continue;
+    groups.push({
+      ...family,
+      mean,
+      percent: own.find((measurement) => measurement.unit === "%"),
+      validPixels: own.find((measurement) => measurement.unit === "pixels"),
+    });
+  }
+  return groups;
+}
+
+/** The comparison-level measurements a temporal run is headlined by. */
+const TEMPORAL_HEADLINE_IDS = [
+  "temporal_ndwi.difference.mean_ndwi_difference",
+  "temporal_ndwi.change.ndwi_change_mean",
+] as const;
+
+/**
  * The two measurements worth setting at headline size.
  *
  * Analytical units only. A discovery count is a fact about the search, not a
  * result of the analysis, and setting one large would give the reader the wrong
  * headline. When nothing analytical was computed the block is absent.
+ *
+ * The pair is taken from ONE index so the two numbers describe the same thing.
+ * Pairing across indices produced a headline reading "ndvi mean" beside an
+ * NDWI threshold percentage - two true numbers arranged into a false reading.
  */
 function headlineMeasurements(evidence: Evidence): Measurement[] {
+  // A comparison is headlined by the comparison. Its per-observation means
+  // share one metric name ("ndwi_mean"), so the family grouping below picked
+  // the EARLIER observation's mean and set it large as "ndwi mean" - observed
+  // live on a water-change question, where the headline read the 2024 value
+  // beside an answer about change. Both measurements here name themselves.
+  // If the backend suppressed them, there is no headline rather than an
+  // unlabelled single observation.
+  if (evidence.items.some((item) => item.id.startsWith("temporal_ndwi."))) {
+    return TEMPORAL_HEADLINE_IDS.map(
+      (id) => evidence.items.find((item) => item.id === id)?.measurement ?? null,
+    ).filter((measurement): measurement is Measurement => measurement !== null);
+  }
   const all = measurementsFrom(evidence);
-  const index = all.find((measurement) => measurement.unit === "index");
-  const percent = all.find((measurement) => measurement.unit === "%");
-  const paired = [index, percent].filter(
-    (measurement): measurement is Measurement => measurement !== undefined,
-  );
-  if (paired.length === 2) return paired;
+  const [group] = indexGroups(all);
+  if (group !== undefined) {
+    return [group.mean, group.percent].filter(
+      (measurement): measurement is Measurement => measurement !== undefined,
+    );
+  }
   return all
     .filter(
       (measurement) => measurement.unit === "index" || measurement.unit === "%",
@@ -481,6 +596,7 @@ export function AgentEvidencePanel({
     scene: SatelliteScene | null;
     imagery: ImageryResponse | null;
     measurements: Measurement[];
+    sar_backscatter?: SarBackscatterResult | null;
   } | null;
   bbox?: { west: number; south: number; east: number; north: number } | null;
 }) {
@@ -491,10 +607,21 @@ export function AgentEvidencePanel({
   const scene = shownScene(window) ?? manual?.scene ?? null;
   const imagery = window?.imagery ?? manual?.imagery ?? null;
   const bbox = evidence?.execution?.plan.bbox ?? manualBbox;
+  // Fall back per-value, exactly as `scene`, `imagery` and `bbox` above do.
+  //
+  // Selecting the source on `evidence === null` instead meant that an agent
+  // result carrying NO measurements - the ordinary `planner_unavailable` case,
+  // where the provider was rate limited and nothing ran - suppressed the
+  // measurements the manual path had genuinely computed. The scene fields
+  // still fell back and rendered, so the panel showed a real scene with its
+  // real numbers stripped out: the deterministic evidence panel reporting no
+  // evidence while the evidence sat in state.
+  const agentMeasurements =
+    evidence === null ? [] : measurementsFrom(evidence);
   const measurements =
-    evidence === null
-      ? (manual?.measurements ?? [])
-      : measurementsFrom(evidence);
+    agentMeasurements.length > 0
+      ? agentMeasurements
+      : (manual?.measurements ?? []);
 
   // A window can discover and select a scene and still fail to retrieve its
   // picture - the documented Sentinel-1 case. The agent path used to drop
@@ -502,9 +629,30 @@ export function AgentEvidencePanel({
   // imagery at all.
   const imageryError = window?.imagery_error ?? null;
 
-  const index = measurements.find((m) => m.unit === "index");
-  const aboveThreshold = measurements.find((m) => m.unit === "%");
-  const validPixels = measurements.find((m) => m.unit === "pixels");
+  // One readout per index that reported a mean. Each carries its own
+  // threshold percentage and its own valid-pixel count, so no number is ever
+  // shown under another index's name.
+  const groups = indexGroups(measurements);
+  // A measurement whose name matches no known index still deserves rendering,
+  // but only when grouping found nothing - otherwise it would duplicate a
+  // number a group already shows.
+  const looseIndex =
+    groups.length === 0
+      ? measurements.find((m) => m.unit === "index")
+      : undefined;
+  const loosePercent =
+    groups.length === 0 ? measurements.find((m) => m.unit === "%") : undefined;
+  // The shared pixel count is a property of the window, so it belongs in the
+  // field grid - but only while every index agrees on it. When they differ
+  // (NDBI resolves through a 20 m band) each group states its own instead of
+  // one arbitrary count standing for all of them.
+  const pixelCounts = measurements.filter((m) => m.unit === "pixels");
+  const sharedPixels =
+    pixelCounts.length > 0 &&
+    pixelCounts.every((m) => m.value === pixelCounts[0].value)
+      ? pixelCounts[0]
+      : undefined;
+  const validPixels = groups.length === 0 ? pixelCounts[0] : sharedPixels;
 
   const fields: { label: string; value: string; wide?: boolean }[] = [];
   const sceneId = imagery?.scene_id ?? window?.selected_scene_id ?? null;
@@ -576,7 +724,7 @@ export function AgentEvidencePanel({
 
       {imageryError !== null && <ImageryErrorNotice raw={imageryError} />}
 
-      {fields.length === 0 && index === undefined ? (
+      {fields.length === 0 && groups.length === 0 && looseIndex === undefined ? (
         <p className="hint" role="status">
           {busy
             ? "Reading scene metadata and computing measurements…"
@@ -598,11 +746,28 @@ export function AgentEvidencePanel({
               </div>
             ))}
           </dl>
-          {index && (
-            <IndexReadout index={index} aboveThreshold={aboveThreshold} />
+          {groups.length > 0 && (
+            <div className="index-readouts">
+              {groups.map((group) => (
+                <IndexReadout
+                  key={group.key}
+                  index={group.mean}
+                  aboveThreshold={group.percent}
+                  caveat={group.caveat}
+                  validPixels={
+                    sharedPixels === undefined ? group.validPixels : undefined
+                  }
+                />
+              ))}
+            </div>
+          )}
+          {looseIndex && (
+            <IndexReadout index={looseIndex} aboveThreshold={loosePercent} />
           )}
         </div>
       )}
+
+      <SarBackscatterPanel result={evidence?.analysis?.sar_backscatter ?? manual?.sar_backscatter ?? null} />
 
       {evidence !== null && evidence.items.length > 0 && (
         // The citation keys the grounding check resolves against. Technical on
@@ -632,9 +797,20 @@ export function AgentEvidencePanel({
 function IndexReadout({
   index,
   aboveThreshold,
+  caveat = "Spectral index only — not a validated land-cover classification.",
+  validPixels,
 }: {
   index: Measurement;
+  /**
+   * A threshold percentage over THIS index's pixels, or `undefined`. The
+   * caller must never pass another index's percentage: the two sit on one
+   * line and read as one measurement.
+   */
   aboveThreshold: Measurement | undefined;
+  /** What this index is not a classification of. Defaults to the general form. */
+  caveat?: string;
+  /** This index's own valid-pixel count, when it differs from its siblings'. */
+  validPixels?: Measurement | undefined;
 }) {
   const clamped = Math.max(-1, Math.min(1, index.value));
   const position = ((clamped + 1) / 2) * 100;
@@ -662,9 +838,12 @@ function IndexReadout({
         <span className="axis-max">+1.0</span>
         <span className="index-tick" style={{ left: `${position}%` }} />
       </div>
-      <p className="index-caveat">
-        Spectral index only — not a validated water classification.
-      </p>
+      {validPixels && (
+        <p className="index-pixels">
+          {formatMeasurement(validPixels.value, validPixels.unit)} valid pixels
+        </p>
+      )}
+      <p className="index-caveat">{caveat}</p>
     </div>
   );
 }
@@ -679,9 +858,27 @@ function IndexReadout({
  */
 export function AgentAnswerPanel({
   result,
+  asked = null,
+  manualComplete = false,
   busy = false,
 }: {
   result: AgentResult | null;
+  /**
+   * What THIS result was actually asked, frozen at submission.
+   *
+   * Never the live selector. Switching provider while a request is in flight
+   * used to leave the returning result - or its failure - sitting under the
+   * newly selected provider's name, blaming a service that was never called.
+   */
+  asked?: { question: string; provider: string | null; model: string | null } | null;
+  /**
+   * A manual analysis finished and produced evidence.
+   *
+   * The manual path produces no written answer - there is no question to
+   * answer - so this does not fabricate one. It replaces an instruction to run
+   * something with a statement that something ran.
+   */
+  manualComplete?: boolean;
   /** A run is in flight: say so rather than showing the resting invitation. */
   busy?: boolean;
 }) {
@@ -694,7 +891,9 @@ export function AgentAnswerPanel({
         <p className="answer-absent" role="status">
           {busy
             ? "Analysing — the answer appears once the evidence is grounded."
-            : "Run an analysis to produce an answer grounded in the deterministic evidence."}
+            : manualComplete
+              ? "Analysis complete. This run was configured manually, so no written answer was generated — the measurements and scene provenance are in the deterministic evidence panel, and can be exported."
+              : "Run an analysis to produce an answer grounded in the deterministic evidence."}
         </p>
       </section>
     );
@@ -719,6 +918,8 @@ export function AgentAnswerPanel({
           failure={result.failure ?? null}
         />
       )}
+
+      <RunAttribution asked={asked} />
 
       <ValidationRow validation={result.trace.answer_validation} />
 
@@ -751,6 +952,29 @@ export function AgentAnswerPanel({
  * analysis failed" from "the sentence about the analysis failed". A reader who
  * sees five measurements and a missing paragraph can act on the five.
  */
+/**
+ * Which provider and model produced the result on screen.
+ *
+ * Read from the run's own snapshot, so it keeps naming the provider that was
+ * actually used even after the selector has moved on. Rendered only when a run
+ * has happened; before that there is nothing to attribute.
+ */
+function RunAttribution({
+  asked,
+}: {
+  asked?: { question: string; provider: string | null; model: string | null } | null;
+}) {
+  if (!asked || (asked.provider === null && asked.model === null)) return null;
+  return (
+    <p className="run-attribution" data-testid="run-attribution">
+      Produced by{" "}
+      {asked.provider !== null ? providerLabel(asked.provider) : "the default provider"}
+      {asked.model !== null ? ` · ${asked.model}` : ""}
+    </p>
+  );
+}
+
+
 function StatusNoticeBlock({
   status,
   measured,
@@ -793,7 +1017,11 @@ function StatusNoticeBlock({
       {failure?.code === "rate_limited" ? (
         <p className="answer-notice-retry">
           {failure.retry_after_seconds !== null
-            ? `The provider requested a wait of ${Math.ceil(failure.retry_after_seconds)} seconds before retrying.`
+            ? // A sub-second wait rounds to "0 seconds", which reads as broken;
+              // and a one-second wait must not read "1 seconds".
+              Math.ceil(failure.retry_after_seconds) < 1
+              ? "The provider asked to be retried shortly."
+              : `The provider requested a wait of ${Math.ceil(failure.retry_after_seconds)} second${Math.ceil(failure.retry_after_seconds) === 1 ? "" : "s"} before retrying.`
             : "The provider quota is exhausted. Wait for quota to reset or explicitly select another configured provider."}
         </p>
       ) : notice.retryable && !failure && (

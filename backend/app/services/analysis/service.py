@@ -20,8 +20,10 @@ execution actually retrieved; every other task is reported as
 rather than a 501 error). Independently of the task, ``include_ndwi`` opts in to
 single-scene Sentinel-2 NDWI statistics, and ``include_temporal_ndwi`` opts in
 to Temporal NDWI Statistics for one deterministic Sentinel-2 pair - two
-observations indexed independently, never compared pixel by pixel. Future
-engines are dispatched from here without changing this contract.
+observations indexed independently, never compared pixel by pixel.
+``include_sar_backscatter`` opts in to quantitative Sentinel-1 RTC gamma-naught
+statistics in decibels for one SAR window. Future engines are dispatched from
+here without changing this contract.
 """
 
 from __future__ import annotations
@@ -43,15 +45,32 @@ from app.services.analysis.engines import (
     render_ndwi_overlay,
 )
 from app.services.analysis.indices import bands_for, resolve_index
+from app.services.analysis.pixel_quality import (
+    align_scl_to_grid,
+    mask_with_scl,
+    quality_measurements,
+    temporal_quality_note,
+)
+from app.services.analysis.sar import SAR_POLARIZATIONS, compute_sar_backscatter
 from app.services.analysis.schemas import (
+    AnalysisOutcome,
     AnalysisRequest,
     AnalysisResult,
     AnalysisWindowRef,
     Measurement,
     NdwiOverlay,
     ObservationIndexResult,
+    PixelQuality,
+    SarBackscatterResult,
     SpatialMeasurement,
     TemporalIndexComparison,
+)
+from app.services.analysis.validation import (
+    DeclaresReadLimits,
+    check_operations_area,
+    operations_for_flags,
+    requested_operations,
+    validate_execution_analysis,
 )
 from app.services.base import DomainService
 from app.services.geospatial.schemas import BoundingBox
@@ -65,18 +84,34 @@ from app.services.query.schemas import (
     QueryTask,
 )
 from app.services.satellite import ImageryService
+from app.services.satellite.imagery import QuantitativeReadLimits
+from app.services.satellite.radiometry import (
+    RadiometricState,
+    RadiometricValidationError,
+    assess_radiometry,
+    radiometric_pair_problem,
+    require_usable,
+)
 from app.services.satellite.raster import BandWindow
+from app.services.satellite.scene_validation import (
+    SceneValidator,
+    ValidatedScene,
+    validate_scene_pair,
+)
 
 logger = get_logger("analysis")
 
 _IMPLEMENTED_TASK: QueryTask = "visualize"
 
 _OPTICAL_MODALITY: Modality = "sentinel-2-optical"
+_SAR_MODALITY: Modality = "sentinel-1-sar"
 #: Earth Search STAC asset keys (common names) for the two 10 m bands NDWI
 #: needs: "green" is band B03, "nir" is band B08. Both come from the SAME scene,
 #: so they share one grid and need no resampling or co-registration.
 _NDWI_GREEN_ASSET = "green"
 _NDWI_NIR_ASSET = "nir"
+#: Sentinel-2's Scene Classification Layer: the pixel-quality source (Stage 3).
+_SCL_ASSET = "scl"
 
 
 def _window_ref(window: ExecutedWindow) -> AnalysisWindowRef:
@@ -193,6 +228,40 @@ def _scene_collection(window: ExecutedWindow) -> str | None:
     return None
 
 
+def _outcome(name: str, *, produced: bool, warnings: list[str]) -> AnalysisOutcome:
+    """What became of one requested analysis.
+
+    The reason is the step's OWN first warning, carried verbatim rather than
+    rewritten here: a second explanation could disagree with the one the reader
+    sees beside it, and then neither would be trustworthy.
+    """
+
+    return AnalysisOutcome(
+        name=name,
+        status="completed" if produced else "unavailable",
+        reason=None if produced else (warnings[0] if warnings else None),
+    )
+
+
+def _merge_outcomes(outcomes: list[AnalysisOutcome]) -> list[AnalysisOutcome]:
+    """One entry per analysis, in the order first requested.
+
+    ``include_ndwi`` and ``indices=["ndwi"]`` ask for the same measurements, so
+    a request carrying both would otherwise report NDWI twice - and could
+    report it as unavailable AND completed. A produced result wins: the
+    measurements exist either way.
+    """
+
+    merged: dict[str, AnalysisOutcome] = {}
+    for outcome in outcomes:
+        existing = merged.get(outcome.name)
+        if existing is None or (
+            existing.status == "unavailable" and outcome.status == "completed"
+        ):
+            merged[outcome.name] = outcome
+    return list(merged.values())
+
+
 def _ndwi_candidates(execution: QueryExecutionResult) -> list[ExecutedWindow]:
     """Optical windows that actually have a scene to read."""
 
@@ -200,6 +269,61 @@ def _ndwi_candidates(execution: QueryExecutionResult) -> list[ExecutedWindow]:
         window
         for window in execution.windows
         if window.modality == _OPTICAL_MODALITY and window.selected_scene_id is not None
+    ]
+
+
+def _sar_candidates(execution: QueryExecutionResult) -> list[ExecutedWindow]:
+    """Sentinel-1 windows that actually have a scene to read."""
+
+    return [
+        window
+        for window in execution.windows
+        if window.modality == _SAR_MODALITY and window.selected_scene_id is not None
+    ]
+
+
+def _scl_metadata_status(scene: ValidatedScene | None) -> str:
+    """Whether Stage 2 confirmed the SCL's encoding from its catalog item."""
+
+    asset = scene.asset(_SCL_ASSET) if scene is not None else None
+    return asset.metadata_status if asset is not None else "not_validated"
+
+
+def _scl_unavailable(what: str, window: ExecutedWindow, reason: str) -> str:
+    return (
+        f"{what} was not computed for the {window.modality} window "
+        f"{window.label!r}: the scene classification layer (SCL) is unavailable, "
+        f"so no pixel can be established as clear. {reason}"
+    )
+
+
+def _radiometry_summary(label: str, state: RadiometricState) -> str:
+    """One citable line: what representation was consumed, and on whose word."""
+
+    scales = sorted({e.scale for e in state.encodings if e.scale is not None})
+    units = sorted({e.unit for e in state.encodings if e.unit is not None})
+    return (
+        f"{label} radiometric state: {state.status} - {state.representation}. "
+        f"Processing baseline {state.processing_baseline or 'not published'}; "
+        f"reflectance offset {state.offset_state.replace('_', ' ')}; declared "
+        f"scale {', '.join(map(str, scales)) or 'not declared'}; unit "
+        f"{', '.join(units) or 'not declared'}; source: the catalog item."
+    )
+
+
+def _quality_warnings(label: str, quality: PixelQuality) -> list[str]:
+    return [f"{label} pixel quality: {note}" for note in quality.quality_notes]
+
+
+def _coverage_warnings(scene: ValidatedScene | None, label: str) -> list[str]:
+    """A partial footprint is reported, not hidden: the statistics shrink with it."""
+
+    if scene is None or scene.aoi_coverage.status == "full":
+        return []
+    return [
+        f"Scene {scene.scene_id} ({label!r}) covers about "
+        f"{scene.aoi_coverage.fraction:.1%} of the requested area by its catalog "
+        f"{scene.aoi_coverage.basis}; its statistics describe only the part it covers."
     ]
 
 
@@ -217,17 +341,100 @@ class AnalysisService(DomainService):
     def __init__(self, *, imagery_service: ImageryService | None = None) -> None:
         self._imagery = imagery_service or ImageryService()
 
+    def _declared_read_limits(self) -> QuantitativeReadLimits | None:
+        """The window the reader refuses beyond, if it declares one.
+
+        The real :class:`ImageryService` does, and enforces the same numbers in
+        ``read_band``. A reader that declares none gets no early size check -
+        the rule is the reader's, and the gate only moves it earlier.
+        """
+
+        if isinstance(self._imagery, DeclaresReadLimits):
+            return self._imagery.quantitative_read_limits()
+        return None
+
+    def precheck_plan(
+        self,
+        bbox: BoundingBox,
+        *,
+        indices: tuple[str, ...] | list[str] = (),
+        include_ndwi: bool = False,
+        include_temporal_ndwi: bool = False,
+        include_sar_backscatter: bool = False,
+    ) -> None:
+        """The request-stage area rule, applied before discovery.
+
+        The agent knows which analyses it will ask for before it searches the
+        catalog, so an area this service would refuse is refused THEN - after
+        geocoding, which is how the area is known, and before any STAC search.
+        The same rule :meth:`analyze` applies, from the same reader limits.
+        """
+
+        operations = operations_for_flags(
+            indices,
+            include_ndwi=include_ndwi,
+            include_temporal_ndwi=include_temporal_ndwi,
+            include_sar_backscatter=include_sar_backscatter,
+        )
+        if operations:
+            check_operations_area(
+                bbox, operations, self._declared_read_limits(), "plan.bbox"
+            )
+
+    async def _validated_scene(
+        self,
+        *,
+        scene_id: str,
+        collection: str | None,
+        modality: Modality,
+        assets: tuple[str, ...],
+        bbox: BoundingBox,
+        require_all_assets: bool = True,
+    ) -> ValidatedScene | None:
+        """Stage 2: the catalog's own item for this scene, checked before any read.
+
+        ``None`` when the reader does not validate scenes (a test double); the
+        real ``ImageryService`` always does. Raises ``SceneValidationError``.
+        """
+
+        if not isinstance(self._imagery, SceneValidator):
+            return None
+        return await run_in_threadpool(
+            self._imagery.validate_scene,
+            scene_id=scene_id,
+            collection=collection,
+            modality=modality,
+            assets=assets,
+            bbox=bbox,
+            require_all_assets=require_all_assets,
+        )
+
     def describe(self) -> str:
         return (
             "Deterministic interpretation of an executed SatQuery result: "
             "status, templated answer, window traceability, warnings, "
-            "opt-in single-scene Sentinel-2 NDWI statistics, and opt-in "
-            "Temporal NDWI Statistics for one Sentinel-2 observation pair."
+            "opt-in single-scene Sentinel-2 NDWI statistics, opt-in "
+            "Temporal NDWI Statistics for one Sentinel-2 observation pair, and "
+            "opt-in Sentinel-1 RTC backscatter statistics in decibels."
+        )
+
+    async def _read_scl(
+        self, *, scene_id: str, bbox: BoundingBox, collection: str | None
+    ) -> BandWindow:
+        return await run_in_threadpool(
+            self._imagery.read_band,
+            scene_id=scene_id,
+            bbox=bbox,
+            asset=_SCL_ASSET,
+            collection=collection,
         )
 
     async def _index_measurements(
-        self, execution: QueryExecutionResult, keys: tuple[str, ...]
-    ) -> tuple[list[Measurement], list[str]]:
+        self,
+        execution: QueryExecutionResult,
+        keys: tuple[str, ...],
+        radiometry: list[RadiometricState],
+    ) -> tuple[list[Measurement], list[str], list[PixelQuality]]:
         """Compute several spectral indices over one optical window.
 
         Each distinct band is read ONCE and shared: NIR appears in all three
@@ -248,6 +455,7 @@ class AnalysisService(DomainService):
                     "window with a selected scene was available; nothing was "
                     "computed."
                 ],
+                [],
             )
 
         window = candidates[0]
@@ -262,9 +470,72 @@ class AnalysisService(DomainService):
                 "window(s) were not analysed."
             )
 
+        needed = bands_for(keys)
+        try:
+            # Partial availability is accepted here: a scene without SWIR still
+            # has a perfectly good NDVI, exactly as a failed read already allowed.
+            scene = await self._validated_scene(
+                scene_id=window.selected_scene_id,
+                collection=collection,
+                modality=_OPTICAL_MODALITY,
+                assets=(*needed, _SCL_ASSET),
+                bbox=bbox,
+                require_all_assets=False,
+            )
+        except AppError as exc:
+            warnings.append(
+                "Spectral indices were not computed for the "
+                f"{window.modality} window {window.label!r}: {exc.message}"
+            )
+            return [], warnings, []
+        unavailable = scene.unavailable_assets if scene is not None else {}
+        if _SCL_ASSET in unavailable:
+            warnings.append(
+                _scl_unavailable("Spectral indices", window, unavailable[_SCL_ASSET])
+            )
+            return [], warnings, []
+        warnings.extend(_coverage_warnings(scene, window.label))
+
+        # Stage 4, before any read: an index whose bands are not on a
+        # representation the engine can consume as-is is dropped here, so its
+        # own bands are never read. Each index is judged on its own pair.
+        runnable: list[str] = []
+        for key in keys:
+            index = resolve_index(key)
+            if scene is not None:
+                state = assess_radiometry(scene, (index.high_band, index.low_band))
+                radiometry.append(state)
+                try:
+                    require_usable(state)
+                except AppError as exc:
+                    warnings.append(f"{index.label} was not computed: {exc.message}")
+                    continue
+                warnings.append(_radiometry_summary(index.label, state))
+            runnable.append(key)
+        if not runnable:
+            return [], warnings, []
+        keys = tuple(runnable)
+        needed = bands_for(keys)
+
+        # Pixel quality first: without it no pixel can be used, so a failure
+        # here costs no spectral band read.
+        try:
+            scl = await self._read_scl(
+                scene_id=window.selected_scene_id, bbox=bbox, collection=collection
+            )
+        except AppError as exc:
+            warnings.append(_scl_unavailable("Spectral indices", window, exc.message))
+            return [], warnings, []
+
         # One read per distinct band, keyed by asset.
         bands: dict[str, BandWindow] = {}
-        for asset in bands_for(keys):
+        for asset in needed:
+            if asset in unavailable:
+                warnings.append(
+                    f"The {asset} band could not be read, so any index needing "
+                    f"it was not computed: {unavailable[asset]}"
+                )
+                continue
             try:
                 bands[asset] = await run_in_threadpool(
                     self._imagery.read_band,
@@ -280,6 +551,10 @@ class AnalysisService(DomainService):
                 )
 
         measurements: list[Measurement] = []
+        qualities: list[PixelQuality] = []
+        # Every index here lands on the same 10 m grid, so the SCL is aligned
+        # once per distinct grid and reused, not re-aligned per index.
+        scl_on_grid: dict[tuple[object, ...], BandWindow] = {}
         for key in keys:
             index = resolve_index(key)
             high = bands.get(index.high_band)
@@ -294,7 +569,27 @@ class AnalysisService(DomainService):
                         high = coregister_to_finer_grid(high, low)
                     else:
                         low = coregister_to_finer_grid(low, high)
-                measurements.extend(compute_index_measurements(index, high, low))
+                # Stage 3, on the FINAL grid: the mask is applied to the pair
+                # before the engine sees it, so every statistic is masked.
+                grid_key = (high.crs, high.values.shape, tuple(high.transform)[:6])
+                if grid_key not in scl_on_grid:
+                    scl_on_grid[grid_key] = align_scl_to_grid(scl, high)
+                masked = mask_with_scl(
+                    high,
+                    low,
+                    scl_on_grid[grid_key],
+                    index=index.key,
+                    label=index.label,
+                    scene_id=window.selected_scene_id,
+                    window_label=window.label,
+                    scl_metadata_status=_scl_metadata_status(scene),
+                )
+                measurements.extend(
+                    compute_index_measurements(index, masked.high, masked.low)
+                )
+                measurements.extend(quality_measurements(masked.quality))
+                qualities.append(masked.quality)
+                warnings.extend(_quality_warnings(index.label, masked.quality))
             except AppError as exc:
                 warnings.append(
                     f"{index.label} could not be computed: {exc.message}"
@@ -307,12 +602,20 @@ class AnalysisService(DomainService):
                     f"detail no finer than {index.limiting_resolution_m:.0f} m."
                 )
 
-        return measurements, warnings
+        return measurements, warnings, qualities
 
     async def _ndwi_measurements(
-        self, execution: QueryExecutionResult, *, with_overlay: bool = False
+        self,
+        execution: QueryExecutionResult,
+        radiometry: list[RadiometricState],
+        *,
+        with_overlay: bool = False,
     ) -> tuple[
-        list[Measurement], list[str], NdwiOverlay | None, SpatialMeasurement | None
+        list[Measurement],
+        list[str],
+        NdwiOverlay | None,
+        SpatialMeasurement | None,
+        PixelQuality | None,
     ]:
         """Single-scene NDWI for one optical window. Returns (measurements, warnings).
 
@@ -330,6 +633,7 @@ class AnalysisService(DomainService):
                 ],
                 None,
                 None,
+                None,
             )
 
         window = candidates[0]
@@ -344,6 +648,24 @@ class AnalysisService(DomainService):
         bbox = execution.plan.bbox
         collection = _scene_collection(window)
         try:
+            scene = await self._validated_scene(
+                scene_id=window.selected_scene_id,
+                collection=collection,
+                modality=_OPTICAL_MODALITY,
+                assets=(_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET, _SCL_ASSET),
+                bbox=bbox,
+            )
+            # Stage 4, before any read.
+            radiometric: RadiometricState | None = None
+            if scene is not None:
+                radiometric = assess_radiometry(
+                    scene, (_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET)
+                )
+                radiometry.append(radiometric)
+                require_usable(radiometric)
+            scl = await self._read_scl(
+                scene_id=window.selected_scene_id, bbox=bbox, collection=collection
+            )
             green = await run_in_threadpool(
                 self._imagery.read_band,
                 scene_id=window.selected_scene_id,
@@ -358,7 +680,21 @@ class AnalysisService(DomainService):
                 asset=_NDWI_NIR_ASSET,
                 collection=collection,
             )
+            masked = mask_with_scl(
+                green,
+                nir,
+                scl,
+                index="ndwi",
+                label="NDWI",
+                scene_id=window.selected_scene_id,
+                window_label=window.label,
+                scl_metadata_status=_scl_metadata_status(scene),
+            )
+            # Everything below reads the MASKED pair: the statistics, the
+            # overlay and the threshold count describe the same usable pixels.
+            green, nir = masked.high, masked.low
             measurements = compute_ndwi_measurements(green, nir)
+            measurements.extend(quality_measurements(masked.quality))
             # Same two band windows, so the picture and the numbers describe
             # exactly the same pixels; the engine positions it from their own
             # affine and returns None rather than a misplaced overlay.
@@ -398,8 +734,12 @@ class AnalysisService(DomainService):
                 f"NDWI could not be computed for the {window.modality} window "
                 f"{window.label!r}: {exc.message}"
             )
-            return [], warnings, None, None
+            return [], warnings, None, None, None
 
+        warnings.extend(_coverage_warnings(scene, window.label))
+        if radiometric is not None:
+            warnings.append(_radiometry_summary("NDWI", radiometric))
+        warnings.extend(_quality_warnings("NDWI", masked.quality))
         warnings.append(
             "NDWI values are a spectral index computed from raw Sentinel-2 "
             "digital numbers; they are not a validated water or flood "
@@ -416,10 +756,15 @@ class AnalysisService(DomainService):
                 "An NDWI threshold was requested but no valid pixel was "
                 "available to count, so no percentage was produced."
             )
-        return measurements, warnings, overlay, spatial
+        return measurements, warnings, overlay, spatial, masked.quality
 
     async def _observation_index(
-        self, observation: Observation, bbox: BoundingBox
+        self,
+        observation: Observation,
+        bbox: BoundingBox,
+        *,
+        scl_metadata_status: str = "not_validated",
+        radiometry: RadiometricState | None = None,
     ) -> tuple[ObservationIndexResult, BandWindow, BandWindow]:
         """Index ONE observation on its own pixels. Two reads, no comparison.
 
@@ -432,6 +777,9 @@ class AnalysisService(DomainService):
         would be a second retrieval path for the same pixels.
         """
 
+        scl = await self._read_scl(
+            scene_id=observation.scene_id, bbox=bbox, collection=observation.collection
+        )
         green = await run_in_threadpool(
             self._imagery.read_band,
             scene_id=observation.scene_id,
@@ -446,12 +794,31 @@ class AnalysisService(DomainService):
             asset=_NDWI_NIR_ASSET,
             collection=observation.collection,
         )
+        # Each observation is masked by ITS OWN classification; the returned
+        # bands carry that mask, so the paired change can only use pixels
+        # usable on both dates.
+        masked = mask_with_scl(
+            green,
+            nir,
+            scl,
+            index="ndwi",
+            label="NDWI",
+            scene_id=observation.scene_id,
+            window_label=observation.window_label,
+            scl_metadata_status=scl_metadata_status,
+        )
+        green, nir = masked.high, masked.low
         result = ObservationIndexResult(
             window_label=observation.window_label,
             scene_id=observation.scene_id,
             acquired_at=observation.acquired_at,
             cloud_cover=observation.scene.cloud_cover,
-            measurements=compute_ndwi_measurements(green, nir),
+            measurements=[
+                *compute_ndwi_measurements(green, nir),
+                *quality_measurements(masked.quality),
+            ],
+            pixel_quality=masked.quality,
+            radiometry=radiometry,
             # Evidence from the read itself. Both bands come from one scene and
             # share a grid, so ``green`` describes the read; carrying it lets
             # the engine state the AOI coverage and the grid actually used
@@ -509,12 +876,46 @@ class AnalysisService(DomainService):
             )
 
         bbox = execution.plan.bbox
+        scene_pair = None
         try:
+            # Both scenes are validated against the catalog, independently, and
+            # then as a pair - all before the first of the four band reads.
+            scenes = [
+                await self._validated_scene(
+                    scene_id=observation.scene_id,
+                    collection=observation.collection,
+                    modality=_OPTICAL_MODALITY,
+                    assets=(_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET, _SCL_ASSET),
+                    bbox=bbox,
+                )
+                for observation in (pair.first, pair.second)
+            ]
+            first_scene, second_scene = scenes
+            states: list[RadiometricState | None] = [None, None]
+            if first_scene is not None and second_scene is not None:
+                scene_pair = validate_scene_pair(first_scene, second_scene)
+                # Stage 4, before any of the six reads: each observation on
+                # its own, then the pair. Nothing is corrected to make them agree.
+                states = [
+                    require_usable(
+                        assess_radiometry(scene, (_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET))
+                    )
+                    for scene in (first_scene, second_scene)
+                ]
+                problem = radiometric_pair_problem(states[0], states[1])  # type: ignore[arg-type]
+                if problem is not None:
+                    raise RadiometricValidationError("radiometric_incompatible", problem)
             first, first_green, first_nir = await self._observation_index(
-                pair.first, bbox
+                pair.first,
+                bbox,
+                scl_metadata_status=_scl_metadata_status(first_scene),
+                radiometry=states[0],
             )
             second, second_green, second_nir = await self._observation_index(
-                pair.second, bbox
+                pair.second,
+                bbox,
+                scl_metadata_status=_scl_metadata_status(second_scene),
+                radiometry=states[1],
             )
         except AppError as exc:
             logger.info(
@@ -535,6 +936,13 @@ class AnalysisService(DomainService):
         differences, comparison_warnings = compare_ndwi_observations(
             first=first, second=second, compatibility=compatibility
         )
+        if scene_pair is not None:
+            for scene, label in (
+                (scene_pair.earlier, first.window_label),
+                (scene_pair.later, second.window_label),
+            ):
+                comparison_warnings.extend(_coverage_warnings(scene, label))
+            comparison_warnings.extend(scene_pair.notes)
 
         # Paired-pixel change, on the bands already read. The engine verifies
         # the two grids are identical and returns None when they are not; this
@@ -567,6 +975,14 @@ class AnalysisService(DomainService):
                 "Per-pixel NDWI change was not computed because no pixel was "
                 "valid in both observations."
             )
+        if first.pixel_quality is not None and second.pixel_quality is not None:
+            comparison_warnings.append(
+                temporal_quality_note(
+                    first.pixel_quality,
+                    second.pixel_quality,
+                    change.paired_valid_pixel_count if change is not None else None,
+                )
+            )
 
         return (
             TemporalIndexComparison(
@@ -580,8 +996,137 @@ class AnalysisService(DomainService):
             warnings,
         )
 
+    async def _sar_backscatter(
+        self, execution: QueryExecutionResult, radiometry: list[RadiometricState]
+    ) -> tuple[SarBackscatterResult | None, list[str]]:
+        """Sentinel-1 RTC gamma-naught statistics for ONE SAR window.
+
+        Orchestration only: pick the window, read each polarization through the
+        unchanged quantitative band path, and hand the arrays to the pure
+        engine. Every decibel conversion, exclusion rule and grid check lives
+        there; this method computes nothing.
+
+        A polarization that cannot be read degrades to a warning rather than
+        failing the result - a missing VH is no reason to withhold a perfectly
+        good VV - and both failing yields no result at all.
+        """
+
+        candidates = _sar_candidates(execution)
+        if not candidates:
+            return (
+                None,
+                [
+                    "Sentinel-1 backscatter was requested but no SAR window "
+                    "with a selected scene was available; nothing was measured."
+                ],
+            )
+
+        window = candidates[0]
+        warnings: list[str] = []
+        if len(candidates) > 1:
+            warnings.append(
+                "Sentinel-1 backscatter is single-scene in this phase: it was "
+                f"computed only for the {window.modality} window "
+                f"{window.label!r}; {len(candidates) - 1} other SAR window(s) "
+                "were not analysed."
+            )
+
+        bbox = execution.plan.bbox
+        collection = _scene_collection(window)
+        try:
+            # A missing VH is no reason to withhold VV, as a failed read allows.
+            scene = await self._validated_scene(
+                scene_id=window.selected_scene_id,
+                collection=collection,
+                modality=_SAR_MODALITY,
+                assets=tuple(SAR_POLARIZATIONS),
+                bbox=bbox,
+                require_all_assets=False,
+            )
+        except AppError as exc:
+            warnings.append(
+                "Sentinel-1 backscatter was not measured for the "
+                f"{window.modality} window {window.label!r}: {exc.message}"
+            )
+            return None, warnings
+        unavailable = scene.unavailable_assets if scene is not None else {}
+        warnings.extend(_coverage_warnings(scene, window.label))
+        # Stage 4, before any read and before any asset is signed: the
+        # polarizations must be declared as linear power, or not declared at
+        # all - never decibels, never scaled or offset.
+        if scene is not None:
+            state = assess_radiometry(
+                scene, tuple(p for p in SAR_POLARIZATIONS if p not in unavailable)
+            )
+            radiometry.append(state)
+            try:
+                require_usable(state)
+            except AppError as exc:
+                warnings.append(
+                    "Sentinel-1 backscatter was not measured for the "
+                    f"{window.modality} window {window.label!r}: {exc.message}"
+                )
+                return None, warnings
+            warnings.append(_radiometry_summary("Sentinel-1 backscatter", state))
+        bands: dict[str, BandWindow] = {}
+        for polarization in SAR_POLARIZATIONS:
+            if polarization in unavailable:
+                warnings.append(
+                    f"The {polarization} polarization could not be read for the "
+                    f"{window.modality} window {window.label!r}, so no "
+                    f"{polarization} statistics were computed: "
+                    f"{unavailable[polarization]}"
+                )
+                continue
+            try:
+                bands[polarization] = await run_in_threadpool(
+                    self._imagery.read_band,
+                    scene_id=window.selected_scene_id,
+                    bbox=bbox,
+                    asset=polarization,
+                    collection=collection,
+                )
+            except AppError as exc:
+                logger.info(
+                    "SAR %s unavailable for window %s [%s]: %s",
+                    polarization,
+                    window.label,
+                    exc.code,
+                    exc.message,
+                )
+                warnings.append(
+                    f"The {polarization} polarization could not be read for the "
+                    f"{window.modality} window {window.label!r}, so no "
+                    f"{polarization} statistics were computed: {exc.message}"
+                )
+
+        if not bands:
+            return None, warnings
+
+        return (
+            compute_sar_backscatter(
+                vv=bands.get("vv"),
+                vh=bands.get("vh"),
+                scene_id=window.selected_scene_id,
+                window_label=window.label,
+                acquired_at=_selected_acquisition(execution, window),
+                collection=collection,
+            ),
+            warnings,
+        )
+
     async def analyze(self, request: AnalysisRequest) -> AnalysisResult:
         """Interpret ``request.execution``; the task comes from its intent."""
+
+        # Stage 1 of the scientific pipeline, before the first read: a request
+        # that cannot be measured is refused here, with a specific code, rather
+        # than discovered after a catalog fetch and a remote open. The reader is
+        # consulted only when something will be read: an interpretation with no
+        # quantitative operation never touched it, and still does not.
+        validate_execution_analysis(
+            request,
+            limits=self._declared_read_limits() if requested_operations(request) else None,
+        )
 
         execution = request.execution
         task = execution.plan.intent.task
@@ -598,14 +1143,34 @@ class AnalysisService(DomainService):
         measurements: list[Measurement] = []
         ndwi_overlay: NdwiOverlay | None = None
         spatial_measurement: SpatialMeasurement | None = None
+        # What was ASKED FOR, and what came of it. `status` answers a different
+        # question - whether the task has an engine - so on its own it reported
+        # "ok" for a request whose analysis produced nothing at all.
+        outcomes: list[AnalysisOutcome] = []
         # Multi-index runs share their band reads; NDWI keeps its own path
         # because it alone also produces the overlay and threshold statistic.
+        pixel_quality: list[PixelQuality] = []
+        radiometry: list[RadiometricState] = []
         if request.indices:
-            index_measurements, index_warnings = await self._index_measurements(
-                execution, tuple(request.indices)
+            (
+                index_measurements,
+                index_warnings,
+                index_qualities,
+            ) = await self._index_measurements(
+                execution, tuple(request.indices), radiometry
             )
+            pixel_quality.extend(index_qualities)
             warnings.extend(index_warnings)
             measurements.extend(index_measurements)
+            # Each index is judged on its own: a missing SWIR band costs NDBI
+            # and leaves a perfectly good NDVI standing.
+            names = {m.name for m in index_measurements}
+            outcomes.extend(
+                _outcome(
+                    key, produced=f"{key}_mean" in names, warnings=index_warnings
+                )
+                for key in request.indices
+            )
 
         if request.include_ndwi:
             (
@@ -613,10 +1178,24 @@ class AnalysisService(DomainService):
                 ndwi_warnings,
                 ndwi_overlay,
                 spatial_measurement,
+                ndwi_quality,
             ) = await self._ndwi_measurements(
-                execution, with_overlay=request.include_ndwi_overlay
+                execution, radiometry, with_overlay=request.include_ndwi_overlay
             )
+            # ``indices=["ndwi"]`` and ``include_ndwi`` assess the same grid.
+            if ndwi_quality is not None and not any(
+                q.index == ndwi_quality.index and q.scene_id == ndwi_quality.scene_id
+                for q in pixel_quality
+            ):
+                pixel_quality.append(ndwi_quality)
             warnings.extend(ndwi_warnings)
+            outcomes.append(
+                _outcome(
+                    "ndwi",
+                    produced=bool(ndwi_measurements),
+                    warnings=ndwi_warnings,
+                )
+            )
             # Names are unique per index, so a combined request reports both
             # rather than one replacing the other.
             existing = {m.name for m in measurements}
@@ -629,12 +1208,54 @@ class AnalysisService(DomainService):
                     "Sentinel-2 scene at native 10 m resolution."
                 )
 
+        sar_backscatter: SarBackscatterResult | None = None
+        if request.include_sar_backscatter:
+            sar_backscatter, sar_warnings = await self._sar_backscatter(
+                execution, radiometry
+            )
+            warnings.extend(sar_warnings)
+            outcomes.append(
+                _outcome(
+                    "sar_backscatter",
+                    # A result with no valid positive sample measured nothing,
+                    # whatever object came back.
+                    produced=sar_backscatter is not None
+                    and any(
+                        p.valid_pixel_count for p in sar_backscatter.polarizations
+                    ),
+                    warnings=sar_warnings,
+                )
+            )
+            if sar_backscatter is not None:
+                existing = {m.name for m in measurements}
+                measurements.extend(
+                    m for m in sar_backscatter.measurements if m.name not in existing
+                )
+                if any(p.valid_pixel_count for p in sar_backscatter.polarizations):
+                    answer = (
+                        f"{answer} Sentinel-1 RTC gamma naught backscatter "
+                        "statistics were computed in decibels for one SAR scene at "
+                        "native resolution."
+                    )
+                else:
+                    answer = (
+                        f"{answer} No valid positive SAR samples were available, "
+                        "so no backscatter statistics in decibels were computed."
+                    )
+
         temporal_comparison: TemporalIndexComparison | None = None
         if request.include_temporal_ndwi:
             temporal_comparison, temporal_warnings = await self._temporal_ndwi(
                 execution
             )
             warnings.extend(temporal_warnings)
+            outcomes.append(
+                _outcome(
+                    "temporal_ndwi",
+                    produced=temporal_comparison is not None,
+                    warnings=temporal_warnings,
+                )
+            )
             if temporal_comparison is not None:
                 if task == "change_detection":
                     status = "ok"
@@ -668,7 +1289,11 @@ class AnalysisService(DomainService):
             windows_considered=refs,
             warnings=warnings,
             measurements=measurements,
+            analysis_outcomes=_merge_outcomes(outcomes),
             ndwi_overlay=ndwi_overlay,
             spatial_measurement=spatial_measurement,
             temporal_comparison=temporal_comparison,
+            pixel_quality=pixel_quality,
+            radiometry=radiometry,
+            sar_backscatter=sar_backscatter,
         )

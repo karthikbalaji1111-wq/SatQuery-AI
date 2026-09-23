@@ -488,6 +488,18 @@ function setPlace(value: string) {
   fireEvent.change(screen.getByLabelText("Place name"), { target: { value } });
 }
 
+/** The JSON body of the last request whose URL contains `fragment`. */
+function lastBody(
+  fetchMock: ReturnType<typeof stubRouter>,
+  fragment: string,
+): Record<string, unknown> {
+  const call = [...fetchMock.mock.calls]
+    .reverse()
+    .find((args) => String(args[0]).includes(fragment));
+  if (call === undefined) throw new Error(`no request to ${fragment}`);
+  return JSON.parse(String((call[1] as RequestInit | undefined)?.body ?? "{}"));
+}
+
 const SINGLE_INTENT = {
   location_query: "Chennai",
   temporal_mode: "single",
@@ -513,7 +525,9 @@ describe("QueryPanel - query plan", () => {
     // status "not_implemented"), but labelled so neither is mistaken for a
     // capability the system has.
     expect(
-      screen.getByRole("option", { name: "Change Detection (unavailable)" }),
+      screen.getByRole("option", {
+        name: "General change detection (not implemented)",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("option", {
@@ -779,6 +793,139 @@ describe("QueryPanel - natural language parsing", () => {
       "visualize",
     );
     expect(screen.getByText(/Parsed intent: single/)).toBeInTheDocument();
+  });
+
+  // ------------------------------------------------------------------ #
+  // A parsed window must survive intact.
+  //
+  // The parser returns a full range - "January 2025" is 01-01 to 01-31 - and
+  // only `start_date` was kept, then re-emitted as {start, start}. The request
+  // asked for one day, and the answer described a day the user never named.
+  // Both ends are asserted independently, from literals, so a fix that
+  // preserved only one end cannot pass.
+  // ------------------------------------------------------------------ #
+
+  const RANGES = [
+    ["a whole month", "2025-01-01", "2025-01-31"],
+    ["a multi-month span", "2025-06-01", "2025-08-31"],
+    ["a two-day window", "2025-03-24", "2025-03-25"],
+  ] as const;
+
+  it.each(RANGES)(
+    "preserves both ends of %s through parse and execution",
+    async (_label, start, end) => {
+      const fetchMock = stubRouter({
+        "/geospatial/resolve": { body: CHENNAI },
+        "/query/parse": {
+          body: {
+            ...SINGLE_INTENT,
+            time_windows: [{ start_date: start, end_date: end }],
+          },
+        },
+        "/query/build-plan": {
+          body: { intent: SINGLE_INTENT, bbox: CHENNAI.bbox },
+        },
+      });
+      render(<QueryPanel />);
+
+      typeNl("optical imagery of Chennai");
+      fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+      await waitFor(() =>
+        expect(
+          (screen.getByLabelText("Place name") as HTMLInputElement).value,
+        ).toBe("Chennai"),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some((a) => String(a[0]).includes("/query/build-plan")),
+        ).toBe(true),
+      );
+
+      const windows = (lastBody(fetchMock, "/query/build-plan") as {
+        time_windows: { start_date: string; end_date: string }[];
+      }).time_windows;
+      expect(windows).toHaveLength(1);
+      expect(windows[0].start_date).toBe(start);
+      expect(windows[0].end_date).toBe(end);
+      expect(windows[0].end_date).not.toBe(windows[0].start_date);
+    },
+  );
+
+  it("still sends a point date when the user types one", async () => {
+    // The counter-case: a single typed date is a point date and must stay one.
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/build-plan": {
+        body: { intent: SINGLE_INTENT, bbox: CHENNAI.bbox },
+      },
+    });
+    render(<QueryPanel />);
+
+    fireEvent.change(screen.getByLabelText("Place name"), {
+      target: { value: "Chennai" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /resolve location/i }));
+    await screen.findByText(CHENNAI.display_name);
+
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2025-03-24" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((a) => String(a[0]).includes("/query/build-plan")),
+      ).toBe(true),
+    );
+
+    const windows = (lastBody(fetchMock, "/query/build-plan") as {
+      time_windows: { start_date: string; end_date: string }[];
+    }).time_windows;
+    expect(windows[0].start_date).toBe("2025-03-24");
+    expect(windows[0].end_date).toBe("2025-03-24");
+  });
+
+  it("drops a parsed range when the date is then typed over", async () => {
+    // Otherwise a new start pairs with an older end - an INVERTED window,
+    // which is worse than the truncation this fix replaced.
+    const fetchMock = stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/parse": {
+        body: {
+          ...SINGLE_INTENT,
+          time_windows: [{ start_date: "2025-01-01", end_date: "2025-01-31" }],
+        },
+      },
+      "/query/build-plan": {
+        body: { intent: SINGLE_INTENT, bbox: CHENNAI.bbox },
+      },
+    });
+    render(<QueryPanel />);
+
+    typeNl("optical imagery of Chennai in January 2025");
+    fireEvent.click(screen.getByRole("button", { name: /parse request/i }));
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Place name") as HTMLInputElement).value,
+      ).toBe("Chennai"),
+    );
+
+    fireEvent.change(screen.getByLabelText("Observation date"), {
+      target: { value: "2025-03-24" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build query plan/i }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((a) => String(a[0]).includes("/query/build-plan")),
+      ).toBe(true),
+    );
+
+    const windows = (lastBody(fetchMock, "/query/build-plan") as {
+      time_windows: { start_date: string; end_date: string }[];
+    }).time_windows;
+    expect(windows[0].start_date).toBe("2025-03-24");
+    expect(windows[0].end_date).toBe("2025-03-24");
   });
 
   it("populates compare fields, modalities and task from a compare-mode intent", async () => {
@@ -2163,7 +2310,14 @@ describe("QueryPanel - manual evidence reaches the workspace", () => {
     stubRouter({
       "/geospatial/resolve": { body: CHENNAI },
       "/satellite/search": {
-        body: { scenes: [SCENE], count: 1, catalog: "https://example.test/v1" },
+        // `scene_count` is the contract field; this fixture said `count`, a
+        // name the server never sends. Harmless until responses were checked
+        // at the boundary, which is the point of checking them.
+        body: {
+          scenes: [SCENE],
+          scene_count: 1,
+          catalog: "https://example.test/v1",
+        },
       },
       "/satellite/imagery": { body: imageryResponse(SCENE.id) },
     });
@@ -2215,7 +2369,7 @@ describe("ConfigSummary - unsupported task labelling", () => {
     render(<QueryPanel />);
 
     const text = document.body.textContent ?? "";
-    expect(/Change detect\s*\(not implemented\)/i.test(text)).toBe(true);
+    expect(/General change detect\s*\(not implemented\)/i.test(text)).toBe(true);
     expect(/Object ID\s*\(not implemented\)/i.test(text)).toBe(true);
   });
 });
@@ -2234,7 +2388,8 @@ describe("QueryPanel - changing the analysis selection invalidates the result", 
           status: "ok",
           task: "visualize",
           answer: "Computed.",
-          windows_considered: 1,
+          // A LIST in the contract - this fixture had the number 1.
+          windows_considered: [],
           warnings: [],
           measurements: [
             { name: "ndwi_mean", value: 0.42, unit: "index" },
@@ -2275,5 +2430,117 @@ describe("QueryPanel - changing the analysis selection invalidates the result", 
     await waitFor(() =>
       expect(screen.queryByText(/ndwi_mean/i)).not.toBeInTheDocument(),
     );
+  });
+});
+
+// ===========================================================================
+// The configuration summary must describe the run that happened
+// ===========================================================================
+
+describe("QueryPanel - the summary reports the run, not a guess about it", () => {
+  const THREE_INDEX_ANALYSIS = analysisResult({
+    measurements: [
+      { name: "ndvi_mean", value: -0.0614, unit: "index" },
+      { name: "ndwi_mean", value: 0.1464, unit: "index" },
+      { name: "ndbi_mean", value: 0.0118, unit: "index" },
+    ],
+  });
+
+  function summary() {
+    return document.querySelector(".config-summary") as HTMLElement;
+  }
+
+  it("lists the scenes the execution discovered, not only a standalone search", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    // The run selected this scene, so the summary cannot claim none was found.
+    expect(summary()).not.toHaveTextContent(/No scenes discovered yet/);
+    expect(
+      within(summary()).getByText("S2B_44PLA_20240715_0_L2A"),
+    ).toBeInTheDocument();
+  });
+
+  it("highlights every index the analysis actually computed", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: THREE_INDEX_ANALYSIS },
+    });
+    render(<QueryPanel />);
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    // Derived from the measurement names the backend returned. Deriving it
+    // from the NDWI flag alone rendered NDVI and NDBI as "not requested"
+    // while their values were on screen.
+    const chips = [...summary().querySelectorAll(".analysis-chip")];
+    const byLabel = (label: string) =>
+      chips.find((chip) => chip.textContent === label);
+    expect(byLabel("NDVI")?.getAttribute("data-active")).toBe("true");
+    expect(byLabel("NDWI")?.getAttribute("data-active")).toBe("true");
+    expect(byLabel("NDBI")?.getAttribute("data-active")).toBe("true");
+  });
+
+  it("never says an index was not needed for a question the manual path never asked", async () => {
+    stubRouter({
+      "/geospatial/resolve": { body: CHENNAI },
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: THREE_INDEX_ANALYSIS },
+    });
+    render(<QueryPanel />);
+    runFullQuery();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Analysis" })).toBeInTheDocument(),
+    );
+
+    expect(summary()).not.toHaveTextContent(/for this question/);
+    expect(summary()).toHaveTextContent(/NDVI, NDWI, NDBI computed for this run/);
+  });
+
+  it("marks the unimplemented tasks apart from an index that was merely unused", () => {
+    stubRouter({ "/geospatial/resolve": { body: CHENNAI } });
+    render(<QueryPanel />);
+
+    // Two different kinds of absence. Change detection does not exist; NDBI
+    // exists and was not asked for. They must not read the same.
+    expect(summary()).toHaveTextContent(/General change detect \(not implemented\)/);
+    expect(summary()).toHaveTextContent(/Object ID \(not implemented\)/);
+    expect(summary()).toHaveTextContent(
+      /No spectral index was computed for this run\. All three are available\./,
+    );
+  });
+});
+
+describe("QueryPanel SAR controls", () => {
+  it("keeps quantitative SAR off unless explicitly requested and sends selected VH display", async () => {
+    const fetchMock = stubRouter({
+      "/query/execute": { body: executionResult() },
+      "/query/analyze": { body: analysisResult() },
+    });
+    render(<QueryPanel />);
+    const control = screen.getByRole("checkbox", { name: /Compute Sentinel-1 RTC backscatter/ });
+    expect(control).not.toBeChecked();
+    expect(control).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Sentinel-1 SAR" }));
+    fireEvent.click(control);
+    fireEvent.change(screen.getByLabelText("SAR display polarization"), { target: { value: "vh" } });
+    runFullQuery();
+    await waitFor(() => expect(analyzeBody(fetchMock).include_sar_backscatter).toBe(true));
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes("/query/execute"));
+    expect(JSON.parse((call![1] as RequestInit).body as string).sar_polarization).toBe("vh");
   });
 });

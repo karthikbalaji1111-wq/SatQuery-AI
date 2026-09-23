@@ -22,7 +22,7 @@ from app.services.satellite.schemas import (
     SceneSearchRequest,
     SceneSearchResponse,
 )
-from app.services.satellite.stac import search_items
+from app.services.satellite.stac import search_page
 
 logger = get_logger("satellite")
 
@@ -155,12 +155,19 @@ def _normalize_scene(feature: object) -> Scene:
 
 
 class SatelliteService(DomainService):
-    """Satellite scene discovery via the Earth Search STAC API.
+    """Satellite scene discovery via a STAC API.
 
     The generic :meth:`run` hook stays unimplemented; :meth:`search` is the
     typed entry point. The collection is chosen by ``SceneSearchRequest``
-    (Sentinel-2 by default, Sentinel-1 when overridden); SAR *imagery*
-    retrieval remains out of scope.
+    (Sentinel-2 by default, Sentinel-1 when overridden) and it also selects the
+    catalog: ``sentinel-1-rtc`` is served by the Planetary Computer, everything
+    else by the configured Earth Search deployment - see
+    :func:`app.services.satellite.rtc.catalog_for`.
+
+    Discovery is metadata only. Bounded SAR *imagery* retrieval lives in
+    :class:`~app.services.satellite.imagery.ImageryService` and is available
+    for the RTC collection; it is not available for ``sentinel-1-grd``, whose
+    measurement assets Earth Search publishes on a requester-pays s3:// bucket.
     """
 
     name = "satellite"
@@ -174,7 +181,9 @@ class SatelliteService(DomainService):
         self._transport = transport
 
     def describe(self) -> str:
-        return "Sentinel-1 SAR and Sentinel-2 optical imagery retrieval."
+        return (
+            "Sentinel-1 SAR and Sentinel-2 optical scene discovery via STAC."
+        )
 
     async def search(self, request: SceneSearchRequest) -> SceneSearchResponse:
         """Discover scenes for a bounding box and date range.
@@ -217,13 +226,15 @@ class SatelliteService(DomainService):
         if stac_filter is not None:
             body["query"] = stac_filter
 
-        features = await search_items(
+        page = await search_page(
             settings=self._settings,
             body=body,
             transport=self._transport,
         )
 
-        scenes = [_normalize_scene(feature) for feature in features][: request.limit]
+        scenes = [_normalize_scene(feature) for feature in page.features][
+            : request.limit
+        ]
         logger.info(
             "STAC search (%s, %s) returned %d scene(s)",
             collection,
@@ -243,4 +254,8 @@ class SatelliteService(DomainService):
             scene_count=len(scenes),
             scenes=scenes,
             catalog=catalog_for(collection, self._settings),
+            # What this page is a page OF. Selection happens over `scenes`, so
+            # the two counts together are what makes the scope of a choice
+            # readable instead of implied.
+            scenes_matched=page.matched,
         )

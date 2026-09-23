@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from app.api.routes.query import get_ai_service
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.errors import IntentParsingError, InvalidInputError, UpstreamServiceError
 from app.main import create_app
 from app.services.ai import (
@@ -429,10 +429,38 @@ def test_parse_endpoint_never_calls_geospatial_stac_or_imagery(
 # --------------------------------------------------------------------------- #
 
 
-def test_production_get_ai_service_uses_gemini_parser() -> None:
+def test_production_get_ai_service_uses_gemini_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring, proven with a credential this test supplies itself.
+
+    It asserts WHICH parser the factory builds, so it needs the provider to be
+    configured - and it must not borrow that configuration from whoever is
+    running the suite. The value is deliberately not a real key shape: nothing
+    here sends a request, and the factory only needs the credential to exist.
+    """
+
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-a-real-credential")
+    get_settings.cache_clear()
+
     service = get_ai_service()
     assert isinstance(service, AiService)
     assert isinstance(service._parser, GeminiIntentParser)
+
+
+def test_production_get_ai_service_without_a_credential_fails_honestly() -> None:
+    """The counter-case, which the suite could not state before.
+
+    With no credential configured - the default for every test now - the
+    factory refuses and names the variable to set, rather than constructing a
+    parser that would fail at request time.
+    """
+
+    with pytest.raises(UpstreamServiceError) as raised:
+        get_ai_service()
+
+    assert "GEMINI_API_KEY" in str(raised.value)
 
 
 def test_provider_coupling_is_confined_to_parser_module() -> None:

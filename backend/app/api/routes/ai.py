@@ -12,7 +12,10 @@ three different questions:
 
 A model that exists is not thereby usable, and this endpoint never implies it
 is. Reachability is a fourth question that only an actual request can answer,
-so it is not claimed here.
+so it is not claimed here - with one exception. The local provider runs on this
+machine, so asking it is cheap and its answer is actionable: one read-only
+``GET /api/tags`` says whether Ollama is running, whether it can read its
+models, and which are installed - and each local model's status says so.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from app.services.agent.providers.catalog import (
     ModelCard,
     ModelRole,
 )
+from app.services.agent.providers.local import ProbeFailure, installed_models
 
 router = APIRouter()
 
@@ -47,6 +51,11 @@ class ModelOption(BaseModel):
     endpoint_type: str
     #: True when this deployment holds a credential for the model's provider.
     configured: bool
+    #: False when the provider has retired the model. Static, published fact -
+    #: never the result of a health check.
+    available: bool = True
+    #: Present only for a retired model, so a UI can explain the refusal.
+    retired_reason: str | None = None
     #: True when the model can fill the requested role.
     compatible: bool
     #: A short, honest status for display.
@@ -65,12 +74,24 @@ class ModelCatalogResponse(BaseModel):
 
 
 def _configured(settings: Settings, provider: str) -> bool:
-    if provider == "gemini":
-        return bool(settings.gemini_api_key)
-    return bool(settings.nvidia_api_key)
+    """Whether this deployment holds a credential for ``provider``.
+
+    Asks :class:`Settings` by provider name rather than branching, so a newly
+    catalogued provider reports its real state instead of inheriting whichever
+    branch happened to be last.
+    """
+
+    return settings.is_configured(provider)
 
 
-def _status(*, configured: bool, compatible: bool, role: ModelRole) -> str:
+def _status(
+    *, configured: bool, compatible: bool, role: ModelRole, available: bool = True
+) -> str:
+    # Retirement outranks every other consideration: a model the provider no
+    # longer serves cannot be Ready, Not configured, or Unsupported - it is
+    # simply gone, and saying anything else invites a selection that will fail.
+    if not available:
+        return "Retired by provider"
     if not compatible:
         return (
             "Unsupported for visual analysis"
@@ -84,11 +105,44 @@ def _status(*, configured: bool, compatible: bool, role: ModelRole) -> str:
     return "Ready"
 
 
+def _local_status(
+    card: ModelCard, installed: frozenset[str] | ProbeFailure | None
+) -> str | None:
+    """A local model's reachability, or ``None`` to keep the generic status."""
+
+    if card.provider != "local":
+        return None
+    if installed is None:
+        return "Ollama not running"
+    if installed is ProbeFailure.MODELS_UNREADABLE:
+        return "Ollama cannot read models"
+    if card.model_id not in installed:
+        return "Not installed"
+    return None
+
+
 def _option(
-    card: ModelCard, *, settings: Settings, role: ModelRole
+    card: ModelCard,
+    *,
+    settings: Settings,
+    role: ModelRole,
+    installed: frozenset[str] | ProbeFailure | None = None,
 ) -> ModelOption:
     configured = _configured(settings, card.provider)
-    compatible = card.serves(role)
+    # Pure capability: a retired model is still image-capable, and reporting it
+    # as "incompatible" would misdescribe WHY it cannot be chosen. Availability
+    # is carried by `available`/`status` instead.
+    compatible = card.supports_role(role)
+    status = _status(
+        configured=configured,
+        compatible=compatible,
+        role=role,
+        available=card.is_available,
+    )
+    if status == "Ready":
+        # Only a model that is otherwise ready is asked about reachability; a
+        # retired, unsupported or unconfigured one already says why it cannot run.
+        status = _local_status(card, installed) or status
     return ModelOption(
         provider=card.provider,
         model_id=card.model_id,
@@ -102,7 +156,9 @@ def _option(
         endpoint_type=card.endpoint_type,
         configured=configured,
         compatible=compatible,
-        status=_status(configured=configured, compatible=compatible, role=role),
+        available=card.is_available,
+        retired_reason=card.retired_reason,
+        status=status,
     )
 
 
@@ -120,16 +176,18 @@ async def list_models(
     """
 
     settings = get_settings()
-    default_model = (
-        settings.gemini_model
-        if settings.ai_provider == "gemini"
-        else settings.nvidia_model
+    default_model = settings.model_for(settings.ai_provider)
+    installed = (
+        await installed_models(settings)
+        if settings.is_configured("local")
+        else None
     )
     return ModelCatalogResponse(
         role=role,
         default_provider=settings.ai_provider,
         default_model=default_model,
         models=[
-            _option(card, settings=settings, role=role) for card in MODEL_CATALOG
+            _option(card, settings=settings, role=role, installed=installed)
+            for card in MODEL_CATALOG
         ],
     )

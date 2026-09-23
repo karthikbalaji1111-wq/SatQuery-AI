@@ -57,16 +57,21 @@ QUESTION = "Is there visible water in this image?"
 
 
 def settings(**overrides: object) -> Settings:
-    """Settings with both providers credentialed unless a test says otherwise.
+    """Settings with EVERY provider credentialed unless a test says otherwise.
 
     ``_env_file=None`` keeps these hermetic: without it the developer's real
     ``.env`` supplies a GEMINI_API_KEY and the missing-credential tests pass
     for the wrong reason on one machine and fail on another.
+
+    Every supported provider gets a key, so the tests that iterate
+    ``SUPPORTED_AI_PROVIDERS`` exercise each one rather than failing on
+    whichever was added last.
     """
 
     base: dict[str, object] = {
         "GEMINI_API_KEY": "gemini-test-key",
         "NVIDIA_API_KEY": "nvidia-test-key",
+        "ANTHROPIC_API_KEY": "anthropic-test-key",
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[arg-type]

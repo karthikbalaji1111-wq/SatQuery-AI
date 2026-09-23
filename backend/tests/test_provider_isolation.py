@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 from app.core.config import Settings
 from app.main import app
+from app.services.agent.providers import anthropic as anthropic_mod
 from app.services.agent.providers import factory as factory_mod
 from app.services.agent.providers import gemini as gemini_mod
 from app.services.agent.providers import nvidia as nvidia_mod
@@ -37,11 +38,13 @@ QUESTION = "Is there visible water in the Sentinel-2 image of Marina Beach?"
 
 
 def _settings(provider: str) -> Settings:
-    """Both providers fully credentialed.
+    """EVERY provider fully credentialed.
 
     Deliberate: if Gemini were unconfigured, a Gemini-free run would prove
     nothing - the path might be avoiding Gemini for want of a key rather than
-    because the provider was selected.
+    because the provider was selected. The same reasoning applies to each
+    provider added since, so all of them hold a key here and the two with a
+    configurable host are pointed at the discard port.
     """
 
     return Settings(  # type: ignore[arg-type]
@@ -50,6 +53,9 @@ def _settings(provider: str) -> Settings:
         GEMINI_API_KEY="gemini-key-that-must-never-be-used",
         NVIDIA_API_KEY="nvidia-test-key",
         NVIDIA_BASE_URL=UNREACHABLE,
+        ANTHROPIC_API_KEY="anthropic-test-key",
+        ANTHROPIC_BASE_URL=UNREACHABLE,
+        LOCAL_AI_BASE_URL=UNREACHABLE,
     )
 
 
@@ -271,3 +277,216 @@ def test_the_nvidia_tripwire_actually_fires(monkeypatch: Any) -> None:
 
     _status, touched = _run_with_nvidia_tripwire(monkeypatch, "nvidia")
     assert touched, "the NVIDIA tripwire was never installed"
+
+
+# --------------------------------------------------------------------------- #
+# The third provider
+# --------------------------------------------------------------------------- #
+#
+# Isolation is a property of the SELECTION MECHANISM, not of any one pair of
+# providers, so a third backend has to be held to the same standard in both
+# directions: selecting it must reach neither of the others, and selecting one
+# of the others must not reach it. Every provider is credentialed by
+# `_settings`, so an absent touch is never explained by an absent key.
+
+
+def _arm_anthropic_tripwire(monkeypatch: Any) -> list[str]:
+    """Make every Anthropic entry point fail, and record what was touched."""
+
+    touched: list[str] = []
+
+    def forbid(name: str) -> Any:
+        def boom(*args: Any, **kwargs: Any) -> None:
+            touched.append(name)
+            raise AssertionError(f"Anthropic was reached via {name}")
+
+        return boom
+
+    for cls in (
+        "AnthropicAgentPlanner",
+        "AnthropicAnswerSynthesizer",
+        "AnthropicVisualAnalyst",
+        "AnthropicIntentParser",
+    ):
+        monkeypatch.setattr(anthropic_mod, cls, forbid(cls))
+    # The shared messages client - the last line before a real Anthropic request.
+    monkeypatch.setattr(
+        anthropic_mod, "_AnthropicMessagesClient", forbid("_AnthropicMessagesClient")
+    )
+    return touched
+
+
+def _run_with_anthropic_tripwire(
+    monkeypatch: Any, provider: str
+) -> tuple[int, list[str]]:
+    settings = _settings(provider)
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+    touched = _arm_anthropic_tripwire(monkeypatch)
+    # Gemini is credentialed but must not be contacted either; NVIDIA already
+    # points at the discard port. Same reasoning as the NVIDIA-direction test.
+    monkeypatch.setattr(
+        gemini_mod.genai,
+        "Client",
+        lambda *a, **k: (_ for _ in ()).throw(TimeoutError("offline")),
+    )
+
+    app.dependency_overrides.clear()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/v1/query/agent",
+            json={"question": QUESTION, "provider": provider},
+        )
+    return response.status_code, touched
+
+
+def test_gemini_selection_never_reaches_anthropic(monkeypatch: Any) -> None:
+    _status, touched = _run_with_anthropic_tripwire(monkeypatch, "gemini")
+
+    assert touched == [], f"Anthropic was reached via {touched}"
+
+
+def test_nvidia_selection_never_reaches_anthropic(monkeypatch: Any) -> None:
+    _status, touched = _run_with_anthropic_tripwire(monkeypatch, "nvidia")
+
+    assert touched == [], f"Anthropic was reached via {touched}"
+
+
+def test_the_anthropic_tripwire_actually_fires(monkeypatch: Any) -> None:
+    """Proves the two tests above are not vacuous."""
+
+    _status, touched = _run_with_anthropic_tripwire(monkeypatch, "anthropic")
+    assert touched, "the Anthropic tripwire was never installed"
+
+
+def test_anthropic_selection_reaches_neither_other_provider(
+    monkeypatch: Any,
+) -> None:
+    """The other direction, with BOTH other providers armed at once."""
+
+    settings = _settings("anthropic")
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+    gemini_touched = _arm_gemini_tripwire(monkeypatch)
+    nvidia_touched = _arm_nvidia_tripwire(monkeypatch)
+
+    app.dependency_overrides.clear()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/v1/query/agent",
+            json={"question": QUESTION, "provider": "anthropic"},
+        )
+
+    assert gemini_touched == [], f"Gemini was reached via {gemini_touched}"
+    assert nvidia_touched == [], f"NVIDIA was reached via {nvidia_touched}"
+    # The run still completes as an honest agent outcome: Anthropic is pointed
+    # at the discard port, so planning failed and nothing was claimed.
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "planner_unavailable"
+    assert body["answer"] is None
+    assert body["evidence"]["items"] == []
+
+
+def test_parse_with_anthropic_selected_never_reaches_gemini(
+    monkeypatch: Any,
+) -> None:
+    """`/query/parse` respects the third provider too."""
+
+    status, touched = _run_parse(monkeypatch, "anthropic")
+
+    assert touched == [], f"Gemini was reached via {touched}"
+    assert status >= 400
+
+
+# --------------------------------------------------------------------------- #
+# The local (Ollama) provider, in both directions
+#
+# Its whole purpose is to answer without a cloud quota, so the two failures
+# that matter are symmetrical: a cloud run must never wander onto this machine's
+# model, and a local run must never be quietly answered by a cloud provider when
+# the local one is down. Every cloud provider is credentialed here, exactly as
+# `_settings` says, so an untouched tripwire means "not selected", never "no key".
+# --------------------------------------------------------------------------- #
+
+
+def _arm_local_tripwire(monkeypatch: Any) -> list[str]:
+    from app.services.agent.providers import local as local_mod
+
+    touched: list[str] = []
+
+    def forbid(name: str) -> Any:
+        def boom(*args: Any, **kwargs: Any) -> None:
+            touched.append(name)
+            raise AssertionError(f"the local provider was reached via {name}")
+
+        return boom
+
+    for cls in (
+        "LocalAgentPlanner",
+        "LocalAnswerSynthesizer",
+        "LocalVisualAnalyst",
+        "LocalIntentParser",
+    ):
+        monkeypatch.setattr(local_mod, cls, forbid(cls))
+    monkeypatch.setattr(local_mod, "_OllamaChatClient", forbid("_OllamaChatClient"))
+    return touched
+
+
+@pytest.mark.parametrize("provider", ["gemini", "nvidia"])
+def test_a_cloud_selection_never_reaches_the_local_model(
+    monkeypatch: Any, provider: str
+) -> None:
+    settings = _settings(provider)
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+    touched = _arm_local_tripwire(monkeypatch)
+    monkeypatch.setattr(
+        gemini_mod.genai,
+        "Client",
+        lambda *a, **k: (_ for _ in ()).throw(TimeoutError("offline")),
+    )
+
+    app.dependency_overrides.clear()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        client.post("/api/v1/query/agent", json={"question": QUESTION, "provider": provider})
+
+    assert touched == []
+
+
+def test_the_local_tripwire_actually_fires(monkeypatch: Any) -> None:
+    settings = _settings("local")
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+    touched = _arm_local_tripwire(monkeypatch)
+
+    app.dependency_overrides.clear()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        client.post("/api/v1/query/agent", json={"question": QUESTION, "provider": "local"})
+
+    assert touched, "the local tripwire was never installed"
+
+
+def test_a_local_run_with_ollama_down_fails_honestly_and_touches_no_cloud(
+    monkeypatch: Any,
+) -> None:
+    """Ollama unreachable, every cloud provider credentialed AND armed."""
+
+    from app.services.agent.providers.local import UNAVAILABLE_MESSAGE
+
+    settings = _settings("local")
+    monkeypatch.setattr(factory_mod, "get_settings", lambda: settings)
+    touched = (
+        _arm_gemini_tripwire(monkeypatch)
+        + _arm_nvidia_tripwire(monkeypatch)
+        + _arm_anthropic_tripwire(monkeypatch)
+    )
+
+    app.dependency_overrides.clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/query/agent", json={"question": QUESTION, "provider": "local"}
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "planner_unavailable"
+    assert body["failure"]["message"] == UNAVAILABLE_MESSAGE
+    assert body["answer"] is None
+    assert touched == []

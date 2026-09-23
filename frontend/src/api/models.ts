@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import { asModelCatalog } from "./validate";
 import type { ModelCatalogResponse, ModelRole } from "./types";
 
 /**
@@ -9,11 +10,11 @@ import type { ModelCatalogResponse, ModelRole } from "./types";
  * whether each model is configured and compatible - it does not claim any of
  * them is reachable, because nothing has contacted a provider.
  */
-export function fetchModelCatalog(
+export async function fetchModelCatalog(
   role: ModelRole = "visual",
   signal?: AbortSignal,
 ): Promise<ModelCatalogResponse> {
-  return apiRequest<ModelCatalogResponse>(`/api/v1/ai/models?role=${role}`, {
-    signal,
-  });
+  return asModelCatalog(
+    await apiRequest<unknown>(`/api/v1/ai/models?role=${role}`, { signal }),
+  );
 }

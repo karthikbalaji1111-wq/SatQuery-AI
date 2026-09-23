@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import sys
 
+from app.core.observability import RunIdFilter
+
 _CONFIGURED = False
 
 
@@ -16,9 +18,13 @@ def configure_logging(level: str = "INFO") -> None:
         return
 
     handler = logging.StreamHandler(sys.stdout)
+    # Every line carries the run it belongs to, or "-" outside a workflow. The
+    # filter is on the HANDLER so it applies to records from every logger,
+    # including third-party ones, without each having to opt in.
+    handler.addFilter(RunIdFilter())
     handler.setFormatter(
         logging.Formatter(
-            fmt="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+            fmt="%(asctime)s %(levelname)-8s %(name)s [%(run_id)s] | %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S%z",
         )
     )

@@ -112,7 +112,9 @@ def test_rtc_reads_bounded_georeferenced_pixels_without_exposing_signature(
     assert len(result.corners_wgs84) == 4
     assert result.image_base64
     assert "Provider RTC gamma naught" in result.normalization
-    assert "no local calibration" in result.normalization
+    # SatQuery still performs none of these; the wording changed when the
+    # response stopped denying the quantitative analysis it now does perform.
+    assert "no radiometric calibration" in result.normalization
 
 
 @pytest.mark.parametrize("href", [

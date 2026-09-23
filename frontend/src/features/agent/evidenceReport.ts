@@ -17,15 +17,29 @@
 
 import type {
   AgentResult,
+  AnalysisResult,
   ImageryResponse,
   Measurement,
+  QueryExecutionResult,
+  SatQueryIntent,
   SatelliteScene,
+  SarBackscatterResult,
 } from "../../api/types";
 
 export interface ManualEvidenceInput {
   scene: SatelliteScene | null;
   imagery: ImageryResponse | null;
   measurements: Measurement[];
+  sar_backscatter?: SarBackscatterResult | null;
+  /**
+   * The provenance of a MANUAL run. Without these the exported record carried a
+   * scene, a picture and some numbers, and could not say what was asked, which
+   * catalog answered, which windows failed or what the analysis warned about -
+   * so it read as more authoritative than the run behind it.
+   */
+  intent?: SatQueryIntent | null;
+  execution?: QueryExecutionResult | null;
+  analysis?: AnalysisResult | null;
 }
 
 export interface EvidenceReport {
@@ -53,6 +67,11 @@ export interface EvidenceReport {
    * not have to notice an absence to learn something failed.
    */
   imagery_errors: { modality: string; window: string; reason: string }[];
+  /**
+   * Windows whose discovery failed outright, kept apart from the above: a
+   * catalog that could not be asked is not an archive that held nothing.
+   */
+  discovery_failures: { modality: string; window: string; reason: string }[];
   /** Every warning the run produced, from execution and analysis alike. */
   warnings: string[];
 }
@@ -66,8 +85,16 @@ const REPORT_VERSION = "1";
  * while its imagery cannot be retrieved, and the export has to say so rather
  * than quietly omitting the window.
  */
-function imageryErrorsFrom(result: AgentResult | null) {
-  const windows = result?.evidence?.execution?.windows ?? [];
+function imageryErrorsFrom(
+  result: AgentResult | null,
+  manual: ManualEvidenceInput | null,
+) {
+  // Both workflows, because both can fail this way and the export is about the
+  // run that happened, not about which path produced it.
+  const windows = [
+    ...(result?.evidence?.execution?.windows ?? []),
+    ...(manual?.execution?.windows ?? []),
+  ];
   return windows
     .filter((window) => window.imagery_error !== null)
     .map((window) => ({
@@ -77,14 +104,43 @@ function imageryErrorsFrom(result: AgentResult | null) {
     }));
 }
 
-function warningsFrom(result: AgentResult | null): string[] {
-  const analysis = result?.evidence?.analysis;
-  const comparison = analysis?.temporal_comparison;
-  return [
-    ...(analysis?.warnings ?? []),
-    ...(comparison?.warnings ?? []),
-    ...(comparison?.compatibility?.limitations ?? []),
+/**
+ * Windows whose DISCOVERY failed - the catalog could not be asked at all.
+ *
+ * Kept apart from `imagery_errors`, which means the scene was found and its
+ * picture could not be read. Collapsing the two would let a reader conclude an
+ * archive was empty when it was never searched.
+ */
+function discoveryFailuresFrom(
+  result: AgentResult | null,
+  manual: ManualEvidenceInput | null,
+) {
+  const windows = [
+    ...(result?.evidence?.execution?.windows ?? []),
+    ...(manual?.execution?.windows ?? []),
   ];
+  return windows
+    .filter((window) => window.error)
+    .map((window) => ({
+      modality: window.modality,
+      window: window.label,
+      reason: window.error as string,
+    }));
+}
+
+function warningsFrom(
+  result: AgentResult | null,
+  manual: ManualEvidenceInput | null,
+): string[] {
+  const analyses = [result?.evidence?.analysis, manual?.analysis];
+  return analyses.flatMap((analysis) => {
+    const comparison = analysis?.temporal_comparison;
+    return [
+      ...(analysis?.warnings ?? []),
+      ...(comparison?.warnings ?? []),
+      ...(comparison?.compatibility?.limitations ?? []),
+    ];
+  });
 }
 
 export function buildEvidenceReport(
@@ -104,8 +160,9 @@ export function buildEvidenceReport(
     trace: result?.trace ?? null,
     evidence: result?.evidence ?? null,
     manual,
-    imagery_errors: imageryErrorsFrom(result),
-    warnings: warningsFrom(result),
+    imagery_errors: imageryErrorsFrom(result, manual),
+    discovery_failures: discoveryFailuresFrom(result, manual),
+    warnings: warningsFrom(result, manual),
   };
 }
 

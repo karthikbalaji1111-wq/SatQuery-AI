@@ -2,6 +2,17 @@
 
 The provider supplies radiometrically terrain-corrected gamma-naught rasters.
 SatQuery only renders their values; it performs no SAR calibration itself.
+
+WHY SIGNING EXISTS. The RTC rasters live in an Azure storage account that
+refuses public access - a plain GET returns ``409 PublicAccessNotPermitted`` -
+so the href published in the STAC item cannot be opened as it stands. The
+Planetary Computer exposes an ANONYMOUS signing endpoint that exchanges that
+href for a short-lived read-only SAS URL for the same blob. No account, key or
+credential is held by this deployment; the exchange is a public service call.
+
+The signed URL is used to open the raster and is never returned to a client:
+``ImageryResponse.asset_href`` carries the unsigned href, and the raster layer
+strips the query string before logging.
 """
 from urllib.parse import urlsplit
 
@@ -41,6 +52,15 @@ def sign_rtc_asset(
     try:
         with httpx.Client(timeout=settings.http_timeout_seconds, transport=transport) as client:
             response = client.get(_SIGN_ENDPOINT, params={"href": href})
+        if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
+            # A distinct, recoverable condition: the provider rate-limits
+            # anonymous signing. Collapsing it into "unavailable" would tell an
+            # operator to investigate an outage that is not happening.
+            raise UpstreamServiceError(
+                "The Sentinel-1 RTC provider is rate-limiting anonymous asset "
+                "signing right now. Discovery and scene metadata are "
+                "unaffected; retry the imagery request shortly."
+            )
         response.raise_for_status()
         signed = response.json()["href"]
         resolved = urlsplit(signed)
@@ -53,5 +73,19 @@ def sign_rtc_asset(
         return signed
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         raise UpstreamServiceError(
-            "The public Sentinel-1 RTC asset signing service is unavailable."
+            "The public Sentinel-1 RTC asset signing service did not return a "
+            "usable read URL, so the raster could not be opened. Sentinel-1 "
+            "discovery and scene metadata are unaffected."
         ) from exc
+
+
+def require_linear_power_encoding(
+    *, scale: object = 1.0, offset: object = 0.0, unit: object = None,
+) -> None:
+    """Refuse encoded/scaled or decibel data instead of applying a second conversion."""
+    if scale != 1.0 or offset != 0.0 or unit not in (None, "", "1", "linear", "power"):
+        raise InvalidInputError(
+            "Sentinel-1 RTC quantitative analysis requires unscaled linear gamma-naught "
+            "power. The raster metadata advertises a different scale, offset or unit; "
+            "no backscatter statistics were computed."
+        )
