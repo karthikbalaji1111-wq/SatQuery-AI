@@ -1260,6 +1260,37 @@ describe("AgentEvidencePanel - measurements are attributed to their own index", 
     expect(withNote[0].textContent).toContain("45.4");
   });
 
+  it("never labels a pixel-quality percentage as a threshold result", () => {
+    // The live NDVI run (S2B_44PMV_20250104, Marina Beach): pixel quality adds
+    // its own counts and percentages under the index's prefix, in this order.
+    // NDVI has no threshold, so "99.8% above threshold" was the valid-pixel
+    // share (33,524 of 33,600) wearing the wrong label.
+    const { container } = renderWithManual([
+      { name: "ndvi_valid_pixel_count", value: 33524, unit: "pixels" },
+      { name: "ndvi_mean", value: -0.0613, unit: "index" },
+      { name: "ndvi_quality_total_pixel_count", value: 33600, unit: "pixels" },
+      { name: "ndvi_quality_cloud_pixel_count", value: 76, unit: "pixels" },
+      { name: "ndvi_quality_valid_percent", value: 99.77, unit: "%" },
+      { name: "ndvi_quality_contamination_percent", value: 0.23, unit: "%" },
+      { name: "ndwi_quality_total_pixel_count", value: 33600, unit: "pixels" },
+      { name: "ndwi_quality_valid_percent", value: 99.77, unit: "%" },
+      { name: "ndwi_valid_pixel_count", value: 33524, unit: "pixels" },
+      { name: "ndwi_mean", value: 0.1464, unit: "index" },
+      {
+        name: "ndwi_percent_above_index_threshold_0.3",
+        value: 45.41,
+        unit: "%",
+      },
+    ]);
+    const readouts = [...container.querySelectorAll(".index-readout")];
+    const ndvi = readouts.find((node) => node.textContent?.includes("ndvi mean"));
+    const ndwi = readouts.find((node) => node.textContent?.includes("ndwi mean"));
+    expect(ndvi?.querySelector(".index-note")).toBeNull();
+    expect(ndwi?.querySelector(".index-note")?.textContent).toContain("45.4");
+    expect(ndwi?.textContent).toContain("33,524");
+    expect(container.textContent).not.toMatch(/99\.8% above/);
+  });
+
   it("captions each index with what THAT index is not a classification of", () => {
     const { container } = renderWithManual(THREE_INDEX_MEASUREMENTS);
     const readouts = [...container.querySelectorAll(".index-readout")];

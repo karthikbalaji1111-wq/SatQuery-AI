@@ -278,11 +278,24 @@ function indexGroups(measurements: Measurement[]): IndexGroup[] {
           measurement.name.toLowerCase().endsWith("_mean"),
       ) ?? own.find((measurement) => measurement.unit === "index");
     if (mean === undefined) continue;
+    // Matched by NAME, not unit alone: pixel quality reports its own "%" and
+    // "pixels" under the same prefix (`ndvi_quality_valid_percent`), and taking
+    // the first "%" set the valid-pixel share under "above threshold" for an
+    // index that has no threshold at all.
     groups.push({
       ...family,
       mean,
-      percent: own.find((measurement) => measurement.unit === "%"),
-      validPixels: own.find((measurement) => measurement.unit === "pixels"),
+      percent: own.find(
+        (measurement) =>
+          measurement.unit === "%" &&
+          measurement.name.toLowerCase().includes("_percent_above_"),
+      ),
+      validPixels:
+        own.find(
+          (measurement) =>
+            measurement.unit === "pixels" &&
+            measurement.name.toLowerCase().endsWith("_valid_pixel_count"),
+        ) ?? own.find((measurement) => measurement.unit === "pixels"),
     });
   }
   return groups;
