@@ -113,7 +113,7 @@ export function Landing() {
           <a href="#pipeline">How it works</a>
           <a href="#multimodal">Data</a>
           <a href="#evidence">Evidence</a>
-          <a className="nav-cta" href="/">
+          <a className="nav-cta" href="/app">
             Try SatQuery
           </a>
         </nav>
@@ -133,7 +133,7 @@ export function Landing() {
             evidence-backed insights from real satellite data.
           </p>
           <div className="cta-row">
-            <a className="cta cta-primary" href="/">
+            <a className="cta cta-primary" href="/app">
               Try SatQuery
             </a>
             <a className="cta cta-secondary" href="#pipeline">
@@ -356,7 +356,7 @@ export function Landing() {
           </h2>
           <p className="lede">For a more informed, more resilient planet.</p>
           <div className="cta-row">
-            <a className="cta cta-primary" href="/">
+            <a className="cta cta-primary" href="/app">
               Try SatQuery
             </a>
             <a

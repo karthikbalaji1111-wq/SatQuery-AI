@@ -20,7 +20,58 @@ const STAGES: { label: string; detail: string }[] = [
   { label: "Answer", detail: "checked against that evidence" },
 ];
 
-export function WorkspaceIntro({ busy = false }: { busy?: boolean }) {
+export function WorkspaceIntro({
+  busy = false,
+  overlay = false,
+}: {
+  busy?: boolean;
+  /** Layered over the live map instead of standing in for it. */
+  overlay?: boolean;
+}) {
+  if (overlay) {
+    // The workspace is map-first: the real, interactive map is already on
+    // screen, and this sits on it until a query resolves something to place.
+    // It is an aside, not a second "Satellite scene" heading - the map owns
+    // that landmark - and it never intercepts the pointer, so the map stays
+    // fully usable underneath it.
+    return (
+      <aside
+        className="workspace-intro-overlay"
+        data-busy={busy ? "true" : undefined}
+        aria-label={busy ? "Analysis in progress" : "How SatQuery works"}
+      >
+        {busy ? (
+          <>
+            <p className="intro-lead">Running the analysis…</p>
+            <p className="intro-note">
+              The area, scenes and imagery appear on this map as each stage
+              returns.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="intro-lead">
+              Ask a question about a place and a time. SatQuery finds the
+              satellite scenes that answer it, measures them, and shows its
+              working.
+            </p>
+            <ol className="intro-stages">
+              {STAGES.map((stage) => (
+                <li key={stage.label}>
+                  <span className="intro-stage-label">{stage.label}</span>
+                  <span className="intro-stage-detail">{stage.detail}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="intro-note">
+              The area and scene imagery appear on this map. Every number is
+              computed from the pixels, never written by a model.
+            </p>
+          </>
+        )}
+      </aside>
+    );
+  }
   if (busy) {
     // The pipeline strip above already reports which stage is running, so this
     // says only that the frame is spoken for - two live progress accounts of

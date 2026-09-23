@@ -11,10 +11,12 @@ export default defineConfig(({ command, mode }) => {
     plugins: [react()],
     build: {
       rollupOptions: {
-        // Separate entries keep three.js out of the workspace bundle.
+        // Separate entries keep three.js out of the workspace bundle. The
+        // cinematic landing is the front door at "/" (index.html); the real
+        // workspace is served at "/app" (app.html).
         input: {
-          app: "index.html",
-          landing: "landing.html",
+          app: "app.html",
+          landing: "index.html",
         },
       },
     },

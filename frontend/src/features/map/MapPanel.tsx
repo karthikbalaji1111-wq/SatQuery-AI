@@ -155,8 +155,11 @@ const DEFAULT_BASEMAP_ATTRIBUTION =
  * asked about and read as a pre-loaded demo - `WorkspaceIntro` holds that
  * space now.
  */
-const INITIAL_CENTER: [number, number] = [80.27, 13.08];
-const INITIAL_ZOOM = 9;
+// A neutral world view. The map is on screen before any query (map-first), so
+// its opening frame must not name a place the user never asked about; every
+// real view comes from fitting the AOI or the scene a run resolves.
+const INITIAL_CENTER: [number, number] = [20, 15];
+const INITIAL_ZOOM = 1.4;
 
 const createMapLibreMap: MapFactory = ({ container }) => {
   // Before the first map exists: MapLibre resolves its worker relative to its
