@@ -40,14 +40,13 @@ services:
       - key: SATQUERY_LOG_LEVEL
         value: INFO
 
-      # Browser origins this API accepts. Production REFUSES to start without
-      # an explicit public HTTPS origin, and the frontend's domain does not
-      # exist yet, so this starts as the API's own origin - which grants no
-      # other site anything. It is the URL Render ASSIGNED (with its suffix),
-      # not the bare service name, which this service does not own. Add the
-      # Vercel origin here (comma-separated) once the frontend is deployed.
+      # Browser origins this API accepts, comma-separated and explicit - never
+      # "*". Production REFUSES to start without public HTTPS origins. The
+      # API's own Render-ASSIGNED URL (with its suffix, not the bare service
+      # name, which this service does not own) and the deployed Vercel
+      # frontend's production domain.
       - key: SATQUERY_CORS_ORIGINS
-        value: https://satquery-ai-api-rbdt.onrender.com
+        value: https://satquery-ai-api-rbdt.onrender.com,https://satquery-ai.vercel.app
 
       # Which catalogs' rasters this server may open (production requires an
       # explicit list). Identical to docker-compose.prod.yml.
