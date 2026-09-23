@@ -44,9 +44,11 @@ services:
       # "*". Production REFUSES to start without public HTTPS origins. The
       # API's own Render-ASSIGNED URL (with its suffix, not the bare service
       # name, which this service does not own) and the deployed Vercel
-      # frontend's production domain.
+      # frontend's production domain - again the ASSIGNED one: Vercel gave the
+      # project satquery-ai-rouge.vercel.app because satquery-ai.vercel.app
+      # belongs to someone else, and allowing that would grant a stranger's site.
       - key: SATQUERY_CORS_ORIGINS
-        value: https://satquery-ai-api-rbdt.onrender.com,https://satquery-ai.vercel.app
+        value: https://satquery-ai-api-rbdt.onrender.com,https://satquery-ai-rouge.vercel.app
 
       # Which catalogs' rasters this server may open (production requires an
       # explicit list). Identical to docker-compose.prod.yml.
