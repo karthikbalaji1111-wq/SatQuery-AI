@@ -2444,6 +2444,16 @@ reliability tests (message now wraps the last failure). Frontend: 5 rendering
 tests + 2 validation tests. Mutations: outage falls through to synthesis (6
 fail), outage turned into a clarification (7 fail); both restored.
 
+**Verified in production** (`bfc2241` on Render and Vercel; real UI in a
+Playwright browser): the live bundle carries the outage notice; Dal Lake NDWI
+0.03169 (fresh geocode), Cubbon Park NDVI 0.5204 (warm cache), Dal Lake again
+(cache hit); 0 HTTP 429, 0 console errors or warnings, every API call 200, no
+CORS error. The outage path itself was not triggered against production on
+purpose; the tests above cover it. During the first Dal Lake run the upstream
+counter rose by 2 with 2 new places cached - the same question locally makes
+exactly 1 request, so the other was most likely a concurrent visitor; not
+attributable without Render logs.
+
 | Check | Result |
 | --- | --- |
 | `pytest -q` | **3062 passed** (3050 before) |
