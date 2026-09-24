@@ -3210,3 +3210,460 @@ a:focus-visible {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   M6 product completion. One section, built only from the tokens above: the
+   result set as a result, the run as stages, the evidence as sections, and a
+   previous result shown as previous while a new question runs.
+   -------------------------------------------------------------------------- */
+
+/* What can be asked, stated once under the input. */
+.query-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+/* -- pipeline ------------------------------------------------------------- */
+
+.pipeline-strip {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  /* It wraps now, so it never needs to scroll sideways - and a scrolling box
+     may be squeezed by the centre grid below its content, which clipped the
+     stages to a sliver at 1280x800. */
+  overflow: visible;
+}
+
+.pipeline-strip .stage-flow {
+  order: 3;
+  flex-basis: 100%;
+  opacity: 0.72;
+}
+
+/* While running, the technical row has nothing to say yet. */
+.pipeline-strip[data-busy="true"] .stage-flow {
+  display: none;
+}
+
+.pipeline-strip .pipeline-tail {
+  order: 2;
+}
+
+.run-running {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  animation: satquery-pulse 2.4s var(--ease) infinite;
+}
+
+.run-stages,
+.run-running {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.run-stages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-stages li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.run-stage-glyph {
+  font-size: 10px;
+  color: var(--green);
+}
+
+.run-stages li[data-state="failed"] .run-stage-glyph {
+  color: var(--danger);
+}
+
+.run-stages li[data-state="attention"] .run-stage-glyph {
+  color: var(--amber);
+}
+
+.run-stage-detail {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-running {
+    animation: none;
+  }
+}
+
+/* -- the result ----------------------------------------------------------- */
+
+.answer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.answer-head .eyebrow {
+  margin-bottom: 0;
+}
+
+/* The outcome is named before anything else, in its own colour: measured
+   (cyan), a question (amber), a refusal or an outage (red), nothing measured
+   (grey). Never green for anything that did not produce a result. */
+.outcome-chip {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.outcome-chip[data-kind="success"] {
+  border-color: rgb(86 212 228 / 0.45);
+  color: var(--geo-cyan);
+}
+
+.outcome-chip[data-kind="clarification"],
+.outcome-chip[data-kind="area_too_large"],
+.outcome-chip[data-kind="analysis_refused"],
+.outcome-chip[data-kind="location_unavailable"] {
+  border-color: rgb(242 180 94 / 0.45);
+  color: var(--amber-ink);
+}
+
+.outcome-chip[data-kind="location_not_found"],
+.outcome-chip[data-kind="unsupported"],
+.outcome-chip[data-kind="provider_failure"] {
+  border-color: rgb(255 123 114 / 0.45);
+  color: var(--danger);
+}
+
+/* A previous result, while a new question runs: still readable, visibly not
+   the answer to what is in the box. */
+[data-stale="true"] {
+  opacity: 0.55;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+
+.stale-note {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  color: var(--amber-ink);
+}
+
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--geo-cyan);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.result-card[data-count]:not([data-count="1"]) {
+  gap: 10px;
+}
+
+.result-reading + .result-reading {
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.result-op {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.result-op-code {
+  color: var(--ink-3);
+}
+
+.result-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--geo-cyan);
+}
+
+.result-card[data-count]:not([data-count="1"]) .result-value {
+  font-size: 22px;
+}
+
+.result-sub {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.result-sar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 2px 0 0;
+}
+
+.result-sar dt {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+.result-sar dd {
+  margin: 1px 0 0;
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--geo-cyan);
+}
+
+/* Two periods, left to right: earlier, then later. */
+.result-periods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result-periods li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+
+.result-periods li[data-role="later"] {
+  position: relative;
+}
+
+.result-periods li[data-role="later"]::before {
+  content: "→";
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.period-role {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.period-when {
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.period-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--geo-cyan);
+}
+
+.period-acquired {
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+
+.result-card .metric-pair {
+  margin-top: 6px;
+}
+
+.result-context {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 10px 0 0;
+  font-size: 11px;
+}
+
+.result-context > div {
+  display: contents;
+}
+
+.result-context dt {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  align-self: center;
+}
+
+.result-context dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* With a result card above it, the sentence is the explanation, not the
+   headline. */
+.agent-answer[data-role="summary"],
+.agent-answer[data-role="verdict"] {
+  margin-top: 10px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: var(--ink-2);
+}
+
+.answer-notice-reason {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.answer-notice-reason summary {
+  cursor: pointer;
+  color: var(--amber-ink);
+}
+
+/* -- evidence ------------------------------------------------------------- */
+
+.validation-summary,
+.observation-pair {
+  margin-top: 12px;
+}
+
+.validation-summary ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.validation-summary li {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) 1fr;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.validation-summary li::before {
+  content: none;
+}
+
+.check-name {
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.check-value {
+  color: var(--ink);
+}
+
+.validation-summary li[data-refused="true"] .check-value {
+  color: var(--amber-ink);
+}
+
+.evidence-technical {
+  margin-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+
+.evidence-technical > summary {
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.evidence-technical[open] > summary {
+  margin-bottom: 6px;
+}
+
+/* -- rail and map ----------------------------------------------------------- */
+
+/* No visual observation for this run: the panel shrinks to its note and the
+   export action instead of holding space for a reading that was not asked. */
+.observation-panel[data-empty="true"] .hint {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.map-updating {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border: 1px solid rgb(242 180 94 / 0.4);
+  border-radius: 999px;
+  background: rgb(8 12 20 / 0.88);
+  font-size: 10.5px;
+  color: var(--amber-ink);
+  pointer-events: none;
+}
+
+@media (max-width: 1023px) {
+  .validation-summary li {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .result-value {
+    font-size: 28px;
+  }
+}
+
+/* Before any question the intro card says what the map is for; the map's own
+   idle note ("No scene loaded") would repeat it underneath the card. */
+.col-centre[data-empty="true"] .imagery-empty {
+  display: none;
+}
+
+/* The plain-language stages already say how far the run got; the technical
+   row's "nothing executed" placeholder would repeat it. */
+.pipeline-strip:has(.run-stages) .stage-idle {
+  display: none;
+}

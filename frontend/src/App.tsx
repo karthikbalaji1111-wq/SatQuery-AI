@@ -240,14 +240,16 @@ export function App() {
               ndwi={ndwi}
               change={change}
               busy={run.busy}
+              stale={run.stale}
             />
             {!hasGeography && <WorkspaceIntro busy={run.busy} overlay />}
           </div>
           <AgentEvidencePanel
-            evidence={run.result?.evidence ?? null}
+            evidence={run.displayed?.evidence ?? null}
             manual={manual}
             bbox={aoi}
             busy={run.busy}
+            stale={run.stale}
           />
         </div>
 
@@ -267,15 +269,17 @@ export function App() {
           </section>
 
           <AgentAnswerPanel
-            result={run.result}
-            asked={run.asked}
+            result={run.displayed}
+            asked={run.stale ? null : run.asked}
             manualComplete={manualComplete}
             busy={run.busy}
+            stale={run.stale}
           />
           <AgentObservationPanel
-            evidence={run.result?.evidence ?? null}
-            result={run.result}
+            evidence={run.displayed?.evidence ?? null}
+            result={run.displayed}
             busy={run.busy}
+            stale={run.stale}
             onExport={hasCompletedResult ? exportEvidence : undefined}
           />
         </div>
