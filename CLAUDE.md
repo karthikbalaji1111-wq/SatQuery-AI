@@ -2533,8 +2533,32 @@ headline labels; the year-boundary range now appears twice (asserted twice);
 the SAR "never implies a measurement" scan excludes only the static capability
 line.
 
+**Follow-up found in production (`2730ab6`):** a comparison publishes its
+radiometric and grid checks PER OBSERVATION (plus `pair_grid`), not at the top
+level, so its stages omitted "Validate imagery" and its evidence showed only
+pixel quality. `resultModel.validationRecords` now gathers them wherever they
+are; pinned by two tests.
+
+**Verified in production** (`019abb6` + `2730ab6` on Vercel, Render unchanged;
+real UI in a Playwright browser, 1440x900; standard workflow, no AI key).
+Landing -> "Try SatQuery" -> `/app`; the five examples RUN (one
+`/query/agent` request each, counted from the page's resource timings):
+NDVI +0.5204 (Cubbon Park, S2B 2024-12-08, 99.5% usable), NDWI +0.1466
+(Marina Beach), NDBI -0.0248 (Ameerpet, 100.0% usable), SAR VV -5.44 / VH
+-17.85 / VV-VH 12.41 dB (S1A 2025-01-11), temporal NDWI January 2024 +0.0266
+-> January 2025 +0.1466, mean difference +0.1200, paired change +0.1207, all
+six stages incl. "Validate imagery". "Analyze Chennai" -> "One more detail"
+with five runnable choices; "NDVI Chennai January 2025" -> "Area too large".
+A place never used before - "Show water around Hussain Sagar, Hyderabad in
+March 2024" - geocoded live (17.409-17.437 N, 78.462-78.487 E), 10 scenes,
+S2B_44QKE_20240323, NDWI -0.1955 over 85,115 pixels (99.4% usable, radiometry
+verified, grid verified), grounded. Typed over the temporal result, the old
+result stayed marked "Previous result" (map chip shown) until replaced.
+Console 0 errors / 0 warnings on the production pages; every API call 200; no
+CORS error; no duplicate agent request.
+
 | Check | Result |
 | --- | --- |
-| `npm run test` | **438 passed** (379 before) |
+| `npm run test` | **440 passed** (379 before M6) |
 | `npm run typecheck` / `lint` / `build` | clean / clean / builds |
 | `pytest -q` / `ruff` / `git diff --check` | 3062 passed / clean / clean |
