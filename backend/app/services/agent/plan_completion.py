@@ -165,7 +165,7 @@ def _clauses(sentence: str) -> Iterator[tuple[int, str, bool]]:
     yield position, sentence[position:], cancels
 
 
-def _requested_matches(
+def requested_matches(
     question: str, pattern: re.Pattern[str]
 ) -> list[re.Match[str]]:
     """Matches of ``pattern`` that the question actually ASKS FOR.
@@ -221,7 +221,7 @@ def requested_indices(question: str) -> list[str]:
     """
 
     found: list[str] = []
-    for match in _requested_matches(question, _NAMED_INDEX):
+    for match in requested_matches(question, _NAMED_INDEX):
         key = match.group(1).lower()
         if key not in found:
             found.append(key)
@@ -316,7 +316,7 @@ def requests_visual_observation(question: str) -> bool:
     polarity rules that govern the indices govern the observation.
     """
 
-    return bool(_requested_matches(question, _VISUAL_REQUEST))
+    return bool(requested_matches(question, _VISUAL_REQUEST))
 
 
 def ensure_requested_observation(question: str, plan: AgentPlan) -> AgentPlan:
@@ -367,7 +367,7 @@ _WATER_REQUEST = re.compile(r"(?<![A-Za-z0-9_])(?:water|ndwi)(?![A-Za-z0-9_])", 
 def ensure_requested_comparison(question: str, plan: AgentPlan) -> AgentPlan:
     """Add temporal NDWI to an optical comparison that asks about water."""
 
-    if not _requested_matches(question, _WATER_REQUEST):
+    if not requested_matches(question, _WATER_REQUEST):
         return plan
     if any(isinstance(step, TemporalNdwiParams) for step in plan.steps):
         return plan

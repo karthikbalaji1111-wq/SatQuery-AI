@@ -904,9 +904,11 @@ describe("App - AI provider and model selection", () => {
     });
     render(<App />);
 
-    // The default is only known once the catalog has loaded; submitting before
-    // that would attribute a run whose provider genuinely was not resolved yet.
-    await screen.findByLabelText(/ai provider and model/i);
+    // AI is opted into per run (M5.5): pick Gemini explicitly first.
+    const picker = (await screen.findByLabelText(
+      /ai provider and model/i,
+    )) as HTMLSelectElement;
+    fireEvent.change(picker, { target: { value: "gemini-3.6-flash" } });
 
     fireEvent.change(screen.getByLabelText("Question"), {
       target: { value: "Is there visible water in Marina Beach?" },
@@ -932,7 +934,30 @@ describe("App - AI provider and model selection", () => {
     );
   });
 
-  it("offers the catalogued models and marks the incompatible one", async () => {
+  it("attributes a default run to the standard workflow, never to the default AI", async () => {
+    // M5.5: a run that names no provider is interpreted without any model.
+    // Crediting it to the deployment's default provider (Gemini here) would
+    // name a service that was never called.
+    stubRouter({
+      "/health": HEALTH,
+      "/ai/models": CATALOG,
+      "/query/agent": OK_RESULT,
+    });
+    render(<App />);
+    await screen.findByLabelText(/ai provider and model/i);
+
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "What is the NDWI of Marina Beach, Chennai in January 2025?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+    await screen.findByText(OK_RESULT.answer);
+
+    const attribution = screen.getByTestId("run-attribution").textContent;
+    expect(attribution).toMatch(/standard workflow · no AI model/);
+    expect(attribution).not.toMatch(/Gemini/);
+  });
+
+  it("offers the standard workflow first, then the catalogued models", async () => {
     stubRouter({ "/health": HEALTH, "/ai/models": CATALOG });
     render(<App />);
 
@@ -940,16 +965,19 @@ describe("App - AI provider and model selection", () => {
       /ai provider and model/i,
     )) as HTMLSelectElement;
 
-    expect(select.value).toBe("gemini-3.6-flash");
+    // The default names no provider: the server's model-free workflow.
+    expect(select.value).toBe("");
     const options = [...select.options];
+    expect(options[0].textContent).toBe("Standard · no AI model");
     expect(options.map((option) => option.value)).toEqual([
+      "",
       "gemini-3.6-flash",
       "nvidia/nemotron-nano-12b-v2-vl",
       "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
       "nvidia/nemotron-3-super-120b-a12b",
     ]);
     // A text-only model stays visible but cannot be chosen for a visual run.
-    const textOnly = options[3];
+    const textOnly = options[4];
     expect(textOnly.disabled).toBe(true);
     expect(textOnly.textContent).toMatch(/Unsupported for visual analysis/);
   });
@@ -980,6 +1008,8 @@ describe("App - AI provider and model selection", () => {
     const select = (await screen.findByLabelText(
       /ai provider and model/i,
     )) as HTMLSelectElement;
+    // Selectable - and its badge is only shown once it is the selection.
+    fireEvent.change(select, { target: { value: "qwen3-vl:4b-instruct" } });
     expect(select.value).toBe("qwen3-vl:4b-instruct");
     const option = [...select.options].find(
       (candidate) => candidate.value === "qwen3-vl:4b-instruct",
@@ -1014,7 +1044,8 @@ describe("App - AI provider and model selection", () => {
         },
       });
       render(<App />);
-      await screen.findByLabelText(/ai provider and model/i);
+      const select = await screen.findByLabelText(/ai provider and model/i);
+      fireEvent.change(select, { target: { value: "qwen3-vl:4b-instruct" } });
 
       const badge = document.querySelector(".model-status");
       expect(badge?.textContent).toBe(status);
@@ -1048,6 +1079,8 @@ describe("App - AI provider and model selection", () => {
     };
     stubRouter(routes);
     render(<App />);
+    const select = await screen.findByLabelText(/ai provider and model/i);
+    fireEvent.change(select, { target: { value: "qwen3-vl:4b-instruct" } });
     const badge = () => document.querySelector(".model-status");
     await waitFor(() => expect(badge()?.textContent).toBe("Not installed"));
 
@@ -1190,7 +1223,11 @@ describe("App - AI provider and model selection", () => {
     stubRouter({ "/health": HEALTH, "/ai/models": { nope: true } });
     render(<App />);
 
-    expect(await screen.findByText(/AI unavailable/i)).toBeInTheDocument();
+    // Only the optional AI models are unknown; the standard workflow the next
+    // question uses is named as still in effect.
+    expect(
+      await screen.findByText(/Standard · AI models unavailable/i),
+    ).toBeInTheDocument();
     // The workspace still renders around it.
     expect(
       screen.getByRole("heading", { name: "Natural-language query" }),

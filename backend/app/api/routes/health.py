@@ -21,6 +21,12 @@ The single exception is the local provider, and only when it is the SELECTED
 one: Ollama runs on this machine, one read-only ``GET /api/tags`` costs
 nothing, and its answer is the actual determinant of whether a local run can
 work. That call is already bounded (2 s to connect, 10 s to answer).
+
+**The AI provider is optional.** Natural-language questions are interpreted by
+the standard, deterministic workflow unless a request names an AI provider, so
+a deployment with no provider configured can still do its work. The AI
+capability is therefore reported - configured or not, in the same words as
+before - but marked ``required: false``, and it no longer decides readiness.
 """
 
 from __future__ import annotations
@@ -50,6 +56,9 @@ class Capability(BaseModel):
     #: Why, in plain words. Always populated - a capability that is ready says
     #: what it is ready to do, so the endpoint is readable without a legend.
     detail: str
+    #: Whether readiness depends on it. An optional capability that is not
+    #: ready is reported, never hidden, and never makes the deployment unready.
+    required: bool = True
 
 
 class ReadinessResponse(BaseModel):
@@ -100,13 +109,32 @@ def _geocoder(settings: Settings) -> Capability:
     )
 
 
+def _interpretation() -> Capability:
+    return Capability(
+        name="interpretation",
+        ready=True,
+        detail=(
+            "Natural-language questions are interpreted deterministically by "
+            "the standard workflow: NDVI, NDWI, NDBI, SAR backscatter and a "
+            "two-period NDWI comparison for a named place and period. No AI "
+            "provider or credential is required for them."
+        ),
+    )
+
+
 async def _ai_provider(settings: Settings) -> Capability:
-    """The SELECTED provider only.
+    """The SELECTED provider only - optional, reported but not required.
 
     Reporting every catalogued provider would invite the reading that any of
     them could answer, and there is deliberately no fallback between them: a
-    run uses the selected backend or it fails.
+    run that names AI uses the selected backend or it fails.
     """
+
+    capability = await _ai_provider_state(settings)
+    return capability.model_copy(update={"required": False})
+
+
+async def _ai_provider_state(settings: Settings) -> Capability:
 
     provider = settings.ai_provider
     fields = AI_PROVIDER_FIELDS[provider]
@@ -117,8 +145,9 @@ async def _ai_provider(settings: Settings) -> Capability:
             name="ai_provider",
             ready=False,
             detail=(
-                f"{provider} is the selected provider and {fields.env_var} is "
-                "not set, so no query can be answered."
+                f"{provider} is the selected AI provider and {fields.env_var} "
+                "is not set, so optional AI interpretation is unavailable. "
+                "Supported questions are answered without it."
             ),
         )
 
@@ -185,9 +214,12 @@ async def ready(response: Response) -> ReadinessResponse:
         ),
         _catalogs(settings),
         _geocoder(settings),
+        _interpretation(),
         await _ai_provider(settings),
     ]
-    everything = all(capability.ready for capability in capabilities)
+    everything = all(
+        capability.ready for capability in capabilities if capability.required
+    )
     if not everything:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 

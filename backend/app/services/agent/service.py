@@ -55,15 +55,20 @@ from app.core.logging import get_logger
 from app.core.observability import stage
 from app.services.agent.executor import AgentExecutor
 from app.services.agent.grounding import validate_answer
+from app.services.agent.interpretation import ClarificationRequiredError
 from app.services.agent.plan_completion import complete_plan
 from app.services.agent.planner import AgentPlanner
 from app.services.agent.schemas import (
+    AgentClarification,
     AgentEvidence,
     AgentFailure,
+    AgentPlan,
     AgentQuestionRequest,
     AgentResult,
+    AgentToolStep,
     AgentTrace,
     AnswerValidation,
+    ExecuteQueryParams,
 )
 from app.services.agent.synthesizer import AnswerSynthesizer
 from app.services.base import DomainService
@@ -111,6 +116,52 @@ def _failure(stage: str, exc: AppError) -> AgentFailure:
     )
 
 
+def _place(plan: AgentPlan) -> str | None:
+    discovery = plan.steps[0]
+    return (
+        discovery.intent.location_query
+        if isinstance(discovery, ExecuteQueryParams)
+        else None
+    )
+
+
+def _oversized_place(plan: AgentPlan, steps: list[AgentToolStep]) -> AgentClarification:
+    """The clarification for a place larger than one native-resolution read.
+
+    The measured extent and the limit are the analysis gate's own words, taken
+    from the failed step verbatim - nothing is re-derived here.
+    """
+
+    place = _place(plan)
+    reason = next(
+        (step.error_message for step in steps if step.error_message), None
+    ) or "The area is too large to measure at native resolution."
+    reason = reason.split(": ", 1)[-1]  # drop the "plan.bbox: " field prefix
+    named = f"'{place}' is too large to analyse: {reason}" if place else reason
+    return AgentClarification(
+        reason="area_too_large",
+        message=(
+            f"{named} Name a neighbourhood, landmark or smaller district - for "
+            "example '<landmark>, <city>' - or give coordinates as 'lat, lon'."
+        )[:1000],
+        understood_location=place,
+    )
+
+
+def _unresolved_place(plan: AgentPlan) -> AgentClarification:
+    """The clarification for a place the geospatial service could not find."""
+
+    place = _place(plan)
+    named = f"No place matching '{place}' was found. " if place else "The place was not found. "
+    return AgentClarification(
+        reason="location_not_found",
+        message=named
+        + "Name a city, district or landmark - adding the city or state helps, "
+        "for example '<landmark>, <city>' - or give coordinates as 'lat, lon'.",
+        understood_location=place,
+    )
+
+
 class AgentService(DomainService):
     """Coordinates planning, execution, synthesis and validation.
 
@@ -152,6 +203,16 @@ class AgentService(DomainService):
         try:
             with stage("planning"):
                 plan = await self._planner.plan(request.question)
+        except ClarificationRequiredError as exc:
+            # Not a failure: the question does not yet say what to run. It is
+            # put back to the user rather than answered with a default.
+            logger.info("Agent needs clarification [%s]", exc.clarification.reason)
+            return AgentResult(
+                status="needs_clarification",
+                clarification=exc.clarification,
+                trace=AgentTrace(),
+                evidence=AgentEvidence(),
+            )
         except AppError as exc:
             logger.info("Agent planning failed [%s]: %s", exc.code, exc.message)
             return AgentResult(
@@ -175,6 +236,26 @@ class AgentService(DomainService):
             logger.info("Plan completed with an explicitly requested step")
         with stage("execution", steps=len(executed_plan.steps)):
             outcome = await self._executor.execute(executed_plan)
+
+        # A place the geospatial service cannot find is a question for the
+        # user, not an outage and not an absence of scenes. Nothing was
+        # searched, so nothing is described; the failed step stays in the trace.
+        #
+        # So is a place too large to measure: the analysis gate refused it after
+        # geocoding and before any catalog search, and the remedy is a smaller
+        # place - the user's to choose, not ours to crop.
+        clarification = None
+        if outcome.discovery_failure_code == "not_found":
+            clarification = _unresolved_place(plan)
+        elif outcome.discovery_failure_code == "aoi_too_large":
+            clarification = _oversized_place(plan, outcome.steps)
+        if clarification is not None:
+            return AgentResult(
+                status="needs_clarification",
+                clarification=clarification,
+                trace=AgentTrace(plan=plan, steps=outcome.steps),
+                evidence=outcome.evidence,
+            )
 
         # --- 3. Synthesise. A failure here loses the prose, never the
         # evidence that was already established.

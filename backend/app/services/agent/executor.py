@@ -117,6 +117,10 @@ class ExecutionOutcome:
 
     steps: list[AgentToolStep] = field(default_factory=list)
     evidence: AgentEvidence = field(default_factory=AgentEvidence)
+    #: The ``AppError`` code discovery failed with, when it failed. Lets the
+    #: orchestrator tell "no such place" (a question to put back to the user)
+    #: from an outage, without matching on message text.
+    discovery_failure_code: str | None = None
 
 
 def _execution_request(params: ExecuteQueryParams) -> QueryExecutionRequest:
@@ -476,6 +480,7 @@ class AgentExecutor:
         steps: dict[int, AgentToolStep] = {}
         execution: QueryExecutionResult | None = None
         discovery_failure: str | None = None
+        discovery_failure_code: str | None = None
 
         if discovery is not None:
             index, params = discovery
@@ -488,6 +493,7 @@ class AgentExecutor:
                     "Agent discovery failed [%s]: %s", exc.code, exc.message
                 )
                 discovery_failure = exc.message
+                discovery_failure_code = exc.code
                 steps[index] = AgentToolStep(
                     status="failed", parameters=params, error_message=exc.message
                 )
@@ -547,7 +553,11 @@ class AgentExecutor:
             len(ordered),
             ", ".join(f"{step.tool}={step.status}" for step in ordered),
         )
-        return ExecutionOutcome(steps=ordered, evidence=evidence)
+        return ExecutionOutcome(
+            steps=ordered,
+            evidence=evidence,
+            discovery_failure_code=discovery_failure_code,
+        )
 
     # -- discovery -------------------------------------------------------- #
 

@@ -127,12 +127,21 @@ Core intended capabilities:
    the generated answer against the collected evidence before returning it.
    The model selects; it never computes. No image ever reaches a model, and no
    reasoning is requested, stored or displayed.
+15. Provider-independent natural-language interpretation (M5.5): a question
+   that names no AI provider is interpreted DETERMINISTICALLY
+   (`agent/interpretation.py`) into the same `AgentPlan` an AI planner would
+   propose, executed by the unchanged executor, and answered with fixed
+   sentences over engine values (`agent/standard.py`) that pass the unchanged
+   grounding. No model, no key. Anything it cannot map is `needs_clarification`,
+   never a guess. AI interpretation is opt-in per request. See section 24.
 
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current backend figure is in section 23 (the scientific core, M1-M5), which also
-supersedes any statement below that the optical indices are not cloud-masked.
+current figures are in section 24 (M5.5). Section 23 (the scientific core,
+M1-M5) supersedes any statement below that the optical indices are not
+cloud-masked, and section 24 supersedes any statement that the typed query box
+or `/query/parse` needs an AI provider.
 
 ## Architecture Rules
 
@@ -1950,3 +1959,84 @@ nest 2:1 at offset 0; RTC VV/VH share the item grid.
 | `pytest -q` | **2748 passed** (2316 before M1; +164 M1, +79 M2, +58 M3, +66 M4, +64 M5, +1 re-parametrized) |
 | `ruff check .` / `git diff --check` | clean / clean |
 | frontend | not re-run in M1-M4: no frontend file changed |
+
+---
+
+## 24. M5.5 - Natural-language intent layer, provider-independent - IMPLEMENTED (2026-09-24)
+
+**The rule, stated once:** a request that names neither `provider` nor `model`
+is interpreted by the STANDARD workflow - no model, no credential. Naming one
+opts that run into AI interpretation. Applies to `POST /query/agent` and
+`POST /query/parse` (which gained an optional `provider`). `AI_PROVIDER` now
+only chooses the AI provider for a request that names a model without a
+provider, the catalog default, and the optional readiness report.
+
+**Where it lives.**
+- `agent/interpretation.py` - pure: text -> `QueryInterpretation` or
+  `ClarificationRequiredError`. Vocabularies map to NDVI, NDWI, NDBI, SAR
+  backscatter, two-period NDWI comparison, or true-colour imagery; polarity is
+  read by `plan_completion.requested_matches` (made public, not duplicated), so
+  "show water, not vegetation" asks for water alone. Place = the phrase after
+  around/in/at/of/near/over..., passed VERBATIM to the existing geocoder -
+  never resolved here. Dates = explicit only: ISO day/month, "15 January
+  2025", "January 15, 2025", "January 2025", "2025", "from X to Y",
+  "between X and Y" (shared trailing year), "10 to 20 January 2025". No
+  today, no default window, no season or "early 2024" boundaries, no year for a
+  bare month. Sensor follows the analysis; a contradicting source ("vegetation
+  using radar") is questioned.
+- `agent/standard.py` - `StandardPlanner`, `StandardReport` (one fixed
+  sentence per engine value - the grounding templates - plus "Scene X was
+  selected." / "The scene was acquired on D.", or the abstention),
+  `StandardIntentParser`.
+- `AgentService`: a planner clarification -> `needs_clarification`; after
+  execution, discovery code `not_found` -> `location_not_found` and M1's
+  `aoi_too_large` -> `area_too_large` (M1's own message, M1 untouched).
+- Contract: `AgentStatus` + `needs_clarification`; `AgentResult.clarification`
+  (`reason`, `message`, `options`, `understood_*`); integrity: present exactly
+  with that status, never beside an answer or a failure.
+- `/ready`: new `interpretation` capability; `ai_provider` is `required: false`
+  and no longer decides readiness. A missing REQUIRED capability is still 503.
+- Frontend: selector default "Standard · no AI model"; a default run is
+  attributed "the standard workflow · no AI model", never the default AI;
+  clarification shown under the query box; pipeline "Needs clarification";
+  examples are all standard-supported (NDWI, vegetation, built-up, radar,
+  temporal); header ignores optional capabilities.
+
+**Deliberately refused, never approximated:** visual questions ("visible",
+"looks like") -> `requires_ai_model`; floods, counting, ships/vehicles,
+classification, land cover -> `analysis_unsupported`, even beside a supported
+analysis; any comparison other than water (temporal NDVI/NDBI/SAR is not
+implemented) -> `analysis_unsupported`; a place given only by "this"/"here" ->
+`location_missing`.
+
+**Mutation-checked (8/8 caught, each restored byte-identical):** NDVI->NDWI (3
+tests fail), SAR->optical (4), temporal->single (12), place discarded (13),
+dates discarded (13), unsupported executed (7), AI made mandatory (5), fake
+result substituted (11).
+
+**Verified live (local backend, all three provider keys blanked, real
+Nominatim / Earth Search / Planetary Computer, and the UI in Chrome):**
+- "Show vegetation around Chennai" -> `date_missing`, 0 s, nothing run.
+- "... around Chennai in January 2025" -> `area_too_large` (20.9 x 42.4 km),
+  refused before any STAC search.
+- "Show vegetation around Marina Beach, Chennai in January 2025" -> 5 scenes,
+  S2B_44PMV_20250104, NDVI -0.06131 over 33,524 px (76 SCL-masked), grounded.
+- "Analyze SAR backscatter around Marina Beach, Chennai in January 2025" ->
+  Sentinel-1 RTC S1A ... 20250111, VV -5.444 dB, VH -17.85 dB, grounded.
+- "Compare water at Marina Beach, Chennai between January 2024 and January
+  2025" -> S2A 20240115 vs S2B 20250104, mean NDWI difference 0.12, grounded.
+- Backend log: every run `provider=standard model=none`; zero AI endpoints.
+
+**Known limitations.** Place extraction needs a lead word ("NDVI Chennai
+January 2025" is asked to name the place); a map-drawn AOI is not an input
+(no draw tool exists); "this reservoir" is not resolved from the map; the
+deployed Render backend does not have M5.5 until it is pushed.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **2853 passed** (2748 at M5; +103 `test_standard_workflow.py`, +1 readiness non-vacuity, +1 split parse test) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **367 passed** (358 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |

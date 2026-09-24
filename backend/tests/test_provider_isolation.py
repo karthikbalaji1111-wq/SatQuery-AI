@@ -143,9 +143,15 @@ def _run_parse(monkeypatch: Any, provider: str) -> tuple[int, list[str]]:
 
     app.dependency_overrides.clear()
     with TestClient(app) as client:
+        # Since M5.5 a prompt naming no provider is parsed by the standard,
+        # model-free parser; AI parsing is selected per request, so the
+        # selection under test travels in the body.
         response = client.post(
             "/api/v1/query/parse",
-            json={"prompt": "Show optical imagery of Chennai in January 2024"},
+            json={
+                "prompt": "Show optical imagery of Chennai in January 2024",
+                "provider": provider,
+            },
         )
     return response.status_code, touched
 

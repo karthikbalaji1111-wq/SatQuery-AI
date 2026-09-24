@@ -70,12 +70,13 @@ function requireNumber(
   if (typeof body[key] !== "number") fail(what, `'${key}' is missing`);
 }
 
-/** The four statuses are exhaustive; anything else means a contract mismatch. */
+/** The five statuses are exhaustive; anything else means a contract mismatch. */
 const AGENT_STATUSES = new Set([
   "ok",
   "planner_unavailable",
   "synthesis_unavailable",
   "answer_withheld",
+  "needs_clarification",
 ]);
 
 export function asAgentResult(value: unknown): AgentResult {
@@ -88,6 +89,13 @@ export function asAgentResult(value: unknown): AgentResult {
   requireArray(trace, "steps", "agent");
   const evidence = record(body.evidence, "agent");
   requireArray(evidence, "items", "agent");
+  // The question panel renders the clarification's message and options, so a
+  // result claiming to need one must actually carry them.
+  if (body.status === "needs_clarification") {
+    const clarification = record(body.clarification, "agent");
+    requireString(clarification, "message", "agent");
+    requireArray(clarification, "options", "agent");
+  }
   return value as AgentResult;
 }
 

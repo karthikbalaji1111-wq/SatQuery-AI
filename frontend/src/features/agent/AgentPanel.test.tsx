@@ -1079,10 +1079,10 @@ describe("AgentPanel - the query hero is a real input", () => {
     const fetchMock = stubAgent({ body: agentResult() });
     render(<AgentPanel />);
 
-    fireEvent.click(screen.getByRole("button", { name: /visible water/i }));
+    fireEvent.click(screen.getByRole("button", { name: /radar backscatter/i }));
 
     const input = screen.getByLabelText(/question/i) as HTMLTextAreaElement;
-    expect(input.value).toMatch(/Marina Beach, Chennai/);
+    expect(input.value).toMatch(/SAR backscatter around Marina Beach, Chennai/);
     // Clicking an example is not a submission.
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -1429,5 +1429,94 @@ describe("AgentAnswerPanel - completed result is origin-independent", () => {
     render(<AgentAnswerPanel result={null} manualComplete busy />);
 
     expect(screen.getByRole("status").textContent).toMatch(/Analysing/i);
+  });
+});
+
+
+// ===========================================================================
+// M5.5: a question put back to the user
+// ===========================================================================
+
+describe("AgentPanel - clarification", () => {
+  const CLARIFICATION = {
+    status: "needs_clarification",
+    answer: null,
+    failure: null,
+    clarification: {
+      reason: "date_missing",
+      message:
+        "For which date or period? Give a month and year or a date - for example 'in January 2025'.",
+      options: [],
+      understood_analyses: ["vegetation (NDVI)"],
+      understood_location: "Chennai",
+      understood_periods: [],
+    },
+    trace: { plan: null, steps: [], evidence_refs: [], answer_validation: null },
+    evidence: { items: [], execution: null, analysis: null },
+  };
+
+  it("shows the server's question under the query box, with what was understood", async () => {
+    stubAgent({ body: CLARIFICATION });
+    render(<AgentPanel />);
+
+    await askAndWait("Show vegetation around Chennai");
+
+    const prompt = await screen.findByText(/For which date or period\?/);
+    const block = prompt.closest(".clarification") as HTMLElement;
+    expect(block).toHaveAttribute("data-reason", "date_missing");
+    expect(within(block).getByText(/Understood so far/)).toHaveTextContent(
+      "vegetation (NDVI) · Chennai",
+    );
+  });
+
+  it("lists the supported choices the server named, and nothing else", async () => {
+    stubAgent({
+      body: {
+        ...CLARIFICATION,
+        clarification: {
+          ...CLARIFICATION.clarification,
+          reason: "analysis_missing",
+          message: "What would you like to analyse?",
+          options: ["vegetation (NDVI)", "water (NDWI)"],
+          understood_analyses: [],
+        },
+      },
+    });
+    render(<AgentPanel />);
+
+    await askAndWait("I want to know something about Chennai");
+
+    const list = await screen.findByRole("list", { name: "Supported choices" });
+    expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "vegetation (NDVI)",
+      "water (NDWI)",
+    ]);
+  });
+
+  it("reads 'Needs clarification' in the pipeline, not a failure", async () => {
+    stubAgent({ body: CLARIFICATION });
+    render(<AgentPanel />);
+
+    await askAndWait("Show vegetation around Chennai");
+
+    const pipeline = screen
+      .getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(within(pipeline).getByText("Needs clarification")).toBeInTheDocument(),
+    );
+    expect(within(pipeline).queryByText("Failed")).not.toBeInTheDocument();
+  });
+
+  it("presents no answer and no measurement for a clarification", async () => {
+    stubAgent({ body: CLARIFICATION });
+    render(<AgentPanel />);
+
+    await askAndWait("Show vegetation around Chennai");
+
+    expect(
+      await screen.findByText(/No analysis ran: the question needs one more detail/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/mean NDVI/i)).not.toBeInTheDocument();
   });
 });

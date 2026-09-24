@@ -46,7 +46,7 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.services.analysis.schemas import AnalysisResult, Measurement
-from app.services.query.schemas import QueryExecutionResult, SatQueryIntent
+from app.services.query.schemas import QueryExecutionResult, SatQueryIntent, TimeRange
 
 #: The closed set of tools a planner may select. Adding a name here is the
 #: deliberate act of granting a model access to a capability - which is why a
@@ -69,10 +69,34 @@ ToolStepStatus = Literal["ok", "rejected", "failed", "skipped"]
 #: ``planner_unavailable``    - no plan; nothing executed.
 #: ``synthesis_unavailable``  - tools ran, the answer could not be generated.
 #: ``answer_withheld``        - an answer was generated but failed validation.
-#: In the last three the evidence is still returned: the deterministic result
+#: ``needs_clarification``    - the question does not state something the
+#:                              workflow needs (or asks for something it does
+#:                              not do); nothing was measured and
+#:                              ``clarification`` says what to add.
+#: In the middle three the evidence is still returned: the deterministic result
 #: never depends on a language-model provider being reachable.
 AgentStatus = Literal[
-    "ok", "planner_unavailable", "synthesis_unavailable", "answer_withheld"
+    "ok",
+    "planner_unavailable",
+    "synthesis_unavailable",
+    "answer_withheld",
+    "needs_clarification",
+]
+
+#: Why a question could not be executed as asked. Each names ONE missing or
+#: unsupported fact, so a caller can act on it without parsing prose.
+ClarificationReason = Literal[
+    "analysis_missing",
+    "analysis_unsupported",
+    "location_missing",
+    "location_not_found",
+    "area_too_large",
+    "date_missing",
+    "date_ambiguous",
+    "date_invalid",
+    "comparison_incomplete",
+    "conflicting_request",
+    "requires_ai_model",
 ]
 
 #: Where one piece of evidence came from. ``model`` is RESERVED for a future
@@ -545,6 +569,29 @@ class AgentFailure(_StrictModel):
     retry_after_seconds: float | None = Field(default=None, ge=0)
 
 
+class AgentClarification(_StrictModel):
+    """What a question has to add before it can be executed.
+
+    A question, not a guess. When the interpreter cannot establish an analysis,
+    a place or a period from what was written, it says which one and what the
+    supported choices are - rather than running a default nobody asked for and
+    presenting the result as an answer.
+
+    ``understood_*`` repeat back what WAS established, so a reader can see that
+    only the missing part needs adding. They are facts read from the question,
+    never inferred values.
+    """
+
+    reason: ClarificationReason
+    #: The question put to the user. System-authored, never model output.
+    message: str = Field(min_length=1, max_length=1000)
+    #: The supported choices that would resolve it, when there is a closed set.
+    options: list[str] = Field(default_factory=list, max_length=10)
+    understood_analyses: list[str] = Field(default_factory=list, max_length=10)
+    understood_location: str | None = Field(default=None, max_length=300)
+    understood_periods: list[TimeRange] = Field(default_factory=list, max_length=2)
+
+
 class AgentResult(_StrictModel):
     """The agent's response: what ran, what was found, and - maybe - an answer.
 
@@ -566,6 +613,8 @@ class AgentResult(_StrictModel):
     #: than required so an existing caller constructing a bare failure result
     #: stays valid; the service always supplies it.
     failure: AgentFailure | None = None
+    #: Present exactly when ``status`` is ``needs_clarification``.
+    clarification: AgentClarification | None = None
     trace: AgentTrace
     evidence: AgentEvidence
 
@@ -576,6 +625,16 @@ class AgentResult(_StrictModel):
                 "status 'ok' requires an answer; use 'synthesis_unavailable' or "
                 "'answer_withheld' when there is none"
             )
+
+        # A clarification is a question back to the user. It never sits beside
+        # an answer, and a result that asks for one must say what it asks.
+        if (self.status == "needs_clarification") != (self.clarification is not None):
+            raise ValueError(
+                "'clarification' is present exactly when status is "
+                "'needs_clarification'"
+            )
+        if self.status == "needs_clarification" and self.answer is not None:
+            raise ValueError("a result that needs clarification carries no answer")
 
         # A failure beside a delivered or withheld answer would misdescribe the
         # run: in both of those the providers did their work, and what happened

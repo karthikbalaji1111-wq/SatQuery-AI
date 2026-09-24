@@ -55,7 +55,11 @@ export function BackendStatus() {
 
   const unready =
     status.state === "ok"
-      ? (status.readiness?.capabilities ?? []).filter((c) => !c.ready)
+      ? // An optional capability (the AI provider) is reported by the server
+        // but never named as the reason the deployment is degraded.
+        (status.readiness?.capabilities ?? []).filter(
+          (c) => !c.ready && c.required !== false,
+        )
       : [];
   const degraded = status.state === "ok" && status.readiness?.ready === false;
 

@@ -774,8 +774,15 @@ def test_an_executor_failure_is_not_mislabelled_as_another_status(
     assert synthesizer.calls == []
 
 
-def test_the_status_vocabulary_was_not_widened() -> None:
-    """No fifth status was introduced to paper over executor failure."""
+def test_the_status_vocabulary_was_widened_only_for_clarification() -> None:
+    """No status papers over executor failure.
+
+    M5.5 added exactly one: ``needs_clarification``, for a question that does
+    not state what to run or names a place the geocoder cannot find. It is a
+    question back to the user, and the contract forbids it beside an answer or
+    a failure (see ``test_standard_workflow``); an executor failure still
+    surfaces through the trace and the evidence, never through this status.
+    """
 
     from typing import get_args
 
@@ -786,6 +793,7 @@ def test_the_status_vocabulary_was_not_widened() -> None:
         "planner_unavailable",
         "synthesis_unavailable",
         "answer_withheld",
+        "needs_clarification",
     }
 
 
