@@ -489,6 +489,8 @@ def test_analyze_endpoint_returns_the_expected_contract() -> None:
         "pixel_quality",
         # Stage 4, additive: the radiometric state of each analysis assessed.
         "radiometry",
+        # Stage 5, additive: the grid of each analysis attempted.
+        "grids",
     }
     assert body["status"] == "ok"
     assert body["task"] == "visualize"
@@ -1383,7 +1385,14 @@ def test_the_overlay_needs_the_statistics_too() -> None:
     assert imagery.calls == []
 
 
-def test_an_unusable_grid_yields_no_overlay_but_keeps_the_numbers() -> None:
+def test_an_ungeoreferenced_grid_is_refused_not_measured() -> None:
+    """Stage 5: a band pair whose CRS cannot be established is not a valid grid.
+
+    Before geometric validation this kept the numbers and dropped only the
+    overlay. An unknown CRS must not silently become valid, so the index is now
+    refused with the geometric reason - and still no overlay is drawn.
+    """
+
     imagery = FakeImageryService(
         bands={
             "green": grid_band(GREEN_GRID, crs=None),
@@ -1393,7 +1402,10 @@ def test_an_unusable_grid_yields_no_overlay_but_keeps_the_numbers() -> None:
     result, _ = analyze_with_overlay(ndwi_execution(), imagery)
 
     assert result.ndwi_overlay is None
-    assert named(result.measurements)["ndwi_valid_pixel_count"] == 3
+    assert "ndwi_valid_pixel_count" not in named(result.measurements)
+    (outcome,) = result.analysis_outcomes
+    assert outcome.status == "unavailable"
+    assert any("could not be established" in w for w in result.warnings)
 
 
 def test_the_analysis_result_serializes_with_the_overlay() -> None:
@@ -1662,22 +1674,24 @@ def test_the_measurement_carries_no_raster_data() -> None:
     assert not any(isinstance(v, (bytes, bytearray)) for v in dumped.values())
 
 
-def test_an_ungeoreferenced_grid_still_reports_the_number() -> None:
-    """The count is the evidence; a missing footprint must not suppress it."""
+def test_an_ungeoreferenced_grid_is_refused_for_the_count() -> None:
+    """Stage 5: without an established CRS the two bands are not a valid grid.
 
-    m = compute_ndwi_threshold_measurement(
-        grid_band(BOUNDARY_GREEN, crs=None),
-        grid_band(BOUNDARY_NIR, crs=None),
-        threshold=NdwiThreshold(operator="lte", value=1.0),
-        scene_id="s",
-        window_label="w",
-        acquired_at=None,
-    )
+    This used to report the count with no footprint. An unknown CRS must not
+    silently become valid, so the count is refused - loudly, with the reason.
+    """
 
-    assert m is not None
-    assert m.matching_pixel_count == 3
-    assert m.crs is None
-    assert m.corners_wgs84 is None
+    from app.services.analysis.geometry import GeometryError
+
+    with pytest.raises(GeometryError, match="could not be established"):
+        compute_ndwi_threshold_measurement(
+            grid_band(BOUNDARY_GREEN, crs=None),
+            grid_band(BOUNDARY_NIR, crs=None),
+            threshold=NdwiThreshold(operator="lte", value=1.0),
+            scene_id="s",
+            window_label="w",
+            acquired_at=None,
+        )
 
 
 # --- 15. malformed thresholds are refused at the contract ------------------ #

@@ -131,7 +131,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current backend figure is in section 23 (the scientific core, M1-M4), which also
+current backend figure is in section 23 (the scientific core, M1-M5), which also
 supersedes any statement below that the optical indices are not cloud-masked.
 
 ## Architecture Rules
@@ -1866,7 +1866,7 @@ credential is invented: a test needing one sets an obviously fake value itself.
 
 ---
 
-## 23. Scientific core — M1–M4 validation stages — IMPLEMENTED (2026-09-23)
+## 23. Scientific core — M1–M5 validation stages — IMPLEMENTED (2026-09-23)
 
 Before any index or backscatter number exists, four stages run in order. Each
 refuses BEFORE the cost it protects. Stage 1 failures are HTTP 422; stages 2-4
@@ -1912,6 +1912,27 @@ from `bits_per_sample` (15, recorded). Saturation comes from SCL class 1 only.
 `ObservationIndexResult.pixel_quality`, `.radiometry`. Optical reads: `scl` is
 read first, so a temporal comparison is six reads, and NDVI+NDWI+NDBI is five.
 
+### M5 - geometric validation (`analysis/geometry.py`)
+
+One authoritative rule set; `_require_matching_band_grids`,
+`coregister_to_finer_grid` and `_grids_are_comparable` all delegate to it. A
+band pair, a paired temporal change and a VV-VH difference need IDENTICAL grids
+(same CRS - equivalent spellings accepted - north-up, equal resolution per
+axis, equal dimensions and origin). A coarser raster placed on the 10 m grid
+(NDBI's SWIR, the SCL) must be EXACTLY NESTED: integer ratio on EACH axis, cell
+edges on pixel edges (a 20 m grid shifted 5 m is refused - before M5 it was
+silently misassigned), and overlap. Tolerance is 1e-6 px, for float noise only.
+Checked twice: before any read from the catalog's `proj:*` source grids (M2
+now records them per asset), and after the read on the actual windows. Unknown
+CRS is refused (the NDWI statistics and threshold count used to report on a
+CRS-less grid; two tests were updated to the refusal). The paired temporal
+change and the VV-VH difference are withheld on a mismatch; each side's own
+statistics never needed a common grid. `GridState` rides on
+`AnalysisResult.grids`, `ObservationIndexResult.grid` and
+`TemporalIndexComparison.pair_grid`, refusals included. Live: tiles 44PMV
+(EPSG:32644) and 43QBA (EPSG:32643), baselines 03.01/05.09/05.11 - SWIR and SCL
+nest 2:1 at offset 0; RTC VV/VH share the item grid.
+
 ### Known limitations
 
 - About 9% of 2022-23 scenes over Chennai (13 of 145: baseline >= 04.00 with the
@@ -1926,6 +1947,6 @@ read first, so a temporal comparison is six reads, and NDVI+NDWI+NDBI is five.
 
 | Check | Result |
 | --- | --- |
-| `pytest -q` | **2684 passed** (2316 before M1; +164 M1, +79 M2, +58 M3, +66 M4, +1 re-parametrized) |
+| `pytest -q` | **2748 passed** (2316 before M1; +164 M1, +79 M2, +58 M3, +66 M4, +64 M5, +1 re-parametrized) |
 | `ruff check .` / `git diff --check` | clean / clean |
 | frontend | not re-run in M1-M4: no frontend file changed |

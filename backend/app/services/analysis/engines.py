@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image
 
 from app.core.errors import ImageryError
+from app.services.analysis import geometry
 from app.services.analysis.indices import SpectralIndex
 from app.services.analysis.schemas import (
     Measurement,
@@ -83,13 +84,17 @@ _INDEX_UNIT = "index"
 
 
 def _require_matching_band_grids(high: BandWindow, low: BandWindow, label: str) -> None:
-    """Equal array shapes alone do not establish the same ground pixels."""
+    """Equal array shapes alone do not establish the same ground pixels.
 
-    if high.crs != low.crs or tuple(high.transform)[:6] != tuple(low.transform)[:6]:
-        raise ImageryError(
-            f"Cannot compute {label}: the band CRS or affine grids differ. "
-            "Both bands must describe the same ground pixels."
-        )
+    Stage 5: the rule is ``geometry.same_grid_problem`` - the one statement of
+    "same grid" every combining computation uses.
+    """
+
+    geometry.require(
+        geometry.same_grid_problem(geometry.Grid.of(high), geometry.Grid.of(low)),
+        f"Cannot compute {label}: the band CRS or affine grids differ. Both bands "
+        "must describe the same ground pixels",
+    )
 
 
 def _pair_operands(
@@ -301,23 +306,16 @@ def coregister_to_finer_grid(
     looks fine is worse than one that is declined.
     """
 
-    if coarse.crs != fine.crs:
-        raise ImageryError(
-            "Cannot align the bands: they are in different coordinate "
-            f"reference systems ({coarse.crs} vs {fine.crs})."
-        )
     if coarse.resolution is None or fine.resolution is None:
         raise ImageryError(
             "Cannot align the bands: the resolution of at least one is unknown."
         )
-    ratio = coarse.resolution / fine.resolution
-    if ratio < 1.0 or abs(ratio - round(ratio)) > 1e-9:
-        raise ImageryError(
-            "Cannot align the bands: the coarser band's resolution is not a "
-            f"whole multiple of the finer one's ({coarse.resolution} m vs "
-            f"{fine.resolution} m). Whole-cell assignment is only exact on a "
-            "nested grid."
-        )
+    # Stage 5: the relationship this assignment assumes - same CRS, north-up,
+    # an integer ratio on each axis, cell edges on pixel edges, overlap - is
+    # PROVED before a single value moves. A 20 m grid shifted by 5 m has the
+    # right ratio and the wrong ground, and is refused here.
+    _, problem = geometry.nesting(geometry.Grid.of(coarse), geometry.Grid.of(fine))
+    geometry.require(problem, "Cannot align the bands")
 
     fine_t = fine.transform
     coarse_t = coarse.transform
@@ -444,7 +442,15 @@ def render_ndwi_overlay(
     would assert measurements about ground that was never read.
     """
 
-    ndwi, valid = _ndwi_grid(green, nir)
+    try:
+        ndwi, valid = _ndwi_grid(green, nir)
+    except geometry.GeometryError as exc:
+        # A grid that cannot be POSITIONED (no CRS, not north-up) has no honest
+        # picture: None, exactly as before. Two bands on DIFFERENT ground are an
+        # error, and still raise.
+        if exc.code in ("grid_crs_unknown", "grid_orientation_unsupported"):
+            return None
+        raise
     count = int(np.count_nonzero(valid))
     if count == 0:
         return None
@@ -558,25 +564,15 @@ def _grids_are_comparable(baseline: BandWindow, target: BandWindow) -> str | Non
     them anyway would paint change wherever the grids disagree - a border of
     pure artefact around every image.
 
-    The affine is compared exactly. A ten-metre shift is a different pixel over
-    different ground, and no tolerance would make it the same one.
+    Stage 5: the rule is ``geometry.same_grid_problem``. Positions are compared
+    to a float-representation tolerance only (1e-6 px); a ten-metre shift is a
+    different pixel over different ground, and no tolerance makes it the same.
     """
 
-    if baseline.crs is None or target.crs is None:
-        return "the CRS of at least one observation could not be established"
-    if baseline.crs != target.crs:
-        return f"the observations are in different CRSs ({baseline.crs} vs {target.crs})"
-    if (baseline.width, baseline.height) != (target.width, target.height):
-        return (
-            "the observations cover different pixel dimensions "
-            f"({baseline.width}x{baseline.height} vs {target.width}x{target.height})"
-        )
-    if tuple(baseline.transform)[:6] != tuple(target.transform)[:6]:
-        return (
-            "the observations sit on different pixel grids: their affine "
-            "transforms differ, so the same pixel index is not the same ground"
-        )
-    return None
+    problem = geometry.same_grid_problem(
+        geometry.Grid.of(baseline), geometry.Grid.of(target)
+    )
+    return None if problem is None else problem[1].replace("they ", "the observations ", 1)
 
 
 def _change_rgba(change: np.ndarray, paired: np.ndarray) -> np.ndarray:

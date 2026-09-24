@@ -956,11 +956,14 @@ def test_flag_off_keeps_every_existing_field_and_adds_a_null_comparison() -> Non
         "pixel_quality",
         # Stage 4, additive: the radiometric state of each analysis assessed.
         "radiometry",
+        # Stage 5, additive: the grid of each analysis attempted.
+        "grids",
     }
     # The only intentional serialized differences, both null when unrequested.
     assert body["temporal_comparison"] is None
     assert body["pixel_quality"] == []
     assert body["radiometry"] == []
+    assert body["grids"] == []
     assert body["ndwi_overlay"] is None
     assert body["status"] == "ok"
     assert body["task"] == "visualize"

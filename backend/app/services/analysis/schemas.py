@@ -184,6 +184,58 @@ class PixelQuality(BaseModel):
         return self
 
 
+class GridInput(BaseModel):
+    """One raster that took part in a computation, and how it met the grid."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    crs: str | None = None
+    width: int
+    height: int
+    resolution_x: float
+    resolution_y: float
+    #: ``identical`` - the analysis grid itself or pixel-for-pixel equal to it;
+    #: ``nested`` - a coarser grid whose cells cover whole blocks of it.
+    relationship: Literal["analysis_grid", "identical", "nested"]
+    ratio_x: int | None = None
+    ratio_y: int | None = None
+    #: Coarse-origin offset from the analysis origin, in analysis pixels.
+    offset_x: int | None = None
+    offset_y: int | None = None
+
+
+class GridState(BaseModel):
+    """The grid a computation ran on - or the reason it was refused one.
+
+    Stage 5 of the scientific pipeline (``analysis.geometry``). ``stage`` says
+    whether the decision was made from the catalog's published source grids
+    (``pre_read``, before any pixel was read) or from the windows actually read
+    (``post_read``). No confidence is expressed: the rules are exact up to a
+    float-representation tolerance of ``geometry.TOLERANCE_PIXELS``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["valid", "refused"]
+    analysis: str
+    scene_id: str | None = None
+    stage: Literal["pre_read", "post_read"]
+    crs: str | None = None
+    width: int | None = None
+    height: int | None = None
+    resolution_x: float | None = None
+    resolution_y: float | None = None
+    transform: list[float] | None = None
+    origin: list[float] | None = None
+    #: ``[min_x, min_y, max_x, max_y]`` in ``crs``.
+    bounds: list[float] | None = None
+    grid_id: str | None = None
+    inputs: list[GridInput] = Field(default_factory=list)
+    refusal: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
 class AnalysisWindowRef(BaseModel):
     """Slim, traceable reference to one executed (modality, window) pair.
 
@@ -240,6 +292,8 @@ class ObservationIndexResult(BaseModel):
     pixel_quality: PixelQuality | None = None
     #: The radiometric representation its values were validated as (Stage 4).
     radiometry: RadiometricState | None = None
+    #: The grid this observation was indexed on (Stage 5).
+    grid: GridState | None = None
 
 
 class SpatialMeasurement(BaseModel):
@@ -398,6 +452,10 @@ class TemporalIndexComparison(BaseModel):
     #: identical. ``None`` when they were not - see ``warnings`` for why.
     change: NdwiTemporalChange | None = None
     warnings: list[str] = Field(default_factory=list)
+    #: Stage 5: whether the two observations share ONE grid, which the paired
+    #: change requires. ``refused`` withholds only the paired change - each
+    #: side's own statistics never needed a common grid.
+    pair_grid: GridState | None = None
 
 
 # =========================================================================== #
@@ -604,6 +662,9 @@ class AnalysisResult(BaseModel):
     #: REFUSED ones included, so a missing number can be traced to its reason.
     #: Temporal observations carry theirs on the comparison.
     radiometry: list[RadiometricState] = Field(default_factory=list)
+    #: Stage 5: the grid of every single-scene analysis attempted, refused ones
+    #: included. Temporal observations carry theirs on the comparison.
+    grids: list[GridState] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
