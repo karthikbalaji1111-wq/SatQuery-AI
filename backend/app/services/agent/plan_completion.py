@@ -148,6 +148,10 @@ _DEFINITION_LEAD = re.compile(
 _IS_DEFINED = re.compile(
     r"^\s*(?:is|are|stands\s+for|means|refers\s+to|measures)\b", re.IGNORECASE
 )
+#: "How leafy is Chennai?" asks HOW MUCH, not what "leafy" means: a lowercase
+#: word straight after "how" is a degree, so "<word> is" does not define it.
+#: An acronym ("How NDVI is computed") keeps the definition reading.
+_DEGREE_QUESTION = re.compile(r"(?<![A-Za-z0-9_])how\s+$", re.IGNORECASE)
 
 #: Quoted text is being discussed, not issued as an instruction.
 _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'|“[^”]*”")
@@ -199,7 +203,10 @@ def requested_matches(
                 if refused or (cue is not None and match.start() >= cue.start()):
                     continue
                 tail = sentence[offset + match.end() :]
-                if _IS_DEFINED.match(tail):
+                if _IS_DEFINED.match(tail) and not (
+                    match.group(0).islower()
+                    and _DEGREE_QUESTION.search(sentence[: offset + match.start()])
+                ):
                     continue
                 if _DEFINITION_LEAD.search(sentence[:at]):
                     continue

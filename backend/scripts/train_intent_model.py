@@ -1,6 +1,6 @@
 """Train, evaluate and export the SatQuery intent model.
 
-    uv run python scripts/train_intent_model.py          (from backend/)
+    uv run python scripts/train_intent_model.py [--baseline OLD.json.gz]   (from backend/)
 
 Reproducible end to end: the same dataset file and this script produce the
 same artifact bytes. Nothing is downloaded; scikit-learn is a DEV dependency
@@ -9,7 +9,7 @@ JSON with numpy (``app/services/agent/intent_model.py``).
 
 Protocol
 --------
-1. Load ``data/intent/satquery_intents_v1.jsonl`` and validate every row.
+1. Load ``data/intent/satquery_intents_v2.jsonl`` and validate every row.
 2. Mask places and dates with the deterministic reader (``classifier_text``),
    exactly as inference does, so the model learns operations, not cities.
 3. Group near-duplicates and cross-label twins into families (see
@@ -19,18 +19,22 @@ Protocol
 5. Fit the final model on train only.
 6. Choose the confidence threshold on out-of-fold train predictions plus the
    validation split: the lowest threshold at which at least 99% of accepted
-   predictions are correct. The test split takes no part in any choice.
+   predictions are correct, and never below ``THRESHOLD_FLOOR`` (0.90). The
+   test split takes no part in any choice.
 7. Evaluate once on test: model metrics, then the full decision rule
    (model + rules + guards) against the rules alone.
 8. Export the pipeline to JSON, reload it through the production loader, and
    refuse to write anything unless it reproduces scikit-learn's probabilities.
-9. Evaluate the fresh challenge set (``satquery_intents_v1_challenge.jsonl``),
-   written after every choice above was frozen. It influences nothing; its
-   numbers are reported as they fall, with each item's closest training match.
+9. Evaluate the challenge sets (``CHALLENGES``). ``satquery_intents_v2_
+   challenge.jsonl`` was written before any v2 training and influences
+   nothing; the v1 challenge set's misses informed dataset v2, so it is
+   reported as development data. With ``--baseline <artifact>`` the previous
+   model is evaluated on the same sets through the same rules (before -> after).
 """
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import gzip
 import hashlib
@@ -65,6 +69,7 @@ from app.services.agent.intent_model import (  # noqa: E402
     INTENT_LABELS,
     IntentModelError,
     parse_artifact,
+    read_artifact,
 )
 from app.services.agent.intent_router import route, route_operation  # noqa: E402
 from app.services.agent.interpretation import (  # noqa: E402
@@ -72,19 +77,31 @@ from app.services.agent.interpretation import (  # noqa: E402
     classifier_text,
 )
 
-DATASET = BACKEND / "data" / "intent" / "satquery_intents_v1.jsonl"
-CHALLENGE = BACKEND / "data" / "intent" / "satquery_intents_v1_challenge.jsonl"
-REPORT_JSON = BACKEND / "data" / "intent" / "evaluation_v1.json"
-REPORT_MD = BACKEND / "data" / "intent" / "evaluation_v1.md"
-MODEL_VERSION = "satquery-intent-v1"
+DATASET = BACKEND / "data" / "intent" / "satquery_intents_v2.jsonl"
+#: (name, path, role). Only the FIRST is held out from every choice. The v1
+#: challenge set was evaluated once against v1; its misses were then read and
+#: informed dataset v2, so for v2 it is development data and is labelled so.
+CHALLENGES = (
+    ("challenge_v2", BACKEND / "data" / "intent" / "satquery_intents_v2_challenge.jsonl",
+     "held out: written before any v2 training, evaluated once"),
+    ("challenge_v1", BACKEND / "data" / "intent" / "satquery_intents_v1_challenge.jsonl",
+     "development: its v1 misses were inspected and informed dataset v2"),
+)
+REPORT_JSON = BACKEND / "data" / "intent" / "evaluation_v2.json"
+REPORT_MD = BACKEND / "data" / "intent" / "evaluation_v2.md"
+MODEL_VERSION = "satquery-intent-v2"
 
-SEED = "satquery-intent-v1"
+SEED = "satquery-intent-v2"
 SPLIT = (0.70, 0.15, 0.15)
 NEAR_DUPLICATE_JACCARD = 0.75
 TWIN_JACCARD = 0.55
 C_GRID = (1.0, 3.0, 10.0, 30.0, 100.0)
 THRESHOLD_GRID = tuple(round(0.30 + 0.05 * i, 2) for i in range(14))  # 0.30 .. 0.95
 TARGET_ACCEPTED_PRECISION = 0.99
+#: The shipped threshold is never below this, whatever the calibration finds.
+#: A lower threshold would raise coverage by acting on less certain predictions;
+#: coverage is to come from better data, not from a looser rule.
+THRESHOLD_FLOOR = 0.90
 #: "Today" for the full-pipeline evaluation, pinned so the report is
 #: reproducible: a future-date refusal must not depend on when it is re-run.
 EVALUATION_DATE = date(2026, 9, 24)
@@ -370,7 +387,60 @@ def system_summary(rows: list[dict], classifier, judge=system_outcome) -> dict:
 # --------------------------------------------------------------------------- #
 
 
-def main() -> None:
+def evaluate_challenge(
+    path: Path, role: str, classifier, train_shingles: list[set[str]] | None
+) -> dict:
+    """One challenge set through the model alone and through the full rule.
+
+    ``train_shingles`` gives each item's closest training match; it is ``None``
+    for a baseline artifact, whose training rows are not this run's.
+    """
+
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    for row in rows:
+        row["masked"] = classifier_text(row["text"])
+    predictions = [classifier.predict(r["masked"]) for r in rows]
+    threshold = classifier.threshold
+    correct = [p.label == r["intent"] for p, r in zip(predictions, rows, strict=True)]
+    report = {
+        "path": str(path.relative_to(BACKEND)),
+        "role": role,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "model": metrics([r["intent"] for r in rows], [p.label for p in predictions]),
+        "at_threshold": threshold_table(correct, [p.confidence for p in predictions])[
+            THRESHOLD_GRID.index(threshold)
+        ],
+        "system": {
+            "model_plus_rules": system_summary(rows, classifier),
+            "rules_only": system_summary(rows, None),
+            "full_pipeline_model_plus_rules": system_summary(
+                rows, classifier, system_outcome_full
+            ),
+            "full_pipeline_rules_only": system_summary(rows, None, system_outcome_full),
+        },
+        "misclassified": [
+            {"id": r["id"], "text": r["text"], "intent": r["intent"], "predicted": p.label,
+             "confidence": round(p.confidence, 4), "acted_on": p.confidence >= threshold}
+            for r, p in zip(rows, predictions, strict=True)
+            if p.label != r["intent"]
+        ],
+    }
+    if train_shingles is not None:
+
+        def closest(text: str) -> float:
+            mine = _shingles(_normalised(text))
+            return max(len(mine & other) / len(mine | other) for other in train_shingles)
+
+        nearest = [closest(r["masked"]) for r in rows]
+        report["max_masked_jaccard_to_train"] = max(nearest)
+        report["items_at_or_above_near_duplicate_threshold"] = sum(
+            n >= NEAR_DUPLICATE_JACCARD for n in nearest
+        )
+    return report
+
+
+def main(baseline: Path | None = None) -> None:
+    baseline_model = read_artifact(baseline) if baseline is not None else None
     raw = DATASET.read_bytes()
     rows = load_dataset()
     for row in rows:
@@ -423,7 +493,7 @@ def main() -> None:
     ]
     calibration_conf = [*oof_conf, *val_conf]
     calibration = threshold_table(calibration_correct, calibration_conf)
-    threshold = choose_threshold(calibration)
+    threshold = max(THRESHOLD_FLOOR, choose_threshold(calibration))
 
     # --- 7. test, once ----------------------------------------------------------
     test_proba = pipeline.predict_proba(texts["test"])
@@ -434,7 +504,7 @@ def main() -> None:
     # --- 8. export and verify ---------------------------------------------------
     metadata = {
         "dataset": {
-            "path": "data/intent/satquery_intents_v1.jsonl",
+            "path": str(DATASET.relative_to(BACKEND)),
             "sha256": hashlib.sha256(raw).hexdigest(),
             "examples": len(rows),
             "per_class": dict(sorted(Counter(r["intent"] for r in rows).items())),
@@ -459,8 +529,9 @@ def main() -> None:
             "threshold_rule": (
                 f"lowest of {THRESHOLD_GRID[0]}..{THRESHOLD_GRID[-1]} with accepted "
                 f"precision >= {TARGET_ACCEPTED_PRECISION} on out-of-fold train "
-                "plus validation predictions"
+                f"plus validation predictions, never below {THRESHOLD_FLOOR}"
             ),
+            "threshold_calibrated": choose_threshold(calibration),
             "scikit_learn": sklearn.__version__,
             "input": "classifier_text(): places -> PLACE, dates -> DATE",
         },
@@ -488,8 +559,6 @@ def main() -> None:
 
     # latency and memory, through the production loader
     tracemalloc.start()
-    from app.services.agent.intent_model import read_artifact
-
     loaded = read_artifact(DEFAULT_ARTIFACT)
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
@@ -512,46 +581,31 @@ def main() -> None:
         for r, p, c, ok in zip(part["test"], test_pred, test_conf, test_correct, strict=True)
         if not ok
     ]
-    # --- 9. the fresh challenge set, evaluated once ------------------------------
-    challenge = [
-        json.loads(line) for line in CHALLENGE.read_text(encoding="utf-8").splitlines() if line
-    ]
-    for row in challenge:
-        row["masked"] = classifier_text(row["text"])
+    # --- 9. the challenge sets, evaluated once -----------------------------------
     train_shingles = [_shingles(_normalised(r["masked"])) for r in part["train"]]
-
-    def closest(text: str) -> float:
-        mine = _shingles(_normalised(text))
-        return max(len(mine & other) / len(mine | other) for other in train_shingles)
-
-    challenge_pred = [loaded.predict(r["masked"]) for r in challenge]
-    challenge_report = {
-        "path": str(CHALLENGE.relative_to(BACKEND)),
-        "sha256": hashlib.sha256(CHALLENGE.read_bytes()).hexdigest(),
-        "model": metrics([r["intent"] for r in challenge], [p.label for p in challenge_pred]),
-        "at_threshold": threshold_table(
-            [p.label == r["intent"] for p, r in zip(challenge_pred, challenge, strict=True)],
-            [p.confidence for p in challenge_pred],
-        )[THRESHOLD_GRID.index(threshold)],
-        "system": {
-            "model_plus_rules": system_summary(challenge, loaded),
-            "rules_only": system_summary(challenge, None),
-            "full_pipeline_model_plus_rules": system_summary(
-                challenge, loaded, system_outcome_full
-            ),
-            "full_pipeline_rules_only": system_summary(challenge, None, system_outcome_full),
-        },
-        "max_masked_jaccard_to_train": max(closest(r["masked"]) for r in challenge),
-        "items_at_or_above_near_duplicate_threshold": sum(
-            closest(r["masked"]) >= NEAR_DUPLICATE_JACCARD for r in challenge
-        ),
-        "misclassified": [
-            {"id": r["id"], "text": r["text"], "intent": r["intent"], "predicted": p.label,
-             "confidence": round(p.confidence, 4), "acted_on": p.confidence >= threshold}
-            for r, p in zip(challenge, challenge_pred, strict=True)
-            if p.label != r["intent"]
-        ],
+    challenges = {
+        name: evaluate_challenge(path, role, loaded, train_shingles)
+        for name, path, role in CHALLENGES
     }
+    baseline = (
+        {
+            "path": baseline.name,
+            "sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
+            "model_version": baseline_model.version,
+            "threshold": baseline_model.threshold,
+            "note": (
+                "the previous artifact through TODAY's rules and guards, so the "
+                "comparison isolates the model; its own training rows may overlap "
+                "challenge_v1 only as that set's role states"
+            ),
+            "challenges": {
+                name: evaluate_challenge(path, role, baseline_model, None)
+                for name, path, role in CHALLENGES
+            },
+        }
+        if baseline is not None and baseline_model is not None
+        else None
+    )
 
     report = {
         "model_version": MODEL_VERSION,
@@ -588,12 +642,77 @@ def main() -> None:
             ),
             "full_pipeline_rules_only": system_summary(part["test"], None, system_outcome_full),
         },
-        "challenge": challenge_report,
+        "challenges": challenges,
+        "baseline": baseline,
         "metadata": metadata,
     }
     REPORT_JSON.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     REPORT_MD.write_text(render_markdown(report))
     print(render_markdown(report))
+
+
+def render_challenge(
+    name: str, ch: dict, threshold: float, labels: list[str], short: dict[str, str]
+) -> list[str]:
+    cm = ch["model"]
+    lines = [
+        "",
+        f"## Challenge set `{name}` - {ch['role']}",
+        "",
+        f"- `{ch['path']}`, n = {cm['count']}"
+        + (
+            f"; closest training match: max masked Jaccard "
+            f"{ch['max_masked_jaccard_to_train']:.3f}, "
+            f"{ch['items_at_or_above_near_duplicate_threshold']} item(s) at or above "
+            f"{NEAR_DUPLICATE_JACCARD}"
+            if "max_masked_jaccard_to_train" in ch
+            else ""
+        ),
+        f"- Model: accuracy {cm['accuracy']:.4f}; macro F1 {cm['macro_f1']:.4f}; "
+        f"weighted F1 {cm['weighted_f1']:.4f}",
+        f"- At threshold {threshold}: {ch['at_threshold']['accepted']} acted on "
+        f"(coverage {ch['at_threshold']['coverage']:.3f}), "
+        f"{ch['at_threshold']['accepted_errors']} wrong",
+        "",
+        "| class | precision | recall | F1 | support |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for label, row in cm["per_class"].items():
+        lines.append(
+            f"| {label} | {row['precision']:.3f} | {row['recall']:.3f} | "
+            f"{row['f1']:.3f} | {row['support']} |"
+        )
+    lines += ["", "Confusion matrix (rows = true, columns = predicted):", "",
+              "| | " + " | ".join(short.get(lab, lab) for lab in labels) + " |",
+              "| --- |" + " --- |" * len(labels)]
+    for label, row in zip(labels, cm["confusion_matrix"]["rows_true_columns_predicted"],
+                          strict=True):
+        lines.append(f"| {short.get(label, label)} | " + " | ".join(str(v) for v in row) + " |")
+    lines += ["", "| | correct | clarified safely | WRONG operation executed |",
+              "| --- | --- | --- | --- |"]
+    for title, key in (
+        ("operation only: model + rules", "model_plus_rules"),
+        ("operation only: rules only (M5.5)", "rules_only"),
+        ("full pipeline: model + rules", "full_pipeline_model_plus_rules"),
+        ("full pipeline: rules only (M5.5)", "full_pipeline_rules_only"),
+    ):
+        sy = ch["system"][key]
+        lines.append(
+            f"| {title} | {sy['correct']} | {sy['clarified_safely']} | "
+            f"{sy['wrong_operation_executed']} |"
+        )
+    lines += ["", "Misclassified by the model:", ""]
+    if not ch["misclassified"]:
+        lines.append("None.")
+    for m in ch["misclassified"]:
+        lines.append(
+            f"- `{m['id']}` {m['intent']} -> {m['predicted']} ({m['confidence']}, "
+            f"{'ACTED ON' if m['acted_on'] else 'below threshold'}): {m['text']}"
+        )
+    lines += ["", "Non-correct outcomes, full pipeline, model + rules:", ""]
+    for e in ch["system"]["full_pipeline_model_plus_rules"]["examples"]:
+        lines.append(f"- `{e['id']}` {e['intent']}: {e['outcome']} ({e['detail']}) - {e['text']}")
+    return lines
 
 
 def render_markdown(report: dict) -> str:
@@ -659,7 +778,8 @@ def render_markdown(report: dict) -> str:
         "",
         f"## Threshold: {report['threshold']}",
         "",
-        f"Rule: {report['metadata']['training']['threshold_rule']}.",
+        f"Rule: {report['metadata']['training']['threshold_rule']}. The calibration "
+        f"alone chose {report['metadata']['training']['threshold_calibrated']}.",
         "",
         "| threshold | accepted | coverage | accepted errors | accepted precision |",
         "| --- | --- | --- | --- | --- |",
@@ -703,60 +823,44 @@ def render_markdown(report: dict) -> str:
     for e in report["system_on_test"]["model_plus_rules"]["examples"]:
         lines.append(f"- `{e['id']}` {e['intent']}: {e['outcome']} ({e['detail']}) - {e['text']}")
 
-    ch = report["challenge"]
-    cm = ch["model"]
-    lines += [
-        "",
-        "## Fresh challenge set (written after every choice was frozen; evaluated once)",
-        "",
-        f"- `{ch['path']}`, n = {cm['count']}; closest training match: max masked "
-        f"Jaccard {ch['max_masked_jaccard_to_train']:.3f}, "
-        f"{ch['items_at_or_above_near_duplicate_threshold']} item(s) at or above "
-        f"{NEAR_DUPLICATE_JACCARD}",
-        f"- Model: accuracy {cm['accuracy']:.4f}; macro F1 {cm['macro_f1']:.4f}; "
-        f"weighted F1 {cm['weighted_f1']:.4f}",
-        f"- At threshold {report['threshold']}: {ch['at_threshold']['accepted']} acted on "
-        f"(coverage {ch['at_threshold']['coverage']:.3f}), "
-        f"{ch['at_threshold']['accepted_errors']} wrong",
-        "",
-        "| class | precision | recall | F1 | support |",
-        "| --- | --- | --- | --- | --- |",
-    ]
-    for label, row in cm["per_class"].items():
-        lines.append(
-            f"| {label} | {row['precision']:.3f} | {row['recall']:.3f} | "
-            f"{row['f1']:.3f} | {row['support']} |"
-        )
-    lines += ["", "Confusion matrix (rows = true, columns = predicted):", "",
-              "| | " + " | ".join(short.get(lab, lab) for lab in labels) + " |",
-              "| --- |" + " --- |" * len(labels)]
-    for label, row in zip(labels, cm["confusion_matrix"]["rows_true_columns_predicted"],
-                          strict=True):
-        lines.append(f"| {short.get(label, label)} | " + " | ".join(str(v) for v in row) + " |")
-    lines += ["", "| | correct | clarified safely | WRONG operation executed |",
-              "| --- | --- | --- | --- |"]
-    for name, key in (
-        ("operation only: model + rules", "model_plus_rules"),
-        ("operation only: rules only (M5.5)", "rules_only"),
-        ("full pipeline: model + rules", "full_pipeline_model_plus_rules"),
-        ("full pipeline: rules only (M5.5)", "full_pipeline_rules_only"),
-    ):
-        sy = ch["system"][key]
-        lines.append(
-            f"| {name} | {sy['correct']} | {sy['clarified_safely']} | "
-            f"{sy['wrong_operation_executed']} |"
-        )
-    lines += ["", "Misclassified by the model:", ""]
-    for m in ch["misclassified"]:
-        lines.append(
-            f"- `{m['id']}` {m['intent']} -> {m['predicted']} ({m['confidence']}, "
-            f"{'ACTED ON' if m['acted_on'] else 'below threshold'}): {m['text']}"
-        )
-    lines += ["", "Non-correct outcomes, full pipeline, model + rules:", ""]
-    for e in ch["system"]["full_pipeline_model_plus_rules"]["examples"]:
-        lines.append(f"- `{e['id']}` {e['intent']}: {e['outcome']} ({e['detail']}) - {e['text']}")
+    for name, ch in report["challenges"].items():
+        lines += render_challenge(name, ch, report["threshold"], labels, short)
+    if report["baseline"] is not None:
+        b = report["baseline"]
+        lines += [
+            "",
+            f"## Before -> after: {b['model_version']} (threshold {b['threshold']}) -> "
+            f"{report['model_version']} (threshold {report['threshold']})",
+            "",
+            f"Baseline: `{b['path']}` (sha256 `{b['sha256'][:16]}...`) - {b['note']}.",
+            "",
+            "| set | model | macro F1 | acted on (coverage) | acted on wrong | "
+            "full pipeline correct | clarified | WRONG executed |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for name, after in report["challenges"].items():
+            for version, ch in ((b["model_version"], b["challenges"][name]),
+                                (report["model_version"], after)):
+                at = ch["at_threshold"]
+                sy = ch["system"]["full_pipeline_model_plus_rules"]
+                lines.append(
+                    f"| {name} | {version} | {ch['model']['macro_f1']:.4f} | "
+                    f"{at['accepted']} ({at['coverage']:.3f}) | {at['accepted_errors']} | "
+                    f"{sy['correct']} | {sy['clarified_safely']} | "
+                    f"{sy['wrong_operation_executed']} |"
+                )
+            ro = after["system"]["full_pipeline_rules_only"]
+            lines.append(
+                f"| {name} | rules only | - | - | - | {ro['correct']} | "
+                f"{ro['clarified_safely']} | {ro['wrong_operation_executed']} |"
+            )
     return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument(
+        "--baseline", type=Path, default=None,
+        help="a previous artifact to evaluate on the same challenge sets (before -> after)",
+    )
+    main(parser.parse_args().baseline)

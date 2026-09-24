@@ -1,0 +1,120 @@
+{"id": "challenge2-ndvi-01", "text": "How leafy is Jubilee Hills in January 2025", "intent": "NDVI"}
+{"id": "challenge2-ndvi-02", "text": "vegetation health around Lalgudi in November 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-03", "text": "NDVI Kodagu December 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-04", "text": "How green is the Aralam sanctuary in October 2024?", "intent": "NDVI"}
+{"id": "challenge2-ndvi-05", "text": "crop vigour near Hoshiarpur in February 2025", "intent": "NDVI"}
+{"id": "challenge2-ndvi-06", "text": "What is the greenness of the Satpura hills in 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-07", "text": "Plant health index for the areca farms near Puttur in 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-08", "text": "How lush is Thekkady in September 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-09", "text": "Show me the vegetation index of Bannerghatta in 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-10", "text": "is the forest near Amboli healthy in August 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-11", "text": "green cover Sholinganallur 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-12", "text": "Measure crop health around Bathinda in December 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-13", "text": "How vigorous is the vegetation at 12.84, 77.58 in January 2025", "intent": "NDVI"}
+{"id": "challenge2-ndvi-14", "text": "leafy canopy around Kurseong in 2024", "intent": "NDVI"}
+{"id": "challenge2-ndvi-15", "text": "Check vegetation near Yercaud for March 2025", "intent": "NDVI"}
+{"id": "challenge2-ndwi-01", "text": "water extent Ambazari lake January 2025", "intent": "NDWI"}
+{"id": "challenge2-ndwi-02", "text": "How much surface water is at Bhimtal in November 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-03", "text": "What is the water spread at Linganamakki in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-04", "text": "Show me water around Karanja lake in December 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-05", "text": "NDWI Hebbal lake 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-06", "text": "Is there water in the Siruvani reservoir in March 2025", "intent": "NDWI"}
+{"id": "challenge2-ndwi-07", "text": "water presence near the Sambhar salt flats in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-08", "text": "How wet is the Nalsarovar wetland in October 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-09", "text": "Measure the lake water at Kankaria in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-10", "text": "surface water index for Rankala lake in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-11", "text": "Water coverage at 17.45, 78.37 in January 2025", "intent": "NDWI"}
+{"id": "challenge2-ndwi-12", "text": "How full of water is the Malampuzha dam in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-13", "text": "Open water around the Deepor Beel in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-14", "text": "water status Tawa reservoir December 2024", "intent": "NDWI"}
+{"id": "challenge2-ndwi-15", "text": "Check the water body at Lonar lake in 2024", "intent": "NDWI"}
+{"id": "challenge2-ndbi-01", "text": "How built up is Kondapur in January 2025", "intent": "NDBI"}
+{"id": "challenge2-ndbi-02", "text": "urbanization around Hebbal in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-03", "text": "built-up area Magarpatta 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-04", "text": "How much concrete is in Bandra in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-05", "text": "developed area index for Yelahanka in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-06", "text": "Is Gachibowli densely built in December 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-07", "text": "impervious surface cover near Sanpada in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-08", "text": "NDBI Adyar 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-09", "text": "How urban is the Rajarhat new town in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-10", "text": "settlement footprint around Bommanahalli in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-11", "text": "Measure built-up land at 19.07, 72.88 in January 2025", "intent": "NDBI"}
+{"id": "challenge2-ndbi-12", "text": "paved area around Karol Bagh in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-13", "text": "Built environment of Hinjewadi phase 3 in 2024", "intent": "NDBI"}
+{"id": "challenge2-ndbi-14", "text": "construction cover near Kharghar in March 2025", "intent": "NDBI"}
+{"id": "challenge2-ndbi-15", "text": "How developed is Electronic City in 2024", "intent": "NDBI"}
+{"id": "challenge2-sar-01", "text": "radar backscatter Kolkata port January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-02", "text": "SAR signal over the Chilika lagoon in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-03", "text": "Sentinel-1 backscatter around Haldia in November 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-04", "text": "What is the VV backscatter at Kandla in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-05", "text": "VH polarisation at Paradip in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-06", "text": "microwave radar over Kochi backwaters in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-07", "text": "Check radar at Ennore in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-08", "text": "backscatter in dB near Mormugao in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-09", "text": "How strong is the radar return from Vizhinjam in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-10", "text": "SAR Kakinada 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-11", "text": "radar intensity at 21.97, 86.73 in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-12", "text": "Measure Sentinel-1 VV and VH over Mangaluru in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-13", "text": "gamma naught backscatter for Tuticorin in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-14", "text": "radar data for the Sundarbans delta in March 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-sar-15", "text": "C band backscatter over Karaikal in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge2-tndwi-01", "text": "Has water at Ambazari lake increased from January 2024 to January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-02", "text": "water change Hebbal lake 2023 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-03", "text": "Did surface water at Bhimtal decrease between 2022 and 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-04", "text": "Compare water at Karanja lake in December 2023 and December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-05", "text": "Water extent at Linganamakki before and after the monsoon, May 2024 vs October 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-06", "text": "How did the water spread at Malampuzha change from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-07", "text": "Is there more water in Siruvani in March 2025 than in March 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-08", "text": "water at Rankala lake, 2023 compared with 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-09", "text": "Did the Nalsarovar wetland dry out between January and May 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-10", "text": "Surface water at Kankaria: 2022 against 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-11", "text": "How has water at Deepor Beel changed from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-12", "text": "Water difference at 17.45, 78.37 between January 2024 and January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-13", "text": "compare surface water Tawa reservoir 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-14", "text": "Has the water at Lonar lake risen between 2021 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-tndwi-15", "text": "Water presence at Sambhar, January 2024 versus January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge2-rgb-01", "text": "satellite image Jubilee Hills January 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-02", "text": "Show me the true colour picture of Thekkady in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-03", "text": "RGB view of Kodagu in December 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-04", "text": "Fetch the Sentinel-2 image around Lalgudi in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-05", "text": "Give me a satellite photo of Yercaud in March 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-06", "text": "natural colour view of Bannerghatta in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-07", "text": "Display the satellite picture of Amboli in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-08", "text": "true colour image Kurseong 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-09", "text": "Show the optical imagery for Puttur in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-10", "text": "Pull up the satellite scene of Hoshiarpur in February 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-11", "text": "Show the image at 12.84, 77.58 in January 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-12", "text": "RGB snapshot of Satpura in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-13", "text": "Colour satellite image of Aralam in October 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-14", "text": "Just show Sholinganallur from the satellite in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-rgb-15", "text": "Sentinel-2 photo of Bathinda in December 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge2-clar-01", "text": "Analyze Jubilee Hills", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-02", "text": "Check Lalgudi in 2024", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-03", "text": "What is happening at Kodagu?", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-04", "text": "Report for Thekkady in September 2024", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-05", "text": "Compare Hoshiarpur in 2023 and 2024", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-06", "text": "Show results for Satpura", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-07", "text": "Tell me about Puttur", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-08", "text": "What changed at Bannerghatta between 2022 and 2024?", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-09", "text": "Analyse Amboli in August 2024", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-10", "text": "numbers for Sholinganallur", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-11", "text": "Evaluate Bathinda", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-12", "text": "Analyze the area at 12.84, 77.58", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-13", "text": "Kurseong 2024", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-14", "text": "What should I measure at Yercaud?", "intent": "CLARIFICATION"}
+{"id": "challenge2-clar-15", "text": "Run an analysis near Hebbal", "intent": "CLARIFICATION"}
+{"id": "challenge2-unsup-01", "text": "What is the soil moisture around Lalgudi in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-02", "text": "Count the boats at Kochi harbour", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-03", "text": "Map snow cover on Kedarnath in January 2025", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-04", "text": "Has the vegetation of Kodagu declined from 2020 to 2024?", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-05", "text": "Did urbanization increase around Hebbal between 2015 and 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-06", "text": "Land surface temperature over Hoshiarpur in May 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-07", "text": "Predict the crop yield near Bathinda for 2025", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-08", "text": "Classify the land cover of Satpura in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-09", "text": "Show the flood extent near Kochi in August 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-10", "text": "Estimate the carbon stored in the Bannerghatta forest", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-11", "text": "Detect illegal buildings near Magarpatta in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-12", "text": "What is the air quality over Yelahanka in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-13", "text": "Estimate the depth of Lonar lake", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-14", "text": "Describe what the satellite image of Amboli shows in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge2-unsup-15", "text": "Measure rainfall over Thekkady in 2024", "intent": "UNSUPPORTED"}
