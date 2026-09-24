@@ -34,6 +34,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.services.analysis import geometry
 from app.services.analysis.engines import (
     _grids_are_comparable,
     compare_ndwi_observations,
@@ -57,6 +58,7 @@ from app.services.analysis.schemas import (
     AnalysisRequest,
     AnalysisResult,
     AnalysisWindowRef,
+    GridState,
     Measurement,
     NdwiOverlay,
     ObservationIndexResult,
@@ -311,6 +313,37 @@ def _radiometry_summary(label: str, state: RadiometricState) -> str:
     )
 
 
+def _source_geometry(
+    scene: ValidatedScene | None, scientific: tuple[str, ...], placed: tuple[str, ...]
+) -> tuple[geometry.Problem, list[str]]:
+    """Stage 5 before any read: the catalog's source grids for these assets."""
+
+    if scene is None:
+        return None, []
+    assets = {
+        key: asset
+        for key in (*scientific, *placed)
+        if (asset := scene.asset(key)) is not None
+    }
+    return geometry.source_problem(assets, None, scientific=scientific)
+
+
+def _geometry_refusal(
+    analysis: str,
+    scene_id: str | None,
+    problem: tuple[str, str],
+    stage: str,
+) -> tuple[GridState, str]:
+    """The refused GridState and the warning text, for one geometric refusal."""
+
+    code, reason = problem
+    state = geometry.grid_state(
+        analysis=analysis, scene_id=scene_id, grid=None, refusal=f"{code}: {reason}",
+        stage=stage,  # type: ignore[arg-type]
+    )
+    return state, f"Geometric validation failed ({code}): {reason}."
+
+
 def _quality_warnings(label: str, quality: PixelQuality) -> list[str]:
     return [f"{label} pixel quality: {note}" for note in quality.quality_notes]
 
@@ -434,6 +467,7 @@ class AnalysisService(DomainService):
         execution: QueryExecutionResult,
         keys: tuple[str, ...],
         radiometry: list[RadiometricState],
+        grids: list[GridState],
     ) -> tuple[list[Measurement], list[str], list[PixelQuality]]:
         """Compute several spectral indices over one optical window.
 
@@ -511,6 +545,18 @@ class AnalysisService(DomainService):
                     warnings.append(f"{index.label} was not computed: {exc.message}")
                     continue
                 warnings.append(_radiometry_summary(index.label, state))
+            # Stage 5, before any read: the catalog's source grids for this
+            # index's bands and the SCL must be identical or exactly nested.
+            problem, _ = _source_geometry(
+                scene, (index.high_band, index.low_band), (_SCL_ASSET,)
+            )
+            if problem is not None:
+                refused, text = _geometry_refusal(
+                    index.key, window.selected_scene_id, problem, "pre_read"
+                )
+                grids.append(refused)
+                warnings.append(f"{index.label} was not computed: {text}")
+                continue
             runnable.append(key)
         if not runnable:
             return [], warnings, []
@@ -561,6 +607,7 @@ class AnalysisService(DomainService):
             low = bands.get(index.low_band)
             if high is None or low is None:
                 continue
+            high_source, low_source = high, low
             try:
                 # Bands of different native resolution are placed on the finer
                 # grid by explicit whole-cell assignment, never implicitly.
@@ -590,6 +637,27 @@ class AnalysisService(DomainService):
                 measurements.extend(quality_measurements(masked.quality))
                 qualities.append(masked.quality)
                 warnings.extend(_quality_warnings(index.label, masked.quality))
+                analysis_grid = geometry.Grid.of(high)
+                state = geometry.grid_state(
+                    analysis=index.key,
+                    scene_id=window.selected_scene_id,
+                    grid=analysis_grid,
+                    inputs=[
+                        geometry.grid_input(index.high_band, high_source, analysis_grid),
+                        geometry.grid_input(index.low_band, low_source, analysis_grid),
+                        geometry.grid_input(_SCL_ASSET, scl, analysis_grid),
+                    ],
+                )
+                grids.append(state)
+                warnings.append(geometry.summary(index.label, state))
+            except geometry.GeometryError as exc:
+                refused, text = _geometry_refusal(
+                    index.key, window.selected_scene_id, (exc.code, exc.reason),
+                    "post_read",
+                )
+                grids.append(refused)
+                warnings.append(f"{index.label} could not be computed: {text}")
+                continue
             except AppError as exc:
                 warnings.append(
                     f"{index.label} could not be computed: {exc.message}"
@@ -608,6 +676,7 @@ class AnalysisService(DomainService):
         self,
         execution: QueryExecutionResult,
         radiometry: list[RadiometricState],
+        grids: list[GridState],
         *,
         with_overlay: bool = False,
     ) -> tuple[
@@ -663,6 +732,15 @@ class AnalysisService(DomainService):
                 )
                 radiometry.append(radiometric)
                 require_usable(radiometric)
+                # Stage 5, before any read.
+                problem, _ = _source_geometry(
+                    scene, (_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET), (_SCL_ASSET,)
+                )
+                if problem is not None:
+                    raise geometry.GeometryError(
+                        problem[0], _geometry_refusal("ndwi", None, problem, "pre_read")[1],
+                        stage="pre_read",
+                    )
             scl = await self._read_scl(
                 scene_id=window.selected_scene_id, bbox=bbox, collection=collection
             )
@@ -692,6 +770,7 @@ class AnalysisService(DomainService):
             )
             # Everything below reads the MASKED pair: the statistics, the
             # overlay and the threshold count describe the same usable pixels.
+            green_source, nir_source = green, nir
             green, nir = masked.high, masked.low
             measurements = compute_ndwi_measurements(green, nir)
             measurements.extend(quality_measurements(masked.quality))
@@ -724,6 +803,13 @@ class AnalysisService(DomainService):
                 else None
             )
         except AppError as exc:
+            if isinstance(exc, geometry.GeometryError):
+                grids.append(
+                    geometry.grid_state(
+                        analysis="ndwi", scene_id=window.selected_scene_id, grid=None,
+                        refusal=f"{exc.code}: {exc.reason}", stage=exc.stage,
+                    )
+                )
             logger.info(
                 "NDWI unavailable for window %s [%s]: %s",
                 window.label,
@@ -740,6 +826,19 @@ class AnalysisService(DomainService):
         if radiometric is not None:
             warnings.append(_radiometry_summary("NDWI", radiometric))
         warnings.extend(_quality_warnings("NDWI", masked.quality))
+        analysis_grid = geometry.Grid.of(green)
+        ndwi_grid = geometry.grid_state(
+            analysis="ndwi",
+            scene_id=window.selected_scene_id,
+            grid=analysis_grid,
+            inputs=[
+                geometry.grid_input(_NDWI_GREEN_ASSET, green_source, analysis_grid),
+                geometry.grid_input(_NDWI_NIR_ASSET, nir_source, analysis_grid),
+                geometry.grid_input(_SCL_ASSET, scl, analysis_grid),
+            ],
+        )
+        grids.append(ndwi_grid)
+        warnings.append(geometry.summary("NDWI", ndwi_grid))
         warnings.append(
             "NDWI values are a spectral index computed from raw Sentinel-2 "
             "digital numbers; they are not a validated water or flood "
@@ -807,7 +906,9 @@ class AnalysisService(DomainService):
             window_label=observation.window_label,
             scl_metadata_status=scl_metadata_status,
         )
+        green_source, nir_source = green, nir
         green, nir = masked.high, masked.low
+        observation_grid = geometry.Grid.of(green)
         result = ObservationIndexResult(
             window_label=observation.window_label,
             scene_id=observation.scene_id,
@@ -819,6 +920,16 @@ class AnalysisService(DomainService):
             ],
             pixel_quality=masked.quality,
             radiometry=radiometry,
+            grid=geometry.grid_state(
+                analysis="ndwi",
+                scene_id=observation.scene_id,
+                grid=observation_grid,
+                inputs=[
+                    geometry.grid_input(_NDWI_GREEN_ASSET, green_source, observation_grid),
+                    geometry.grid_input(_NDWI_NIR_ASSET, nir_source, observation_grid),
+                    geometry.grid_input(_SCL_ASSET, scl, observation_grid),
+                ],
+            ),
             # Evidence from the read itself. Both bands come from one scene and
             # share a grid, so ``green`` describes the read; carrying it lets
             # the engine state the AOI coverage and the grid actually used
@@ -905,6 +1016,20 @@ class AnalysisService(DomainService):
                 problem = radiometric_pair_problem(states[0], states[1])  # type: ignore[arg-type]
                 if problem is not None:
                     raise RadiometricValidationError("radiometric_incompatible", problem)
+                # Stage 5, before any of the six reads: each scene's source
+                # grids for green, NIR and the SCL.
+                for validated in (first_scene, second_scene):
+                    source, _ = _source_geometry(
+                        validated, (_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET), (_SCL_ASSET,)
+                    )
+                    if source is not None:
+                        raise geometry.GeometryError(
+                            source[0],
+                            _geometry_refusal(
+                                "ndwi", validated.scene_id, source, "pre_read"
+                            )[1],
+                            stage="pre_read",
+                        )
             first, first_green, first_nir = await self._observation_index(
                 pair.first,
                 bbox,
@@ -948,6 +1073,27 @@ class AnalysisService(DomainService):
         # the two grids are identical and returns None when they are not; this
         # method never resamples to force a comparison.
         incomparable = _grids_are_comparable(first_green, second_green)
+        # Stage 5: the paired change needs ONE grid. Each side's own statistics
+        # never did, so a refusal here withholds the paired change only.
+        common = geometry.Grid.of(first_green)
+        pair_grid = geometry.grid_state(
+            analysis="temporal_ndwi_pair",
+            scene_id=None,
+            grid=common if incomparable is None else None,
+            inputs=(
+                [
+                    geometry.grid_input("earlier", first_green, common),
+                    geometry.grid_input("later", second_green, common),
+                ]
+                if incomparable is None
+                else []
+            ),
+            refusal=(
+                None if incomparable is None
+                else f"paired change not computed: {incomparable}"
+            ),
+        )
+        comparison_warnings.append(geometry.summary("Temporal NDWI pair", pair_grid))
         change = (
             compute_ndwi_temporal_change(
                 first_green=first_green,
@@ -992,12 +1138,16 @@ class AnalysisService(DomainService):
                 differences=differences,
                 change=change,
                 warnings=comparison_warnings,
+                pair_grid=pair_grid,
             ),
             warnings,
         )
 
     async def _sar_backscatter(
-        self, execution: QueryExecutionResult, radiometry: list[RadiometricState]
+        self,
+        execution: QueryExecutionResult,
+        radiometry: list[RadiometricState],
+        grids: list[GridState],
     ) -> tuple[SarBackscatterResult | None, list[str]]:
         """Sentinel-1 RTC gamma-naught statistics for ONE SAR window.
 
@@ -1068,6 +1218,20 @@ class AnalysisService(DomainService):
                 )
                 return None, warnings
             warnings.append(_radiometry_summary("Sentinel-1 backscatter", state))
+            # Stage 5, before any read or signing: the polarizations' source
+            # grid as published (Planetary Computer publishes it per item).
+            readable = tuple(p for p in SAR_POLARIZATIONS if p not in unavailable)
+            problem, _ = _source_geometry(scene, readable, ())
+            if problem is not None:
+                refused, text = _geometry_refusal(
+                    "sar_backscatter", window.selected_scene_id, problem, "pre_read"
+                )
+                grids.append(refused)
+                warnings.append(
+                    "Sentinel-1 backscatter was not measured for the "
+                    f"{window.modality} window {window.label!r}: {text}"
+                )
+                return None, warnings
         bands: dict[str, BandWindow] = {}
         for polarization in SAR_POLARIZATIONS:
             if polarization in unavailable:
@@ -1102,6 +1266,33 @@ class AnalysisService(DomainService):
 
         if not bands:
             return None, warnings
+
+        # Stage 5: each polarization's statistics use only its own pixels; the
+        # VV-VH difference needs ONE grid (checked again by the engine, which
+        # withholds the difference - never the per-polarization statistics).
+        present = [p for p in SAR_POLARIZATIONS if p in bands]
+        base = geometry.Grid.of(bands[present[0]])
+        mismatch = (
+            geometry.same_grid_problem(base, geometry.Grid.of(bands[present[1]]))
+            if len(present) == 2
+            else None
+        )
+        sar_grid = geometry.grid_state(
+            analysis="sar_backscatter",
+            scene_id=window.selected_scene_id,
+            grid=base if mismatch is None else None,
+            inputs=(
+                [geometry.grid_input(p, bands[p], base) for p in present]
+                if mismatch is None
+                else []
+            ),
+            refusal=(
+                None if mismatch is None
+                else f"VV-VH difference not computed: {mismatch[0]}: {mismatch[1]}"
+            ),
+        )
+        grids.append(sar_grid)
+        warnings.append(geometry.summary("Sentinel-1 backscatter", sar_grid))
 
         return (
             compute_sar_backscatter(
@@ -1151,13 +1342,14 @@ class AnalysisService(DomainService):
         # because it alone also produces the overlay and threshold statistic.
         pixel_quality: list[PixelQuality] = []
         radiometry: list[RadiometricState] = []
+        grids: list[GridState] = []
         if request.indices:
             (
                 index_measurements,
                 index_warnings,
                 index_qualities,
             ) = await self._index_measurements(
-                execution, tuple(request.indices), radiometry
+                execution, tuple(request.indices), radiometry, grids
             )
             pixel_quality.extend(index_qualities)
             warnings.extend(index_warnings)
@@ -1180,7 +1372,7 @@ class AnalysisService(DomainService):
                 spatial_measurement,
                 ndwi_quality,
             ) = await self._ndwi_measurements(
-                execution, radiometry, with_overlay=request.include_ndwi_overlay
+                execution, radiometry, grids, with_overlay=request.include_ndwi_overlay
             )
             # ``indices=["ndwi"]`` and ``include_ndwi`` assess the same grid.
             if ndwi_quality is not None and not any(
@@ -1211,7 +1403,7 @@ class AnalysisService(DomainService):
         sar_backscatter: SarBackscatterResult | None = None
         if request.include_sar_backscatter:
             sar_backscatter, sar_warnings = await self._sar_backscatter(
-                execution, radiometry
+                execution, radiometry, grids
             )
             warnings.extend(sar_warnings)
             outcomes.append(
@@ -1295,5 +1487,6 @@ class AnalysisService(DomainService):
             temporal_comparison=temporal_comparison,
             pixel_quality=pixel_quality,
             radiometry=radiometry,
+            grids=grids,
             sar_backscatter=sar_backscatter,
         )

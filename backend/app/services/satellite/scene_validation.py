@@ -168,6 +168,12 @@ class ValidatedAsset(BaseModel):
     #: ``raster:bands[0].bits_per_sample`` (Earth Search declares 15 for the
     #: Sentinel-2 bands). Recorded, never used to build a mask.
     bits_per_sample: int | None = None
+    #: The SOURCE raster's grid as the catalog publishes it (``proj:*`` on the
+    #: asset, else on the item - Earth Search publishes per asset, Planetary
+    #: Computer's RTC per item). Lets geometry be validated before any read.
+    proj_epsg: int | None = None
+    proj_transform: tuple[float, float, float, float, float, float] | None = None
+    proj_shape: tuple[int, int] | None = None
 
 
 class AoiCoverage(BaseModel):
@@ -473,7 +479,7 @@ def _validate_asset(
     if band is None:
         return ValidatedAsset(
             key=key, href=href, media_type=media_type, roles=roles,
-            metadata_status="unknown",
+            metadata_status="unknown", **_proj(asset, item),
         )
     data_type = band.get("data_type")
     expected = profile.data_type_for(key)
@@ -500,7 +506,35 @@ def _validate_asset(
             bits if isinstance(bits := band.get("bits_per_sample"), int)
             and not isinstance(bits, bool) else None
         ),
+        **_proj(asset, item),
     )
+
+
+def _proj(asset: Mapping[str, Any], item: Mapping[str, Any]) -> dict[str, Any]:
+    """The source grid from ``proj:*`` - asset-level first, then item-level."""
+
+    properties = item.get("properties")
+    properties = properties if isinstance(properties, Mapping) else {}
+
+    def pick(key: str) -> Any:
+        return asset.get(key) if asset.get(key) is not None else properties.get(key)
+
+    epsg = pick("proj:epsg")
+    transform = pick("proj:transform")
+    shape = pick("proj:shape")
+    numbers = (
+        isinstance(transform, list | tuple) and len(transform) >= 6
+        and all(_number(v) is not None for v in transform[:6])
+    )
+    sized = (
+        isinstance(shape, list | tuple) and len(shape) == 2
+        and all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in shape)
+    )
+    return {
+        "proj_epsg": epsg if isinstance(epsg, int) and not isinstance(epsg, bool) else None,
+        "proj_transform": tuple(float(v) for v in transform[:6]) if numbers else None,
+        "proj_shape": (int(shape[0]), int(shape[1])) if sized else None,
+    }
 
 
 def shared_scale_problem(first: ValidatedAsset, second: ValidatedAsset) -> str | None:
