@@ -19,7 +19,10 @@
 
 import type {
   AgentResult,
+  AnalysisResult,
   ClarificationReason,
+  GridState,
+  RadiometricState,
   EvidenceItem,
   ExecutedWindow,
   PixelQuality,
@@ -398,6 +401,44 @@ export function resultSummary(result: AgentResult): ResultBody {
 }
 
 // --------------------------------------------------------------------------- //
+// Validation records, wherever the analysis published them
+// --------------------------------------------------------------------------- //
+
+export interface ValidationRecords {
+  quality: PixelQuality[];
+  radiometry: RadiometricState[];
+  grids: GridState[];
+}
+
+/**
+ * Every validation record the analysis carries. A single-scene run publishes
+ * them at the top level; a comparison publishes them PER OBSERVATION, plus the
+ * pair's own grid check - so looking only at the top level reported a
+ * comparison as if its imagery had not been validated.
+ */
+export function validationRecords(analysis: AnalysisResult | null | undefined): ValidationRecords {
+  if (!analysis) return { quality: [], radiometry: [], grids: [] };
+  const comparison = analysis.temporal_comparison ?? null;
+  const observations = comparison ? [comparison.first, comparison.second] : [];
+  const present = <T>(value: T | null | undefined): value is T => value != null;
+  return {
+    quality: [
+      ...(analysis.pixel_quality ?? []),
+      ...observations.map((observation) => observation.pixel_quality).filter(present),
+    ],
+    radiometry: [
+      ...(analysis.radiometry ?? []),
+      ...observations.map((observation) => observation.radiometry).filter(present),
+    ],
+    grids: [
+      ...(analysis.grids ?? []),
+      ...observations.map((observation) => observation.grid).filter(present),
+      ...[comparison?.pair_grid].filter(present),
+    ],
+  };
+}
+
+// --------------------------------------------------------------------------- //
 // The run, stage by stage - after the fact
 // --------------------------------------------------------------------------- //
 
@@ -481,8 +522,7 @@ export function runStages(result: AgentResult): RunStage[] {
 
   // 4. Validating the imagery (M4 radiometry, M5 geometry) - when it ran.
   const analysis = result.evidence.analysis;
-  const radiometry = analysis?.radiometry ?? [];
-  const grids = analysis?.grids ?? [];
+  const { radiometry, grids } = validationRecords(analysis);
   if (radiometry.length > 0 || grids.length > 0) {
     const refused =
       radiometry.some(

@@ -373,6 +373,10 @@ export interface ObservationIndexResult {
   measurements: Measurement[];
   /** This observation's own pixel quality (M3). Optional for older servers. */
   pixel_quality?: PixelQuality | null;
+  /** This observation's own radiometric check (M4). */
+  radiometry?: RadiometricState | null;
+  /** This observation's own grid check (M5). */
+  grid?: GridState | null;
   /**
    * Affine coefficients `[a, b, c, d, e, f]` of the band window this
    * observation was indexed over, carried verbatim from the raster read. Per
@@ -426,6 +430,8 @@ export interface TemporalIndexComparison {
   /** Paired-pixel change, or `null` when the grids were not comparable. */
   change?: NdwiTemporalChange | null;
   warnings: string[];
+  /** Whether the two observations share a verified grid (M5). */
+  pair_grid?: GridState | null;
 }
 
 /** The task is derived from `execution.plan.intent.task`; there is no task field. */

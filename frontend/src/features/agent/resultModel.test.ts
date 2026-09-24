@@ -136,6 +136,11 @@ describe("runStages - only the stages the response shows happened", () => {
     ]);
   });
 
+  it("sees a comparison's validation, published per observation", () => {
+    expect(runStages(TEMPORAL_MARINA).map((stage) => stage.name)).toContain("Validate imagery");
+    expect(runStages(TEMPORAL_MARINA).find((stage) => stage.name === "Validate imagery")?.state).toBe("done");
+  });
+
   it("stops at the stage that did not complete", () => {
     expect(runStages(LOCATION_UNAVAILABLE).map((stage) => [stage.name, stage.state])).toEqual([
       ["Understand question", "done"],
