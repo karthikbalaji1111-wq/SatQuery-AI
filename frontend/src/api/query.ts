@@ -12,7 +12,7 @@ import type {
 /**
  * Translate a natural-language request into a structured {@link SatQueryIntent}.
  * Parsing only - the backend does not build a plan, geocode, or run discovery.
- * No provider is named, so the server's standard, model-free parser answers; a
+ * No provider is named, so the server's standard parser (no external AI) answers; a
  * request it cannot map is a 422 `clarification_required` naming what is
  * missing, surfaced like any other API error.
  */

@@ -134,11 +134,18 @@ Core intended capabilities:
    sentences over engine values (`agent/standard.py`) that pass the unchanged
    grounding. No model, no key. Anything it cannot map is `needs_clarification`,
    never a guess. AI interpretation is opt-in per request. See section 24.
+16. Local intent model (M5.6): a small TF-IDF + logistic-regression classifier
+   (`agent/intent_model.py`, artifact `agent/intent_artifacts/`) names the
+   OPERATION; the rules still own places, dates and every guard. It is acted on
+   only at >= its calibrated threshold (0.90) and only when it does not
+   contradict an operation the rules read explicitly
+   (`agent/intent_router.py`); otherwise the rules decide or the user is asked.
+   Local, numpy-only at runtime, no network. See section 25.
 
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 24 (M5.5). Section 23 (the scientific core,
+current figures are in section 25 (M5.6). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2039,4 +2046,94 @@ deployed Render backend does not have M5.5 until it is pushed.
 | `pytest -q` | **2853 passed** (2748 at M5; +103 `test_standard_workflow.py`, +1 readiness non-vacuity, +1 split parse test) |
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **367 passed** (358 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 25. M5.6 - Local SatQuery intent model - IMPLEMENTED (2026-09-24)
+
+**Scope.** Natural language -> ONE operation label, and nothing else. The
+model computes no index, picks no raster, sees no coordinate and no date:
+places and dates are replaced by `PLACE` / `DATE` (`classifier_text`) before it
+reads the question, and the deterministic reader stays authoritative for both.
+The scientific pipeline (M0-M5) is unchanged.
+
+**Labels (exactly the backend's capabilities):** NDVI, NDWI, NDBI,
+SAR_BACKSCATTER, TEMPORAL_NDWI, TRUE_COLOR, CLARIFICATION, UNSUPPORTED.
+
+**Model.** scikit-learn Pipeline: TF-IDF word 1-2-grams + char_wb 2-5-grams
+(min_df 2), sublinear TF, L2 per block -> multinomial LogisticRegression, C=10
+(grouped 5-fold CV). Exported to ONE gzip JSON artifact (185,182 bytes; 2,135
+word + 3,500 char features) - data, never a pickle - and run in numpy
+(`intent_model.py`), so production needs no scikit-learn (dev dependency only;
+`uv.lock` production set unchanged). numpy vs scikit-learn: max |dp| 2.0e-9.
+Predict ~0.05 ms, full operation routing ~0.2 ms, ~3.7 MB peak to load.
+Reproducible: same dataset + `scripts/train_intent_model.py` -> same bytes.
+
+**Data** (`backend/data/intent/`, see its README): 1,018 hand-written
+examples, 127-129 per label, many places worldwide, typos, vocabulary-free
+paraphrases. Split BY FAMILY (near-duplicates and cross-label skeleton twins
+never straddle a split): 714 train / 152 validation / 152 test. A 120-item
+challenge set was written after every choice was frozen and evaluated once.
+
+**Decision rule** (`intent_router.decide_operation`): no model, invalid output
+or confidence < threshold -> the M5.5 rules decide alone. Confident analysis
+label -> executed only if the rules read no analysis (the model adds recall) or
+the same one (agreement; the rules' full set is kept). Contradiction ->
+`analysis_ambiguous` clarification (new reason). UNSUPPORTED -> refused.
+CLARIFICATION -> the rules ask their specific question. Guards (unsupported,
+visual, sensor contradictions) and slots are always the rules'. Threshold
+0.90 = lowest grid value with >= 99% accepted precision on out-of-fold train +
+validation predictions; shipped inside the artifact.
+
+**Results.** Test (n=152): accuracy 0.9145, macro F1 0.9161, weighted F1
+0.9161; at 0.90, 74 acted on, 0 wrong. Challenge (n=120): accuracy 0.9417,
+macro F1 0.9401; at 0.90, 75 acted on, 0 wrong. Full pipeline, WRONG operation
+executed: model+rules 0 (test) / 0 (challenge); rules only 2 / 0. Correct:
+model+rules 127 / 101 vs rules only 120 / 92. The test split informed
+interpreter fixes, so the challenge set is the clean number; 15 of its 120
+items are >= 0.75 similar to a training sentence after masking (short
+skeletons recur) - stated in the report.
+
+**Interpreter fixes found by the evaluation (M5.5 code):** a place phrase
+swallowed a change verb ("Ukai dam differed") and lowercase request words
+("Srinagar for water", "the rice crop near X"); "normalized difference ...
+index" read as a comparison; "N D V I" / "S.A.R." not read; heat, temperature,
+disease, pests, volume/depth and species were executed as indices instead of
+refused. All fixed; M5.5 tests unchanged and green.
+
+**Security.** Artifact validated field by field on load (format, exact label
+set, shapes, finiteness, sizes); refused -> rules only. Predictions are
+`IntentPrediction(label: Literal[8], confidence: finite 0..1, extra=forbid)`;
+malformed output -> rules. Intent modules import no provider, transport,
+pickle or scikit-learn (AST test); inference passes with sockets blocked.
+
+**Mutation-checked (9/9, restored byte-identical):** NDVI->NDWI (9 fail),
+NDWI->NDBI (5), SAR->optical (3), temporal->single (3), unsupported->analysis
+(2), low confidence executed (1), schema bypass (6), external provider call
+(35), engine replaced by model output (10).
+
+**Verified live** (local backend, every AI key blank, Ollama unreachable, real
+Nominatim / Earth Search / Planetary Computer, real UI in Chrome): NDVI
+-0.06131 (76 px SCL-masked), NDWI 0.1466, NDBI 0.01244, SAR VV -5.444 / VH
+-17.85 dB, temporal NDWI difference 0.12 (S2A 20240115 vs S2B 20250104),
+true colour imagery only, "Analyze Chennai" -> analysis_missing, "Count ships"
+-> analysis_unsupported. "How much concrete is around Marina Beach, Chennai in
+January 2025" - unanswerable by the rules - routed by the model (NDBI 0.93) and
+measured. Log: every decision `intent_model`, every run `provider=standard`,
+0 AI endpoints.
+
+**Known limitations.** Coverage at 0.90 is ~49-63%: many vocabulary-free
+phrasings ("How leafy is ...") are asked back rather than guessed. Single label
+per question (multi-analysis questions rely on the rules' explicit terms).
+English only. Place extraction still needs a lead word. A retrain must rerun
+the script and keep `tests/test_intent_model.py` green (it pins the report).
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **2938 passed** (2853 at M5.5; +85 `test_intent_model.py`) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **368 passed** (367 before) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |

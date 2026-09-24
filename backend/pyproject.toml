@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "ruff>=0.7.0",
+    "scikit-learn>=1.5",
 ]
 
 [tool.uv]

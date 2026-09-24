@@ -778,6 +778,7 @@ export type AgentStatus =
 export type ClarificationReason =
   | "analysis_missing"
   | "analysis_unsupported"
+  | "analysis_ambiguous"
   | "location_missing"
   | "location_not_found"
   | "area_too_large"

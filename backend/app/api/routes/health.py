@@ -36,6 +36,7 @@ from pydantic import BaseModel
 
 from app import __version__
 from app.core.config import AI_PROVIDER_FIELDS, Settings, get_settings
+from app.services.agent.intent_model import load_intent_classifier
 from app.services.agent.providers.local import ProbeFailure, installed_models
 
 router = APIRouter()
@@ -110,14 +111,24 @@ def _geocoder(settings: Settings) -> Capability:
 
 
 def _interpretation() -> Capability:
+    classifier = load_intent_classifier()
+    operation = (
+        f"the local intent model {classifier.version} chooses the operation "
+        f"when at least {classifier.threshold:.2f} confident and consistent "
+        "with the rule-based interpreter, which decides otherwise"
+        if classifier is not None
+        else "the local intent model is unavailable, so the rule-based "
+        "interpreter decides every operation"
+    )
     return Capability(
         name="interpretation",
         ready=True,
         detail=(
-            "Natural-language questions are interpreted deterministically by "
-            "the standard workflow: NDVI, NDWI, NDBI, SAR backscatter and a "
-            "two-period NDWI comparison for a named place and period. No AI "
-            "provider or credential is required for them."
+            "Natural-language questions are interpreted locally by the "
+            "standard workflow: NDVI, NDWI, NDBI, SAR backscatter, a two-period "
+            f"NDWI comparison or true-colour imagery for a named place and "
+            f"period. {operation[0].upper() + operation[1:]}. No external AI "
+            "provider or credential is required."
         ),
     )
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from app.core.limits import rate_limited, workflow_slot
 from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
+from app.services.agent.intent_model import load_intent_classifier
 from app.services.agent.providers.factory import (
     get_agent_providers,
     get_intent_parser,
@@ -51,7 +52,7 @@ def get_ai_service() -> AiService:
     path uses - one selection mechanism, and never a fallback between them.
     """
 
-    return AiService(parser=StandardIntentParser())
+    return AiService(parser=StandardIntentParser(classifier=load_intent_classifier()))
 
 
 def get_query_execution_service() -> QueryExecutionService:
@@ -117,7 +118,8 @@ def build_standard_agent_service() -> AgentService:
     """
 
     return AgentService(
-        planner=StandardPlanner(),
+        # The local intent model, loaded once per process; None -> rules only.
+        planner=StandardPlanner(classifier=load_intent_classifier()),
         executor=AgentExecutor(
             query_execution_service=QueryExecutionService(),
             analysis_service=AnalysisService(),

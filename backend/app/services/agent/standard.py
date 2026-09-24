@@ -6,10 +6,12 @@
              -> validate_answer                       (unchanged grounding)
 
 The same three roles an AI provider fills, filled without one. Nothing here
-calls a model, and nothing here computes: the planner maps words to the closed
-tool set through :mod:`~app.services.agent.interpretation`, and the report
-reads values the engines already produced into the sentence templates the
-grounding validator was built around. The report is still validated like any
+calls an external or generative model, and nothing here computes: the planner
+maps words to the closed tool set - the local intent classifier choosing the
+operation where it is confident and consistent with the rules, the rules
+otherwise (:mod:`~app.services.agent.intent_router`) - and the report reads
+values the engines already produced into the sentence templates the grounding
+validator was built around. The report is still validated like any
 other answer - a report that marked its own homework would establish nothing.
 
 Why this is the default and AI is not: a supported question - an index, a
@@ -22,8 +24,11 @@ when a request names one.
 
 from __future__ import annotations
 
+from app.core.logging import get_logger
 from app.services.agent.grounding import DraftAnswer
-from app.services.agent.interpretation import interpret
+from app.services.agent.intent_model import IntentClassifier
+from app.services.agent.intent_router import route
+from app.services.agent.interpretation import QueryInterpretation
 from app.services.agent.planner import AgentPlanner
 from app.services.agent.prompts import _display_value
 from app.services.agent.schemas import AgentEvidence, AgentPlan, EvidenceItem
@@ -31,8 +36,11 @@ from app.services.agent.synthesizer import AnswerSynthesizer
 from app.services.ai.ports import IntentParser
 from app.services.query.schemas import SatQueryIntent
 
-#: How a run by the standard workflow is attributed. Not a model: nothing was
-#: generated, so there is no model to name.
+logger = get_logger("agent.standard")
+
+#: How a run by the standard workflow is attributed. No external model and no
+#: generative one: a local intent classifier may choose the operation, and
+#: nothing is generated.
 STANDARD_INTERPRETER = "standard"
 
 #: The one sentence grounding accepts when nothing answers the question.
@@ -57,22 +65,52 @@ _TEMPLATES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _interpret(question: str, classifier: IntentClassifier | None) -> QueryInterpretation:
+    """The local intent model, checked against the rules - or the rules alone."""
+
+    interpretation, decision = route(question, classifier)
+    logger.info(
+        "Operation decided by %s (%s%s)",
+        decision.source,
+        decision.reason,
+        (
+            f", model {decision.prediction.label} "
+            f"{decision.prediction.confidence:.2f}"
+            if decision.prediction is not None
+            else ""
+        ),
+    )
+    return interpretation
+
+
 class StandardPlanner(AgentPlanner):
-    """Proposes the plan a supported question implies, with no model.
+    """Proposes the plan a supported question implies, with no external model.
+
+    The OPERATION comes from the local intent model when it is confident and
+    consistent with the rules, and from the rules otherwise; the place, the
+    dates and every safety guard come from the rules alone (see
+    :mod:`~app.services.agent.intent_router`). Without a classifier this is the
+    rule-based M5.5 planner exactly.
 
     Raises :class:`~app.services.agent.interpretation.ClarificationRequiredError`
     rather than proposing a plan it is not sure of.
     """
 
+    def __init__(self, classifier: IntentClassifier | None = None) -> None:
+        self._classifier = classifier
+
     async def plan(self, question: str) -> AgentPlan:
-        return interpret(question).plan()
+        return _interpret(question, self._classifier).plan()
 
 
 class StandardIntentParser(IntentParser):
     """``/query/parse`` without a provider: the same interpretation, as an intent."""
 
+    def __init__(self, classifier: IntentClassifier | None = None) -> None:
+        self._classifier = classifier
+
     async def parse_intent(self, prompt: str) -> SatQueryIntent:
-        return interpret(prompt).intent()
+        return _interpret(prompt, self._classifier).intent()
 
 
 def _scene_sentences(item: EvidenceItem, evidence: AgentEvidence) -> list[str]:
