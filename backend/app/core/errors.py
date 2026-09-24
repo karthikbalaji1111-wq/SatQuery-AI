@@ -59,6 +59,26 @@ class UpstreamServiceError(AppError):
     code = "upstream_error"
 
 
+class GeocodingUnavailableError(UpstreamServiceError):
+    """The geocoder is refusing requests for now (it answered HTTP 429).
+
+    503 rather than the parent's 502: nothing is broken and the same request
+    will very likely succeed later - the upstream service asked this server to
+    slow down. Carries ``Retry-After`` so a caller waits the time the upstream
+    asked for, or the time this process is backing off, instead of retrying
+    straight into the limit. A subclass, so every existing ``except
+    UpstreamServiceError`` still handles it.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "geocoding_unavailable"
+
+    def __init__(self, message: str, *, retry_after_seconds: float) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        self.headers = {"Retry-After": str(max(1, ceil(retry_after_seconds)))}
+
+
 class ImageryError(AppError):
     """Raised when bounded imagery cannot be read or converted to RGB."""
 
