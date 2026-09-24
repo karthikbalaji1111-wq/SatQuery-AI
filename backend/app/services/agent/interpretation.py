@@ -75,7 +75,7 @@ ANALYSIS_LABELS: dict[str, str] = {
     "ndwi": "water (NDWI)",
     "ndbi": "built-up area (NDBI)",
     "sar_backscatter": "SAR backscatter (Sentinel-1 VV/VH)",
-    "temporal_ndwi": "water compared between two periods (NDWI)",
+    "temporal_ndwi": "water change between two periods (NDWI)",
     "imagery": "true-colour imagery (Sentinel-2)",
 }
 
@@ -126,16 +126,17 @@ def _terms(body: str) -> re.Pattern[str]:
 _ANALYSIS_TERMS: dict[str, re.Pattern[str]] = {
     "ndvi": _terms(
         r"ndvi|vegetation|vegetated|greenery|greenness|green\s+cover|plant\s+cover|"
-        r"crops?|cropland|farmland|forests?|forest\s+cover|tree\s+cover"
+        r"crops?|cropland|farmland|forests?|forest\s+cover|tree\s+cover|"
+        r"leafy|foliage|canopy|lush|lushness|verdant|greening"
     ),
     "ndwi": _terms(r"ndwi|water|waters|water\s*bod(?:y|ies)|surface\s+water|open\s+water"),
     "ndbi": _terms(
         r"ndbi|built[-\s]?up|urban|urbani[sz]ation|urbani[sz]ed|impervious|"
-        r"settlements?|bare\s+(?:soil|land|ground)"
+        r"settlements?|bare\s+(?:soil|land|ground)|developed\s+(?:areas?|land)"
     ),
     "sar_backscatter": _terms(
         r"sar|radar|backscatter|backscattering|sentinel[-\s]?1[ab]?|s1|vv|vh|"
-        r"polari[sz]ations?"
+        r"polari[sz]ations?|(?:sigma|gamma)[-\s]?(?:0|naught|nought|zero)"
     ),
     "imagery": _terms(
         r"imagery|images?|pictures?|photos?|true[-\s]colou?r|rgb|satellite\s+view"
@@ -143,12 +144,15 @@ _ANALYSIS_TERMS: dict[str, re.Pattern[str]] = {
 }
 
 #: A request to compare two periods. "Change" alone is enough: a question about
-#: how something changed IS a comparison, and it needs two periods to answer.
+#: how something changed IS a comparison, and it needs two periods to answer -
+#: so is one about whether it declined, rose, fell or dried up. "Fall" itself is
+#: left out: it is also the season.
 _COMPARISON = _terms(
     r"compare[sd]?|comparing|comparison|changes?|changed|changing|difference|"
     r"differ(?:s|ed)?|versus|vs\.?|before\s+and\s+after|increase[sd]?|"
-    r"decrease[sd]?|grew|grown|growth|shr[ai]nk|shrunk|expan(?:d|ded|sion)|"
-    r"loss|lost|gain(?:ed)?|trends?"
+    r"decrease[sd]?|grew|grown|growth|shr[ai]nk|shrunk|shrinkage|expan(?:d|ded|sion)|"
+    r"loss|lost|gain(?:ed)?|trends?|declin(?:e|ed|es|ing)|ris(?:en|ing)|rose|fell|"
+    r"fallen|drop(?:s|ped|ping)?|reced(?:e|ed|ing)|dr(?:y|ied|ying)\s+(?:up|out)"
 )
 
 #: Recognised requests the backend does not implement, refused even beside a
@@ -180,6 +184,12 @@ _UNSUPPORTED: tuple[tuple[re.Pattern[str], str], ...] = (
         "are not implemented. "
         "SatQuery measures spectral indices (vegetation, water, built-up) and "
         "SAR backscatter over an area.",
+    ),
+    (
+        _terms(r"yields?|forecast\w*|predict\w*|projections?"),
+        "Yield estimation and forecasting are not implemented. SatQuery "
+        "measures spectral indices and SAR backscatter over an area for a past "
+        "period.",
     ),
 )
 
@@ -449,7 +459,7 @@ _TRAILING_CONNECTOR = re.compile(
 #: A reference to a place the question does not name.
 _DEICTIC = re.compile(
     r"^(?:this|that|these|those|here|there|it|same|my|our|the\s+(?:same|current|"
-    r"selected|shown|above|given)\b)",
+    r"selected|shown|above|given))(?![A-Za-z0-9_\u02bc'])",
     re.IGNORECASE,
 )
 
@@ -517,6 +527,9 @@ class _Place:
     #: Where the chosen phrase sits in the masked text, so its words are not
     #: read as analysis requests ("Forest Hill" is a place, not NDVI).
     span: tuple[int, int] | None = None
+    #: Two or more words that could each be the place, when nothing decides
+    #: between them - asked back rather than guessed.
+    candidates: tuple[str, ...] = ()
 
 
 def _find_place(masked: str) -> _Place:
@@ -533,7 +546,146 @@ def _find_place(masked: str) -> _Place:
     if first.text is not None:
         return first
     second = _scan_places(masked, allow_term_start=True)
-    return second if second.text is not None else first
+    if second.text is not None:
+        return second
+    if first.deictic is not None:
+        # "this reservoir" points at a place without naming one; a stray
+        # proper noun elsewhere must not be taken as the answer.
+        return first
+    return _residual_place(masked)
+
+
+# --------------------------------------------------------------------------- #
+# A place named without a lead word ("NDVI <city> January 2025")
+# --------------------------------------------------------------------------- #
+
+#: Words that never name a place on their own: commands, question words,
+#: articles, prepositions and the generic nouns of an analysis request.
+_NOISE_WORDS = frozenset({
+    "show", "display", "get", "give", "find", "map", "compute", "calculate", "measure",
+    "measuring", "analyse", "analyze", "analysis", "analyses", "assess", "evaluate",
+    "check", "run", "report", "tell", "me", "us", "please", "pls", "i", "want", "need",
+    "would", "like", "could", "can", "you", "do", "does", "is", "are", "was", "were", "be",
+    "the", "a", "an", "of", "for", "to", "and", "or", "with", "from", "by", "on", "in",
+    "at", "around", "near", "over", "across", "within", "about", "what", "whats", "how",
+    "much", "many", "which", "where", "there", "here", "index", "indices", "statistics",
+    "stats", "value", "values", "data", "result", "results", "level", "levels", "status",
+    "condition", "health", "healthy", "density", "cover", "coverage", "mean", "average",
+    "image", "images", "imagery", "picture", "pictures", "photo", "satellite", "scene",
+    "scenes", "view", "reading", "readings", "number", "numbers", "quick", "detailed",
+    "full", "some", "any", "all", "did", "has", "have", "had", "will", "should", "just",
+    "only", "also", "kindly", "let", "lets", "hey", "hi", "hello", "ok", "okay",
+})
+
+#: Generic geographic nouns: part of a name after one ("Dal Lake"), never a
+#: name alone ("water lake").
+_GENERIC_GEOGRAPHY = frozenset({
+    "lake", "lakes", "river", "rivers", "reservoir", "reservoirs", "dam", "dams", "city",
+    "town", "village", "district", "region", "area", "park", "beach", "coast", "coastline",
+    "bay", "harbour", "harbor", "port", "island", "hills", "hill", "valley", "delta",
+    "lagoon", "marsh", "wetland", "forest", "forests", "field", "fields", "farm", "farms",
+})
+
+#: Lowercase words that may sit inside a name ("Isle of Man", "Rio de Janeiro").
+_NAME_CONNECTORS = frozenset({"of", "de", "la", "le", "du", "da", "del", "do", "dos", "das"})
+
+_WORD_TOKEN = re.compile(r"[-+]?\d+(?:\.\d+)?|[A-Za-z\u02bc'][\w\u02bc'.-]*|,")
+
+
+def _residual_place(masked: str) -> _Place:
+    """The one contiguous run of name-like words the question leaves.
+
+    Everything recognisably something else - a date (already masked), an
+    analysis or comparison word, a command, a question word, a generic noun - is
+    removed. What remains is a place only when it is ONE contiguous run: two
+    separate runs are two candidates, and choosing between them would be a
+    guess. In a question written with capitals a name is written with capitals,
+    so a lowercase leftover is not taken as one. A Capitalised analysis word
+    beside the run ("Forest" in "water Forest Hill") makes the run unsafe to
+    cut, and it is asked back. The geocoder remains the authority on whether
+    the run is a real place.
+    """
+
+    vocabulary_spans = [
+        match.span()
+        for pattern in (*_ANALYSIS_TERMS.values(), _COMPARISON, _RELATIVE, _SEASON,
+                        _VISUAL, _DETECTION)
+        for match in pattern.finditer(masked)
+    ]
+    for pattern, _ in _UNSUPPORTED:
+        vocabulary_spans.extend(match.span() for match in pattern.finditer(masked))
+
+    def in_vocabulary(start: int, end: int) -> bool:
+        return any(lo <= start and end <= hi for lo, hi in vocabulary_spans)
+
+    tokens = list(_WORD_TOKEN.finditer(masked))
+    mixed_case = any(c.isupper() for c in masked)
+    runs: list[list[re.Match[str]]] = []
+    current: list[re.Match[str]] = []
+    capitalised_terms: list[re.Match[str]] = []
+
+    def close() -> None:
+        nonlocal current
+        while current and current[-1].group(0) in {",", *_NAME_CONNECTORS}:
+            current.pop()
+        if current:
+            runs.append(current)
+        current = []
+
+    for position, token in enumerate(tokens):
+        word = token.group(0)
+        lower = word.lower().replace("\u02bc", "'")
+        gap = masked[tokens[position - 1].end() : token.start()] if position else ""
+        if current and gap.strip() not in ("", ","):
+            close()
+        if word == ",":
+            if current:
+                current.append(token)
+            continue
+        numeric = word.lstrip("+-").replace(".", "", 1).isdigit()
+        if in_vocabulary(token.start(), token.end()):
+            if word[:1].isupper() and not word.isupper() and position > 0:
+                capitalised_terms.append(token)
+            close()
+            continue
+        if current and lower in _NAME_CONNECTORS:
+            # "Isle of Man": a connector inside a name. A trailing one is
+            # dropped when the run closes.
+            current.append(token)
+            continue
+        if lower in _NOISE_WORDS:
+            close()
+            continue
+        if lower in _GENERIC_GEOGRAPHY and not current and not (
+            mixed_case and word[:1].isupper()
+        ):
+            close()
+            continue
+        if mixed_case and not (word[:1].isupper() or numeric):
+            close()
+            continue
+        current.append(token)
+    close()
+
+    def name(run: list[re.Match[str]]) -> str:
+        return " ".join(masked[run[0].start() : run[-1].end()].replace(" ,", ",").split())
+
+    runs = [run for run in runs if not _NOT_A_PLACE.fullmatch(name(run))]
+    if len(runs) > 1:
+        return _Place(text=None, candidates=tuple(name(run) for run in runs))
+    if not runs:
+        return _Place(text=None)
+    run = runs[0]
+    touching = [
+        term for term in capitalised_terms
+        if not masked[term.end() : run[0].start()].strip(" ,")
+        or not masked[run[-1].end() : term.start()].strip(" ,")
+    ]
+    if touching:
+        whole = masked[min(t.start() for t in [*touching, run[0]]) :
+                       max(t.end() for t in [*touching, run[-1]])]
+        return _Place(text=None, candidates=(" ".join(whole.split()),))
+    return _Place(text=name(run)[:300], span=(run[0].start(), run[-1].end()))
 
 
 def _names_a_place_despite_terms(phrase: str) -> bool:
@@ -553,24 +705,47 @@ _INNER_PLACE = re.compile(
 
 
 def _first_lowercase_term(phrase: str) -> int | None:
-    """Where the first lowercase analysis word starts, if any.
+    """Where the first lowercase request word or acronym starts, if any.
 
-    "Srinagar for water" names Srinagar; "water" is the request. A Capitalised
-    word ("Forest Hill") is taken as part of a name and left alone.
+    "Srinagar for water" names Srinagar; "water" is the request. So does
+    "<place> NDVI": an acronym is never part of a place name, and neither is
+    "<place> looks like". A Capitalised word ("Forest Hill") is taken as part
+    of a name and left alone.
     """
 
     starts = [
         match.start()
-        for pattern in (*_ANALYSIS_TERMS.values(), _COMPARISON)
+        for pattern in (*_ANALYSIS_TERMS.values(), _COMPARISON, _VISUAL, _DETECTION)
         for match in pattern.finditer(phrase)
-        if match.group(0) == match.group(0).lower() and match.start() > 0
+        if match.start() > 0
+        and (match.group(0) == match.group(0).lower() or match.group(0).isupper())
     ]
     return min(starts) if starts else None
+
+
+#: "Isle of Man", "Bay of Bengal": "of" between two Capitalised words joins a
+#: name. It is only a lead word when what precedes it is not part of one.
+_NAME_BEFORE_OF = re.compile(r"(?:^|[\s,])([A-Z][a-z\u02bc'-]+)\s+$")
+
+
+def _joins_a_name(masked: str, lead: re.Match[str]) -> bool:
+    if lead.group(0).strip().lower() != "of":
+        return False
+    before = _NAME_BEFORE_OF.search(masked[: lead.start()])
+    after = masked[lead.end() : lead.end() + 1]
+    return (
+        before is not None
+        and before.group(1).lower() not in _NOISE_WORDS
+        and not any(p.fullmatch(before.group(1)) for p in _ANALYSIS_TERMS.values())
+        and after.isupper()
+    )
 
 
 def _scan_places(masked: str, *, allow_term_start: bool) -> _Place:
     deictic: str | None = None
     for lead in _LOCATION_LEAD.finditer(masked):
+        if _joins_a_name(masked, lead):
+            continue
         begin = lead.end()
         stop = _LOCATION_END.search(masked, begin)
         raw = masked[begin : stop.start() if stop is not None else len(masked)]
@@ -684,6 +859,58 @@ class QueryInterpretation:
         return AgentPlan(steps=steps)
 
 
+#: How a date question names what it is for: "For which date or period
+#: should <this>?"
+_MEASURED: dict[str, str] = {
+    "ndvi": "vegetation (NDVI) be measured",
+    "ndwi": "water (NDWI) be measured",
+    "ndbi": "built-up area (NDBI) be measured",
+    "sar_backscatter": "SAR backscatter be measured",
+    "temporal_ndwi": "water be compared",
+    "imagery": "the image be shown",
+}
+
+#: A complete question for each analysis, the way the interpreter reads it.
+_QUESTION_FOR: dict[str, str] = {
+    "ndvi": "Show vegetation (NDVI)",
+    "ndwi": "Show water (NDWI)",
+    "ndbi": "Show built-up area (NDBI)",
+    "sar_backscatter": "Analyze SAR backscatter",
+    "temporal_ndwi": "Compare water (NDWI)",
+    "imagery": "Show the satellite image",
+}
+_LABEL_KEY = {label: key for key, label in ANALYSIS_LABELS.items()}
+
+
+def _period_phrase(period: TimeRange) -> str:
+    """A period in words the date reader parses back to exactly it."""
+
+    start, end = period.start_date, period.end_date
+    if start == end:
+        return f"on {start.isoformat()}"
+    month_end = calendar.monthrange(end.year, end.month)[1]
+    if start.day == 1 and end.day == month_end and start.year == end.year:
+        if start.month == end.month:
+            return f"in {calendar.month_name[start.month]} {start.year}"
+        if (start.month, end.month) == (1, 12):
+            return f"in {start.year}"
+    return f"from {start.isoformat()} to {end.isoformat()}"
+
+
+def _suggested_question(key: str, location: str | None, periods: list[TimeRange]) -> str:
+    """The question that asks for ``key`` with only the facts already given."""
+
+    question = _QUESTION_FOR[key]
+    if location:
+        question += f" around {location}"
+    if key == "temporal_ndwi" and len(periods) == 2:
+        first, second = (_period_phrase(p).split(" ", 1)[1] for p in periods)
+        question += f" between {first} and {second}"
+    elif len(periods) == 1:
+        question += f" {_period_phrase(periods[0])}"
+    return question
+
+
 def _clarify(
     reason: ClarificationReason,
     message: str,
@@ -693,16 +920,39 @@ def _clarify(
     location: str | None = None,
     periods: list[TimeRange] | None = None,
 ) -> ClarificationRequiredError:
+    periods = list(periods or [])
+    keys = [_LABEL_KEY.get(option) for option in options]
     return ClarificationRequiredError(
         AgentClarification(
             reason=reason,
             message=message,
             options=list(options),
+            option_questions=(
+                [_suggested_question(key, location, periods) for key in keys if key]
+                if options and all(keys)
+                else []
+            ),
             understood_analyses=[ANALYSIS_LABELS[key] for key in analyses or []],
             understood_location=location,
-            understood_periods=list(periods or []),
+            understood_periods=periods,
         )
     )
+
+
+def _stated_periods(reading: QuestionReading) -> list[TimeRange]:
+    """The periods the question states, when they read cleanly - else none.
+
+    Used only to carry the user's own dates into a suggested question. A date
+    that needs clarifying is left out rather than guessed at.
+    """
+
+    exprs = list(reading.exprs)
+    if not exprs or any(expr.year is None for expr in exprs) or len(exprs) > 2:
+        return []
+    try:
+        return [_to_range(expr) for expr in exprs]
+    except ValueError:
+        return []
 
 
 #: Stands in for an intra-word apostrophe while offsets must stay fixed.
@@ -815,7 +1065,10 @@ def read_question(question: str) -> QuestionReading:
         dated[: place.span[0]] + " " * (place.span[1] - place.span[0]) + dated[place.span[1] :]
     ))
     location = place.text.replace(_APOSTROPHE, "'") if place.text is not None else None
-    place = _Place(text=location, deictic=place.deictic, span=place.span)
+    place = _Place(
+        text=location, deictic=place.deictic, span=place.span,
+        candidates=tuple(c.replace(_APOSTROPHE, "'") for c in place.candidates),
+    )
 
     # -- what is asked for ------------------------------------------------------
     mentions: list[tuple[int, str]] = []
@@ -949,11 +1202,13 @@ def resolve_operation(
         if not measured:
             raise _clarify(
                 "analysis_missing",
-                "What should be compared? Comparison between two periods is "
-                "available for water (NDWI) - for example 'Compare water at "
-                "<place> between January 2024 and January 2025'.",
+                "What should be compared"
+                + (f" at {place.text}" if place.text else "")
+                + "? Comparison between two periods is available for water "
+                "(NDWI).",
                 options=(ANALYSIS_LABELS["temporal_ndwi"],),
                 location=place.text,
+                periods=_stated_periods(reading),
             )
         if others:
             raise _clarify(
@@ -972,10 +1227,12 @@ def resolve_operation(
         if not chosen_analyses:
             raise _clarify(
                 "analysis_missing",
-                "What would you like to analyse - vegetation (NDVI), water "
-                "(NDWI), built-up area (NDBI) or SAR backscatter?",
+                "What would you like to analyse"
+                + (f" at {place.text}" if place.text else "")
+                + "?",
                 options=SUPPORTED_OPTIONS,
                 location=place.text,
+                periods=_stated_periods(reading),
             )
         # Imagery rides along with every analysis; asked for alone, it is the
         # analysis.
@@ -1007,15 +1264,32 @@ def resolve(
 
     # -- where --------------------------------------------------------------------
     if place.text is None:
-        message = (
-            f"Which place should be analysed? The question refers to "
-            f"'{place.deictic}' but does not name it. "
-            if place.deictic
-            else "Which place should be analysed? "
-        ) + (
-            "Name a city, district, landmark or 'lat, lon' after 'around', "
-            "'in' or 'at' - for example 'around <city>' or 'at <landmark>, <city>'."
-        )
+        if len(place.candidates) > 1:
+            lead = (
+                "The question names more than one possible place ("
+                + ", ".join(f"'{c}'" for c in place.candidates)
+                + "). Which one should be analysed?"
+            )
+        elif place.candidates:
+            lead = (
+                f"Is '{place.candidates[0]}' the place to analyse? Say it with "
+                "'around', 'in' or 'at' to confirm."
+            )
+        elif place.deictic:
+            lead = (
+                f"The question refers to '{place.deictic}' but does not name it. "
+                "Which place should be analysed?"
+            )
+        else:
+            lead = "Which place should be analysed?"
+        message = f"{lead} Add a city, neighbourhood, landmark or coordinates (lat, lon)."
+        if not reading.exprs:
+            message += (
+                " Also give the two periods to compare - for example January 2024 "
+                "and January 2025."
+                if comparison
+                else " Also give a month and year - for example January 2025."
+            )
         raise _clarify("location_missing", message, analyses=chosen)
 
     # -- when ---------------------------------------------------------------------
@@ -1078,14 +1352,19 @@ def _periods(
         )
     if not exprs:
         relative = _RELATIVE.search(text)
-        raise clarify(
-            "date_ambiguous" if relative else "date_missing",
-            (
+        if relative:
+            raise clarify(
+                "date_ambiguous",
                 f"'{relative.group(0)}' is not resolved to a date automatically. "
-                if relative
-                else "For which date or period? "
+                f"Give a month and year or a date - {example}.",
             )
-            + f"Give a month and year or a date - {example}.",
+        raise clarify(
+            "date_missing",
+            "Which two periods should be compared? Give both - for example "
+            "'between January 2024 and January 2025'."
+            if comparison
+            else f"For which date or period should {_MEASURED[analyses[0]]}? Give a "
+            f"month and year or a date - {example}.",
         )
     yearless = [expr.text for expr in exprs if expr.year is None]
     if yearless:

@@ -489,6 +489,29 @@ label {
   color: var(--amber);
 }
 
+/* A choice the server phrased as a question: it fills the query box, it does
+   not run anything - styled like the example links beside the input. */
+.clarification-option {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--geo-blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.clarification-option:hover:not(:disabled) {
+  border: 0;
+  color: var(--ink);
+}
+
+.clarification-option:disabled {
+  border: 0;
+  background: none;
+}
+
 .clarification-understood {
   margin: 4px 0 0;
   font-size: 10.5px;

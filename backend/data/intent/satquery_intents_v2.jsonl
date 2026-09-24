@@ -1,0 +1,1258 @@
+{"id": "ndvi-001", "text": "Show vegetation around Marina Beach, Chennai in January 2025", "intent": "NDVI"}
+{"id": "ndvi-002", "text": "What is the NDVI of Anna Nagar in March 2024?", "intent": "NDVI"}
+{"id": "ndvi-003", "text": "Calculate greenness over the Western Ghats near Munnar in October 2023", "intent": "NDVI"}
+{"id": "ndvi-004", "text": "How healthy is the vegetation around Pune in February 2024", "intent": "NDVI"}
+{"id": "ndvi-005", "text": "compute ndvi for Nagpur on 12 November 2024", "intent": "NDVI"}
+{"id": "ndvi-006", "text": "Give me the vegetation index for Coimbatore during December 2023", "intent": "NDVI"}
+{"id": "ndvi-007", "text": "How green are the paddy fields near Alappuzha in September 2024?", "intent": "NDVI"}
+{"id": "ndvi-008", "text": "Measure plant health across the farms around Ludhiana in April 2024", "intent": "NDVI"}
+{"id": "ndvi-009", "text": "Is the crop canopy dense around Hisar in January 2024?", "intent": "NDVI"}
+{"id": "ndvi-010", "text": "NDVI please, Kaziranga, March 2025", "intent": "NDVI"}
+{"id": "ndvi-011", "text": "Show me vegetation cover for the Sundarbans in 2024", "intent": "NDVI"}
+{"id": "ndvi-012", "text": "What does the vegetation index say about Gir forest in May 2024", "intent": "NDVI"}
+{"id": "ndvi-013", "text": "Assess the greenery of Cubbon Park, Bengaluru in August 2024", "intent": "NDVI"}
+{"id": "ndvi-014", "text": "Tree cover around Dehradun in November 2023", "intent": "NDVI"}
+{"id": "ndvi-015", "text": "How much green cover does Ooty have in February 2025", "intent": "NDVI"}
+{"id": "ndvi-016", "text": "I need the normalized difference vegetation index for Hampi in 2023", "intent": "NDVI"}
+{"id": "ndvi-017", "text": "Evaluate crop vigour around Nashik in January 2025", "intent": "NDVI"}
+{"id": "ndvi-018", "text": "vegitation near Guwahati in july 2024", "intent": "NDVI"}
+{"id": "ndvi-019", "text": "Check vegetation health around Lake Naivasha in March 2024", "intent": "NDVI"}
+{"id": "ndvi-020", "text": "Report NDVI over the Nile Delta near Tanta in 2023", "intent": "NDVI"}
+{"id": "ndvi-021", "text": "Map the greenness of the Mekong Delta around Can Tho in February 2024", "intent": "NDVI"}
+{"id": "ndvi-022", "text": "What is the forest condition around Manaus in August 2024?", "intent": "NDVI"}
+{"id": "ndvi-023", "text": "Plant cover near Kigali, June 2024", "intent": "NDVI"}
+{"id": "ndvi-024", "text": "Can you compute vegetation for the orchards around Shimla in April 2024", "intent": "NDVI"}
+{"id": "ndvi-025", "text": "how lush are the tea gardens around Darjeeling in June 2024", "intent": "NDVI"}
+{"id": "ndvi-026", "text": "Vegetation density at the botanical garden in Kolkata in 2024", "intent": "NDVI"}
+{"id": "ndvi-027", "text": "Get NDVI values for the cropland near Bathinda on 2024-03-15", "intent": "NDVI"}
+{"id": "ndvi-028", "text": "Show forest greenness over Periyar in January 2025", "intent": "NDVI"}
+{"id": "ndvi-029", "text": "What's the chlorophyll response of the fields around Warangal in Feb 2024", "intent": "NDVI"}
+{"id": "ndvi-030", "text": "Canopy health of the mangroves near Pichavaram in December 2024", "intent": "NDVI"}
+{"id": "ndvi-031", "text": "estimate vegetation vigor around Mandya in 2024", "intent": "NDVI"}
+{"id": "ndvi-032", "text": "NDVI for Dal Lake surroundings in September 2023", "intent": "NDVI"}
+{"id": "ndvi-033", "text": "Show me the vegetation index of Kathmandu valley in April 2025", "intent": "NDVI"}
+{"id": "ndvi-034", "text": "Vegetation status around Chiang Mai in January 2024", "intent": "NDVI"}
+{"id": "ndvi-035", "text": "Leaf cover around Kandy in March 2024?", "intent": "NDVI"}
+{"id": "ndvi-036", "text": "Give the mean NDVI of Cebu in 2024", "intent": "NDVI"}
+{"id": "ndvi-037", "text": "Analyse the greenery around Lalbagh in December 2024", "intent": "NDVI"}
+{"id": "ndvi-038", "text": "How vigorous is the grassland near Ulaanbaatar in July 2024", "intent": "NDVI"}
+{"id": "ndvi-039", "text": "Report the vegetation condition near Harare for April 2024", "intent": "NDVI"}
+{"id": "ndvi-040", "text": "Check the health of the rice crop near Thanjavur in November 2024", "intent": "NDVI"}
+{"id": "ndvi-041", "text": "Vegetation around Tucson in March 2023", "intent": "NDVI"}
+{"id": "ndvi-042", "text": "Compute the greenness index of Porto's parks in May 2024", "intent": "NDVI"}
+{"id": "ndvi-043", "text": "What is the plant vigour like around Konya in June 2024", "intent": "NDVI"}
+{"id": "ndvi-044", "text": "Crop health for the wheat belt near Karnal in February 2025", "intent": "NDVI"}
+{"id": "ndvi-045", "text": "Sugarcane fields near Kolhapur, vegetation index for January 2024", "intent": "NDVI"}
+{"id": "ndvi-046", "text": "How dense is the forest near Kuching in 2024", "intent": "NDVI"}
+{"id": "ndvi-047", "text": "Is the jungle around Kodagu healthy in October 2024?", "intent": "NDVI"}
+{"id": "ndvi-048", "text": "green cover index for Gurugram in March 2025", "intent": "NDVI"}
+{"id": "ndvi-049", "text": "Show NDVI over the Aravalli hills near Faridabad in 2024", "intent": "NDVI"}
+{"id": "ndvi-050", "text": "vegetaion index for Nashik vineyards in December 2024", "intent": "NDVI"}
+{"id": "ndvi-051", "text": "Assess vegetation vigour at 12.97, 77.59 in January 2025", "intent": "NDVI"}
+{"id": "ndvi-052", "text": "Please run the vegetation analysis for Mysuru in Feb 2025", "intent": "NDVI"}
+{"id": "ndvi-053", "text": "How green is Chandigarh in August 2024", "intent": "NDVI"}
+{"id": "ndvi-054", "text": "Farmland health around Anand, June 2024", "intent": "NDVI"}
+{"id": "ndvi-055", "text": "Measure the greenness of the Yamuna floodplain in 2024", "intent": "NDVI"}
+{"id": "ndvi-056", "text": "Vegetation cover of Majuli island in November 2024", "intent": "NDVI"}
+{"id": "ndvi-057", "text": "NDVI Lucknow January 2025", "intent": "NDVI"}
+{"id": "ndvi-058", "text": "What is the vegetation like around Bhopal in March 2024?", "intent": "NDVI"}
+{"id": "ndvi-059", "text": "Show plant health for the coffee estates near Chikmagalur in 2023", "intent": "NDVI"}
+{"id": "ndvi-060", "text": "How healthy are the trees in Sanjay Gandhi National Park in 2024", "intent": "NDVI"}
+{"id": "ndvi-061", "text": "check greeness around Raipur in october 2024", "intent": "NDVI"}
+{"id": "ndvi-062", "text": "Vegetation vigor near Oaxaca in July 2024", "intent": "NDVI"}
+{"id": "ndvi-063", "text": "Map crop canopy around Fresno for June 2024", "intent": "NDVI"}
+{"id": "ndvi-064", "text": "NDVI statistics please for the fields near Indore in 2024", "intent": "NDVI"}
+{"id": "ndvi-065", "text": "Tell me the vegetation index over Jaipur's Jhalana forest in 2023", "intent": "NDVI"}
+{"id": "ndvi-066", "text": "Plant canopy around Hanoi in April 2024", "intent": "NDVI"}
+{"id": "ndvi-067", "text": "How is the pasture near Christchurch doing in January 2025 in terms of greenness", "intent": "NDVI"}
+{"id": "ndvi-068", "text": "Get vegetation index for the Kanha reserve on 1 March 2024", "intent": "NDVI"}
+{"id": "ndvi-069", "text": "Rate the greenness around Kochi from January to March 2024", "intent": "NDVI"}
+{"id": "ndvi-070", "text": "Crop condition around Guntur between June and August 2024", "intent": "NDVI"}
+{"id": "ndvi-071", "text": "Vegetation health near the Rann of Kutch in September 2024", "intent": "NDVI"}
+{"id": "ndvi-072", "text": "Mangrove greenness near Mumbai's Thane creek in 2024", "intent": "NDVI"}
+{"id": "ndvi-073", "text": "How healthy are the crops in the Indo-Gangetic plain near Kanpur in Jan 2025", "intent": "NDVI"}
+{"id": "ndvi-074", "text": "Vegetation index for Bhubaneswar on 5 December 2024", "intent": "NDVI"}
+{"id": "ndvi-075", "text": "Are the fields around Amritsar green in March 2025?", "intent": "NDVI"}
+{"id": "ndvi-076", "text": "Show me how much vegetation there is around Visakhapatnam in 2023", "intent": "NDVI"}
+{"id": "ndvi-077", "text": "greenery levels at Hebbal in may 2024", "intent": "NDVI"}
+{"id": "ndvi-078", "text": "ndvi around shillong october 2024", "intent": "NDVI"}
+{"id": "ndvi-079", "text": "Vegetation productivity proxy over the cotton fields near Akola in 2024", "intent": "NDVI"}
+{"id": "ndvi-080", "text": "Compute canopy greenness around Addis Ababa in 2024", "intent": "NDVI"}
+{"id": "ndvi-081", "text": "The vegetation index at Kaziranga for 2023, please", "intent": "NDVI"}
+{"id": "ndvi-082", "text": "Plant health status for the olive groves near Valencia in 2024", "intent": "NDVI"}
+{"id": "ndvi-083", "text": "Forest canopy condition around Hobart in January 2024", "intent": "NDVI"}
+{"id": "ndvi-084", "text": "Get the greenness for Nairobi National Park in 2024", "intent": "NDVI"}
+{"id": "ndvi-085", "text": "Vegetation reading for Salem district fields in November 2023", "intent": "NDVI"}
+{"id": "ndvi-086", "text": "How much plant cover does Ranchi have in 2024", "intent": "NDVI"}
+{"id": "ndvi-087", "text": "N D V I for Patna in April 2024", "intent": "NDVI"}
+{"id": "ndvi-088", "text": "green vegetation fraction around Bologna in 2024", "intent": "NDVI"}
+{"id": "ndvi-089", "text": "Show crops around Karimnagar using the vegetation index for Jan 2024", "intent": "NDVI"}
+{"id": "ndvi-090", "text": "I want NDVI for my farm near Tumkur for February 2025", "intent": "NDVI"}
+{"id": "ndvi-091", "text": "Vegetation analysis of Aarey forest in December 2024", "intent": "NDVI"}
+{"id": "ndvi-092", "text": "Greenness of the rainforest near Kuala Lumpur in 2024", "intent": "NDVI"}
+{"id": "ndvi-093", "text": "Give vegetation vigour numbers for the maize fields near Lusaka in Feb 2024", "intent": "NDVI"}
+{"id": "ndvi-094", "text": "What's the NDVI at the Pallikaranai marsh edge in January 2025", "intent": "NDVI"}
+{"id": "ndvi-095", "text": "How verdant is the area around Mahabaleshwar in August 2024", "intent": "NDVI"}
+{"id": "ndvi-096", "text": "foliage density around Srinagar in June 2024", "intent": "NDVI"}
+{"id": "ndvi-097", "text": "Vegetation index please: Vijayawada, March 2024", "intent": "NDVI"}
+{"id": "ndvi-098", "text": "Examine vegetation health around Madurai in 2025", "intent": "NDVI"}
+{"id": "ndvi-099", "text": "Show me the green vegetation around Hyderabad's KBR park in 2024", "intent": "NDVI"}
+{"id": "ndvi-100", "text": "Vegetation condition for Durban in April 2024", "intent": "NDVI"}
+{"id": "ndvi-101", "text": "Is the canopy of Silent Valley healthy in 2024", "intent": "NDVI"}
+{"id": "ndvi-102", "text": "calculate vegetation around surat in january 2025", "intent": "NDVI"}
+{"id": "ndvi-103", "text": "Canopy health of the mangroves near Bhitarkanika in December 2024", "intent": "NDVI"}
+{"id": "ndvi-104", "text": "How alive is the plant life around Coorg in November 2024", "intent": "NDVI"}
+{"id": "ndvi-105", "text": "Leafy cover around the Nilgiris in October 2024", "intent": "NDVI"}
+{"id": "ndvi-106", "text": "photosynthetic activity of the farms near Sangli in 2024", "intent": "NDVI"}
+{"id": "ndvi-107", "text": "How much green biomass signal is there around Kutch in August 2024", "intent": "NDVI"}
+{"id": "ndvi-108", "text": "Is the scrubland near Anantapur greening up in September 2024?", "intent": "NDVI"}
+{"id": "ndvi-109", "text": "Give me a greenness reading for the tea estates near Munnar in January 2025", "intent": "NDVI"}
+{"id": "ndvi-110", "text": "How robust are the maize crops near Davangere in 2024", "intent": "NDVI"}
+{"id": "ndvi-111", "text": "What's the leaf density like in the Sundarbans mangroves in 2023", "intent": "NDVI"}
+{"id": "ndvi-112", "text": "plant vigor index for the vineyards near Bordeaux in July 2024", "intent": "NDVI"}
+{"id": "ndvi-113", "text": "How green is the savanna near Arusha in March 2024", "intent": "NDVI"}
+{"id": "ndvi-114", "text": "Healthy vegetation near Belgaum in December 2024?", "intent": "NDVI"}
+{"id": "ndvi-115", "text": "Check how leafy the orchards around Kinnaur are in August 2024", "intent": "NDVI"}
+{"id": "ndvi-116", "text": "what shape is the forest canopy of Kanha in in 2024", "intent": "NDVI"}
+{"id": "ndvi-117", "text": "Vegetation vitality for the plantations near Wayanad in 2024", "intent": "NDVI"}
+{"id": "ndvi-118", "text": "How thick is the green cover of Similipal in 2023", "intent": "NDVI"}
+{"id": "ndvi-119", "text": "Show me plant greenness around Jorhat for March 2025", "intent": "NDVI"}
+{"id": "ndvi-120", "text": "Evaluate the green canopy near Tirupati in 2024", "intent": "NDVI"}
+{"id": "ndvi-121", "text": "Is the grass green around Leh in August 2024", "intent": "NDVI"}
+{"id": "ndvi-122", "text": "How lush is the valley near Pahalgam in July 2024", "intent": "NDVI"}
+{"id": "ndvi-123", "text": "Measure how green the golf course near Gurgaon is in 2024", "intent": "NDVI"}
+{"id": "ndvi-124", "text": "How is the jowar crop doing near Solapur in terms of greenness in 2024", "intent": "NDVI"}
+{"id": "ndvi-125", "text": "Assess the vegetation index across the Terai near Lakhimpur in 2024", "intent": "NDVI"}
+{"id": "ndvi-126", "text": "Are the rubber plantations near Kottayam healthy in January 2025", "intent": "NDVI"}
+{"id": "ndvi-127", "text": "Green leaf area around Sikkim's Gangtok in 2024", "intent": "NDVI"}
+{"id": "ndwi-001", "text": "Show water around Marina Beach, Chennai in January 2025", "intent": "NDWI"}
+{"id": "ndwi-002", "text": "What is the NDWI of Hussain Sagar in March 2024?", "intent": "NDWI"}
+{"id": "ndwi-003", "text": "Find water bodies around Chilika Lake in October 2024", "intent": "NDWI"}
+{"id": "ndwi-004", "text": "How much water is in Powai Lake in February 2025?", "intent": "NDWI"}
+{"id": "ndwi-005", "text": "compute ndwi for Loktak Lake on 3 May 2024", "intent": "NDWI"}
+{"id": "ndwi-006", "text": "Give me the water index for Vembanad Lake in 2023", "intent": "NDWI"}
+{"id": "ndwi-007", "text": "Is there standing water around Kuttanad in September 2024?", "intent": "NDWI"}
+{"id": "ndwi-008", "text": "Measure open water near Puzhal Lake in January 2025", "intent": "NDWI"}
+{"id": "ndwi-009", "text": "water spread of Hirakud reservoir in December 2024", "intent": "NDWI"}
+{"id": "ndwi-010", "text": "NDWI please, Dal Lake, June 2024", "intent": "NDWI"}
+{"id": "ndwi-011", "text": "Show surface water around the Sundarbans in 2024", "intent": "NDWI"}
+{"id": "ndwi-012", "text": "What does the water index say about Pulicat Lake in May 2024", "intent": "NDWI"}
+{"id": "ndwi-013", "text": "Assess the water content of Sambhar Lake in August 2024", "intent": "NDWI"}
+{"id": "ndwi-014", "text": "How full is Krishna Raja Sagara reservoir in November 2023, in water index terms", "intent": "NDWI"}
+{"id": "ndwi-015", "text": "Water presence near Tehri dam in February 2025", "intent": "NDWI"}
+{"id": "ndwi-016", "text": "I need the normalized difference water index for Bhakra reservoir in 2023", "intent": "NDWI"}
+{"id": "ndwi-017", "text": "Map water around the Rann of Kutch in September 2024", "intent": "NDWI"}
+{"id": "ndwi-018", "text": "watr bodies near Guwahati in july 2024", "intent": "NDWI"}
+{"id": "ndwi-019", "text": "Check the lakes around Srinagar for water in March 2024", "intent": "NDWI"}
+{"id": "ndwi-020", "text": "Report NDWI over Lake Victoria near Kisumu in 2023", "intent": "NDWI"}
+{"id": "ndwi-021", "text": "Map water across the Mekong Delta around Can Tho in February 2024", "intent": "NDWI"}
+{"id": "ndwi-022", "text": "What is the water situation around Manaus in August 2024?", "intent": "NDWI"}
+{"id": "ndwi-023", "text": "ponds near Kigali, water index, June 2024", "intent": "NDWI"}
+{"id": "ndwi-024", "text": "Can you compute water for the tanks around Madurai in April 2024", "intent": "NDWI"}
+{"id": "ndwi-025", "text": "How wet are the rice paddies around Alappuzha in June 2024", "intent": "NDWI"}
+{"id": "ndwi-026", "text": "Water extent at Ulsoor lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-027", "text": "Get NDWI values for the backwaters near Kollam on 2024-03-15", "intent": "NDWI"}
+{"id": "ndwi-028", "text": "Show water over Pallikaranai marsh in January 2025", "intent": "NDWI"}
+{"id": "ndwi-029", "text": "What's the water index of Nagarjuna Sagar in Feb 2024", "intent": "NDWI"}
+{"id": "ndwi-030", "text": "Standing water in the salt pans near Tuticorin in December 2024", "intent": "NDWI"}
+{"id": "ndwi-031", "text": "estimate open water around Sriperumbudur lakes in 2024", "intent": "NDWI"}
+{"id": "ndwi-032", "text": "NDWI for Bellandur lake in September 2023", "intent": "NDWI"}
+{"id": "ndwi-033", "text": "Show me the water index of Phewa Lake, Pokhara in April 2025", "intent": "NDWI"}
+{"id": "ndwi-034", "text": "Water status around Inle Lake in January 2024", "intent": "NDWI"}
+{"id": "ndwi-035", "text": "Is there water in Chembarambakkam lake in March 2024?", "intent": "NDWI"}
+{"id": "ndwi-036", "text": "Give the mean NDWI of Laguna de Bay in 2024", "intent": "NDWI"}
+{"id": "ndwi-037", "text": "Analyse the water bodies around Hyderabad's Osman Sagar in December 2024", "intent": "NDWI"}
+{"id": "ndwi-038", "text": "How much water does Lake Naivasha hold in July 2024", "intent": "NDWI"}
+{"id": "ndwi-039", "text": "Report the water condition near Lake Kariba for April 2024", "intent": "NDWI"}
+{"id": "ndwi-040", "text": "Check the river water near Varanasi in November 2024", "intent": "NDWI"}
+{"id": "ndwi-041", "text": "Water around Lake Titicaca near Puno in March 2023", "intent": "NDWI"}
+{"id": "ndwi-042", "text": "Compute the water index of the Ria Formosa lagoon in May 2024", "intent": "NDWI"}
+{"id": "ndwi-043", "text": "What is the water spread like at Ukai dam in June 2024", "intent": "NDWI"}
+{"id": "ndwi-044", "text": "Water in the canals of Alleppey, February 2025", "intent": "NDWI"}
+{"id": "ndwi-045", "text": "Reservoir water near Nashik, water index for January 2024", "intent": "NDWI"}
+{"id": "ndwi-046", "text": "How much surface water is at Mettur dam in 2024", "intent": "NDWI"}
+{"id": "ndwi-047", "text": "Is the wetland near Keoladeo holding water in October 2024?", "intent": "NDWI"}
+{"id": "ndwi-048", "text": "water index for Salt Lake, Kolkata in March 2025", "intent": "NDWI"}
+{"id": "ndwi-049", "text": "Show NDWI over the Brahmaputra near Dibrugarh in 2024", "intent": "NDWI"}
+{"id": "ndwi-050", "text": "wter bodies index for Bhopal's Upper Lake in December 2024", "intent": "NDWI"}
+{"id": "ndwi-051", "text": "Assess water at 17.42, 78.47 in January 2025", "intent": "NDWI"}
+{"id": "ndwi-052", "text": "Please run the water analysis for Mysuru's Kukkarahalli lake in Feb 2025", "intent": "NDWI"}
+{"id": "ndwi-053", "text": "How wet is the floodplain of the Yamuna near Delhi in August 2024", "intent": "NDWI"}
+{"id": "ndwi-054", "text": "Lake water around Nainital, June 2024", "intent": "NDWI"}
+{"id": "ndwi-055", "text": "Measure the water surface of Wular Lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-056", "text": "Water of the Majuli river channels in November 2024", "intent": "NDWI"}
+{"id": "ndwi-057", "text": "NDWI Udaipur lakes January 2025", "intent": "NDWI"}
+{"id": "ndwi-058", "text": "What is the water like around Bhimtal in March 2024?", "intent": "NDWI"}
+{"id": "ndwi-059", "text": "Show water for the reservoirs near Pune in 2023", "intent": "NDWI"}
+{"id": "ndwi-060", "text": "How much water is left in Red Hills lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-061", "text": "check watter around Raipur's Telibandha lake in october 2024", "intent": "NDWI"}
+{"id": "ndwi-062", "text": "Open water near Tonle Sap in July 2024", "intent": "NDWI"}
+{"id": "ndwi-063", "text": "Map reservoir water around Fresno for June 2024", "intent": "NDWI"}
+{"id": "ndwi-064", "text": "NDWI statistics please for the tanks near Kanchipuram in 2024", "intent": "NDWI"}
+{"id": "ndwi-065", "text": "Tell me the water index over Jaipur's Man Sagar in 2023", "intent": "NDWI"}
+{"id": "ndwi-066", "text": "Water surface around Hanoi's West Lake in April 2024", "intent": "NDWI"}
+{"id": "ndwi-067", "text": "How is the water level near Chilika doing in January 2025 in index terms", "intent": "NDWI"}
+{"id": "ndwi-068", "text": "Get water index for the Kabini reservoir on 1 March 2024", "intent": "NDWI"}
+{"id": "ndwi-069", "text": "Rate the water presence around Kochi from January to March 2024", "intent": "NDWI"}
+{"id": "ndwi-070", "text": "Water around the Godavari near Rajahmundry between June and August 2024", "intent": "NDWI"}
+{"id": "ndwi-071", "text": "water index near the Little Rann in September 2024", "intent": "NDWI"}
+{"id": "ndwi-072", "text": "Creek water near Mumbai's Thane creek in 2024", "intent": "NDWI"}
+{"id": "ndwi-073", "text": "How much water is in the ponds near Kanpur in Jan 2025", "intent": "NDWI"}
+{"id": "ndwi-074", "text": "Water index for Bhubaneswar's Kanjia lake on 5 December 2024", "intent": "NDWI"}
+{"id": "ndwi-075", "text": "Are the ponds around Amritsar holding water in March 2025?", "intent": "NDWI"}
+{"id": "ndwi-076", "text": "Show me how much water there is around Visakhapatnam in 2023", "intent": "NDWI"}
+{"id": "ndwi-077", "text": "lake water levels at Hebbal lake in may 2024", "intent": "NDWI"}
+{"id": "ndwi-078", "text": "ndwi around umiam lake october 2024", "intent": "NDWI"}
+{"id": "ndwi-079", "text": "Water index for the reservoir near Akola in 2024", "intent": "NDWI"}
+{"id": "ndwi-080", "text": "Compute water extent around Lake Tana in 2024", "intent": "NDWI"}
+{"id": "ndwi-081", "text": "The water index at Loktak for 2023, please", "intent": "NDWI"}
+{"id": "ndwi-082", "text": "Water status for the Albufera lagoon near Valencia in 2024", "intent": "NDWI"}
+{"id": "ndwi-083", "text": "Open water condition around Lake Taupo in January 2024", "intent": "NDWI"}
+{"id": "ndwi-084", "text": "Get the water index for Lake Nakuru in 2024", "intent": "NDWI"}
+{"id": "ndwi-085", "text": "Water reading for Stanley reservoir in November 2023", "intent": "NDWI"}
+{"id": "ndwi-086", "text": "How much water does Ranchi's Kanke dam have in 2024", "intent": "NDWI"}
+{"id": "ndwi-087", "text": "N D W I for Patna's Ganga banks in April 2024", "intent": "NDWI"}
+{"id": "ndwi-088", "text": "water fraction around Venice lagoon in 2024", "intent": "NDWI"}
+{"id": "ndwi-089", "text": "Show water bodies around Karimnagar using the water index for Jan 2024", "intent": "NDWI"}
+{"id": "ndwi-090", "text": "I want NDWI for my village pond near Tumkur for February 2025", "intent": "NDWI"}
+{"id": "ndwi-091", "text": "Water analysis of Vihar lake in December 2024", "intent": "NDWI"}
+{"id": "ndwi-092", "text": "Water around Putrajaya lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-093", "text": "Give water index numbers for Kafue flats near Lusaka in Feb 2024", "intent": "NDWI"}
+{"id": "ndwi-094", "text": "What's the NDWI at the Adyar estuary in January 2025", "intent": "NDWI"}
+{"id": "ndwi-095", "text": "How watery is the delta around Sagar Island in August 2024", "intent": "NDWI"}
+{"id": "ndwi-096", "text": "river water around Srinagar's Jhelum in June 2024", "intent": "NDWI"}
+{"id": "ndwi-097", "text": "Water index please: Vijayawada's Prakasam barrage, March 2024", "intent": "NDWI"}
+{"id": "ndwi-098", "text": "Examine the water bodies around Madurai in 2025", "intent": "NDWI"}
+{"id": "ndwi-099", "text": "Show me the water in Hyderabad's Himayat Sagar in 2024", "intent": "NDWI"}
+{"id": "ndwi-100", "text": "Water condition for Durban harbour in April 2024", "intent": "NDWI"}
+{"id": "ndwi-101", "text": "Is the Vaigai dam holding water in 2024", "intent": "NDWI"}
+{"id": "ndwi-102", "text": "calculate water around surat in january 2025", "intent": "NDWI"}
+{"id": "ndwi-103", "text": "How much of Loktak is open water in November 2024", "intent": "NDWI"}
+{"id": "ndwi-104", "text": "Is the tank near Kanchipuram full of water in December 2024?", "intent": "NDWI"}
+{"id": "ndwi-105", "text": "Water surface extent of Ujani dam in 2024", "intent": "NDWI"}
+{"id": "ndwi-106", "text": "How much inland water is there around Barmer in August 2024", "intent": "NDWI"}
+{"id": "ndwi-107", "text": "Wetland water around Harike in January 2025", "intent": "NDWI"}
+{"id": "ndwi-108", "text": "Is the reservoir near Hosur holding much water in 2024", "intent": "NDWI"}
+{"id": "ndwi-109", "text": "How big is the water body at Kolleru lake in September 2024", "intent": "NDWI"}
+{"id": "ndwi-110", "text": "Water coverage of the Kuttanad backwaters in 2023", "intent": "NDWI"}
+{"id": "ndwi-111", "text": "Give me a water reading for the Sukhna lake in March 2025", "intent": "NDWI"}
+{"id": "ndwi-112", "text": "How wet is the marshland near Point Calimere in 2024", "intent": "NDWI"}
+{"id": "ndwi-113", "text": "water extent index for Pong dam in 2024", "intent": "NDWI"}
+{"id": "ndwi-114", "text": "How much water sits in the quarry pits near Jodhpur in 2024", "intent": "NDWI"}
+{"id": "ndwi-115", "text": "Show the water in the canals around Amsterdam in June 2024", "intent": "NDWI"}
+{"id": "ndwi-116", "text": "Is there water in the dry riverbed near Anantapur in October 2024?", "intent": "NDWI"}
+{"id": "ndwi-117", "text": "The amount of surface water around Lake Chad in 2024", "intent": "NDWI"}
+{"id": "ndwi-118", "text": "reservoir water index for Idukki in December 2024", "intent": "NDWI"}
+{"id": "ndwi-119", "text": "How much water covers the salt marsh near Jamnagar in 2024", "intent": "NDWI"}
+{"id": "ndwi-120", "text": "Show inland water bodies near Tezpur for March 2025", "intent": "NDWI"}
+{"id": "ndwi-121", "text": "Water index across the Kosi near Supaul in 2024", "intent": "NDWI"}
+{"id": "ndwi-122", "text": "Are the temple tanks of Kumbakonam holding water in 2024", "intent": "NDWI"}
+{"id": "ndwi-123", "text": "Water presence at the Ranganathittu wetland in July 2024", "intent": "NDWI"}
+{"id": "ndwi-124", "text": "Open water fraction for Kaptai lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-125", "text": "How much standing water is on the fields near Thrissur in 2024", "intent": "NDWI"}
+{"id": "ndwi-126", "text": "wetness index for the lagoons near Pondicherry in January 2025", "intent": "NDWI"}
+{"id": "ndwi-127", "text": "Water index for the ponds of Dhanbad in 2024", "intent": "NDWI"}
+{"id": "ndbi-001", "text": "Show built-up area around Marina Beach, Chennai in January 2025", "intent": "NDBI"}
+{"id": "ndbi-002", "text": "What is the NDBI of Whitefield in March 2024?", "intent": "NDBI"}
+{"id": "ndbi-003", "text": "Map the urban area of Gurugram in October 2024", "intent": "NDBI"}
+{"id": "ndbi-004", "text": "How built up is Electronic City in February 2025?", "intent": "NDBI"}
+{"id": "ndbi-005", "text": "compute ndbi for Noida on 3 May 2024", "intent": "NDBI"}
+{"id": "ndbi-006", "text": "Give me the built-up index for Navi Mumbai in 2023", "intent": "NDBI"}
+{"id": "ndbi-007", "text": "Where are the dense settlements around Dharavi in September 2024?", "intent": "NDBI"}
+{"id": "ndbi-008", "text": "Measure impervious surface near Velachery in January 2025", "intent": "NDBI"}
+{"id": "ndbi-009", "text": "urban footprint of Hyderabad's HITEC City in December 2024", "intent": "NDBI"}
+{"id": "ndbi-010", "text": "NDBI please, Pune, June 2024", "intent": "NDBI"}
+{"id": "ndbi-011", "text": "Show built up land around Surat in 2024", "intent": "NDBI"}
+{"id": "ndbi-012", "text": "What does the built-up index say about Bhiwandi in May 2024", "intent": "NDBI"}
+{"id": "ndbi-013", "text": "Assess the concrete cover of Ahmedabad's SG highway in August 2024", "intent": "NDBI"}
+{"id": "ndbi-014", "text": "How urbanised is New Town, Kolkata in November 2023", "intent": "NDBI"}
+{"id": "ndbi-015", "text": "Built-up density near Dwarka, February 2025", "intent": "NDBI"}
+{"id": "ndbi-016", "text": "I need the normalized difference built-up index for Indore in 2023", "intent": "NDBI"}
+{"id": "ndbi-017", "text": "Map settlements across Patna in September 2024", "intent": "NDBI"}
+{"id": "ndbi-018", "text": "builtup area near Guwahati in july 2024", "intent": "NDBI"}
+{"id": "ndbi-019", "text": "Check the urban land around Srinagar in March 2024", "intent": "NDBI"}
+{"id": "ndbi-020", "text": "Report NDBI over Dhaka in 2023", "intent": "NDBI"}
+{"id": "ndbi-021", "text": "Map built-up surfaces across Hanoi in February 2024", "intent": "NDBI"}
+{"id": "ndbi-022", "text": "What is the urban density around Lagos in August 2024?", "intent": "NDBI"}
+{"id": "ndbi-023", "text": "settlement cover near Kigali, June 2024", "intent": "NDBI"}
+{"id": "ndbi-024", "text": "Can you compute built-up for Lucknow in April 2024", "intent": "NDBI"}
+{"id": "ndbi-025", "text": "How much concrete is there around Sriperumbudur in June 2024", "intent": "NDBI"}
+{"id": "ndbi-026", "text": "Urban land at Koramangala in 2024", "intent": "NDBI"}
+{"id": "ndbi-027", "text": "Get NDBI values for Chandigarh on 2024-03-15", "intent": "NDBI"}
+{"id": "ndbi-028", "text": "Show impervious cover over Thane in January 2025", "intent": "NDBI"}
+{"id": "ndbi-029", "text": "What's the built-up index of Faridabad in Feb 2024", "intent": "NDBI"}
+{"id": "ndbi-030", "text": "Rooftop and paved area around Mylapore in December 2024", "intent": "NDBI"}
+{"id": "ndbi-031", "text": "estimate built up land around Nagpur in 2024", "intent": "NDBI"}
+{"id": "ndbi-032", "text": "NDBI for Jaipur walled city in September 2023", "intent": "NDBI"}
+{"id": "ndbi-033", "text": "Show me the urban index of Kathmandu in April 2025", "intent": "NDBI"}
+{"id": "ndbi-034", "text": "Built environment around Colombo in January 2024", "intent": "NDBI"}
+{"id": "ndbi-035", "text": "Is Howrah heavily built up in March 2024?", "intent": "NDBI"}
+{"id": "ndbi-036", "text": "Give the mean NDBI of Karachi in 2024", "intent": "NDBI"}
+{"id": "ndbi-037", "text": "Analyse the urban surfaces around Secunderabad in December 2024", "intent": "NDBI"}
+{"id": "ndbi-038", "text": "How dense is the construction near Nairobi's Westlands in July 2024", "intent": "NDBI"}
+{"id": "ndbi-039", "text": "Report the built-up condition near Lusaka for April 2024", "intent": "NDBI"}
+{"id": "ndbi-040", "text": "Check the settlement density near Varanasi in November 2024", "intent": "NDBI"}
+{"id": "ndbi-041", "text": "Urban area around Cusco in March 2023", "intent": "NDBI"}
+{"id": "ndbi-042", "text": "Compute the built-up index of Porto in May 2024", "intent": "NDBI"}
+{"id": "ndbi-043", "text": "How paved is the area near Izmir in June 2024", "intent": "NDBI"}
+{"id": "ndbi-044", "text": "Housing density at Ghaziabad, February 2025", "intent": "NDBI"}
+{"id": "ndbi-045", "text": "Industrial estate near Hosur, built-up index for January 2024", "intent": "NDBI"}
+{"id": "ndbi-046", "text": "How much impervious land is at Bhopal in 2024", "intent": "NDBI"}
+{"id": "ndbi-047", "text": "Is the Rajarhat township densely built in October 2024?", "intent": "NDBI"}
+{"id": "ndbi-048", "text": "builtup index for Ludhiana in March 2025", "intent": "NDBI"}
+{"id": "ndbi-049", "text": "Show NDBI over Kanpur in 2024", "intent": "NDBI"}
+{"id": "ndbi-050", "text": "bulit-up index for Raipur in December 2024", "intent": "NDBI"}
+{"id": "ndbi-051", "text": "Assess built-up area at 28.61, 77.21 in January 2025", "intent": "NDBI"}
+{"id": "ndbi-052", "text": "Please run the urban analysis for Mysuru in Feb 2025", "intent": "NDBI"}
+{"id": "ndbi-053", "text": "How built-up is Kochi's Kakkanad in August 2024", "intent": "NDBI"}
+{"id": "ndbi-054", "text": "Concrete surfaces around Vapi, June 2024", "intent": "NDBI"}
+{"id": "ndbi-055", "text": "Measure urban cover of Coimbatore in 2024", "intent": "NDBI"}
+{"id": "ndbi-056", "text": "Settlements of Imphal in November 2024", "intent": "NDBI"}
+{"id": "ndbi-057", "text": "NDBI Ranchi January 2025", "intent": "NDBI"}
+{"id": "ndbi-058", "text": "What is the urban footprint like around Visakhapatnam in March 2024?", "intent": "NDBI"}
+{"id": "ndbi-059", "text": "Show built-up land for the suburbs of Pune in 2023", "intent": "NDBI"}
+{"id": "ndbi-060", "text": "How built up is Dehradun in 2024", "intent": "NDBI"}
+{"id": "ndbi-061", "text": "check urbn area around Nashik in october 2024", "intent": "NDBI"}
+{"id": "ndbi-062", "text": "Built-up zones near Addis Ababa in July 2024", "intent": "NDBI"}
+{"id": "ndbi-063", "text": "Map urban land around Phoenix for June 2024", "intent": "NDBI"}
+{"id": "ndbi-064", "text": "NDBI statistics please for Vijayawada in 2024", "intent": "NDBI"}
+{"id": "ndbi-065", "text": "Tell me the built-up index over Jodhpur in 2023", "intent": "NDBI"}
+{"id": "ndbi-066", "text": "Dense urban fabric around Cairo in April 2024", "intent": "NDBI"}
+{"id": "ndbi-067", "text": "How is the building density near Madurai in January 2025", "intent": "NDBI"}
+{"id": "ndbi-068", "text": "Get built-up index for Amaravati on 1 March 2024", "intent": "NDBI"}
+{"id": "ndbi-069", "text": "Rate the urban cover around Kochi from January to March 2024", "intent": "NDBI"}
+{"id": "ndbi-070", "text": "Built-up land around Guntur between June and August 2024", "intent": "NDBI"}
+{"id": "ndbi-071", "text": "Settlement index near Bhuj in September 2024", "intent": "NDBI"}
+{"id": "ndbi-072", "text": "Urban sprawl footprint near Mumbai's Mira Road in 2024", "intent": "NDBI"}
+{"id": "ndbi-073", "text": "How much built-up land is in Kanpur in Jan 2025", "intent": "NDBI"}
+{"id": "ndbi-074", "text": "Built-up index for Bhubaneswar on 5 December 2024", "intent": "NDBI"}
+{"id": "ndbi-075", "text": "Is Amritsar densely constructed in March 2025?", "intent": "NDBI"}
+{"id": "ndbi-076", "text": "Show me how much urban area there is in Visakhapatnam in 2023", "intent": "NDBI"}
+{"id": "ndbi-077", "text": "building cover at Hebbal in may 2024", "intent": "NDBI"}
+{"id": "ndbi-078", "text": "ndbi around shillong october 2024", "intent": "NDBI"}
+{"id": "ndbi-079", "text": "Urban index for Akola in 2024", "intent": "NDBI"}
+{"id": "ndbi-080", "text": "Compute impervious surfaces around Almaty in 2024", "intent": "NDBI"}
+{"id": "ndbi-081", "text": "The built-up index at Aizawl for 2023, please", "intent": "NDBI"}
+{"id": "ndbi-082", "text": "Urban land status for Valencia in 2024", "intent": "NDBI"}
+{"id": "ndbi-083", "text": "Built-up condition around Tbilisi in January 2024", "intent": "NDBI"}
+{"id": "ndbi-084", "text": "Get the urban index for Kampala in 2024", "intent": "NDBI"}
+{"id": "ndbi-085", "text": "Built-up reading for Salem town in November 2023", "intent": "NDBI"}
+{"id": "ndbi-086", "text": "How much of Ranchi is paved in 2024", "intent": "NDBI"}
+{"id": "ndbi-087", "text": "N D B I for Patna in April 2024", "intent": "NDBI"}
+{"id": "ndbi-088", "text": "built-up fraction around Bologna in 2024", "intent": "NDBI"}
+{"id": "ndbi-089", "text": "Show urban areas around Karimnagar using the built-up index for Jan 2024", "intent": "NDBI"}
+{"id": "ndbi-090", "text": "I want NDBI for the Tumkur industrial area for February 2025", "intent": "NDBI"}
+{"id": "ndbi-091", "text": "Urban analysis of Andheri in December 2024", "intent": "NDBI"}
+{"id": "ndbi-092", "text": "Built-up surfaces around Kuala Lumpur in 2024", "intent": "NDBI"}
+{"id": "ndbi-093", "text": "Give built-up numbers for Ndola in Feb 2024", "intent": "NDBI"}
+{"id": "ndbi-094", "text": "What's the NDBI at Sholinganallur in January 2025", "intent": "NDBI"}
+{"id": "ndbi-095", "text": "How concreted is the area around Gachibowli in August 2024", "intent": "NDBI"}
+{"id": "ndbi-096", "text": "bare soil and buildings around Srinagar in June 2024", "intent": "NDBI"}
+{"id": "ndbi-097", "text": "Built-up index please: Vijayawada, March 2024", "intent": "NDBI"}
+{"id": "ndbi-098", "text": "Examine urban land around Madurai in 2025", "intent": "NDBI"}
+{"id": "ndbi-099", "text": "Show me the built-up area in Hyderabad's Kukatpally in 2024", "intent": "NDBI"}
+{"id": "ndbi-100", "text": "Urban condition for Durban in April 2024", "intent": "NDBI"}
+{"id": "ndbi-101", "text": "Is Bengaluru's Marathahalli built up in 2024", "intent": "NDBI"}
+{"id": "ndbi-102", "text": "calculate built up area around surat in january 2025", "intent": "NDBI"}
+{"id": "ndbi-103", "text": "How paved is the city centre of Kanpur in 2024", "intent": "NDBI"}
+{"id": "ndbi-104", "text": "Paved surfaces around Whitefield in January 2025", "intent": "NDBI"}
+{"id": "ndbi-105", "text": "Developed land near Mohali in 2024", "intent": "NDBI"}
+{"id": "ndbi-106", "text": "How much of Thane is covered by buildings in 2024", "intent": "NDBI"}
+{"id": "ndbi-107", "text": "Concrete jungle index for Andheri in December 2024", "intent": "NDBI"}
+{"id": "ndbi-108", "text": "Built-up coverage of Gandhinagar in 2023", "intent": "NDBI"}
+{"id": "ndbi-109", "text": "Settlement extent near Siliguri in March 2025", "intent": "NDBI"}
+{"id": "ndbi-110", "text": "How much land is developed around Bhiwadi in 2024", "intent": "NDBI"}
+{"id": "ndbi-111", "text": "Rooftops and roads around Ernakulam in August 2024", "intent": "NDBI"}
+{"id": "ndbi-112", "text": "Impervious area index for Pimpri-Chinchwad in 2024", "intent": "NDBI"}
+{"id": "ndbi-113", "text": "Urban coverage near Aurangabad in October 2024", "intent": "NDBI"}
+{"id": "ndbi-114", "text": "What fraction of Guntur is built on in 2024", "intent": "NDBI"}
+{"id": "ndbi-115", "text": "Built surfaces around Mangaluru in 2024", "intent": "NDBI"}
+{"id": "ndbi-116", "text": "How covered in concrete is Sector 62 Noida in 2024", "intent": "NDBI"}
+{"id": "ndbi-117", "text": "Industrial buildings around Manesar, built-up index for 2024", "intent": "NDBI"}
+{"id": "ndbi-118", "text": "Urban land index for the outskirts of Jaipur in 2023", "intent": "NDBI"}
+{"id": "ndbi-119", "text": "Show how built the area around Hosur is in January 2025", "intent": "NDBI"}
+{"id": "ndbi-120", "text": "Built-up signal for Tiruppur in 2024", "intent": "NDBI"}
+{"id": "ndbi-121", "text": "Townships near Kharghar, built-up index 2024", "intent": "NDBI"}
+{"id": "ndbi-122", "text": "How much bare ground and buildings are around Bhuj in 2024", "intent": "NDBI"}
+{"id": "ndbi-123", "text": "Measure the built environment around Rourkela in 2024", "intent": "NDBI"}
+{"id": "ndbi-124", "text": "Urban index for Gachibowli in December 2024", "intent": "NDBI"}
+{"id": "ndbi-125", "text": "Construction cover near Dholera in 2024", "intent": "NDBI"}
+{"id": "ndbi-126", "text": "How built-over is the coastline near Kovalam in 2024", "intent": "NDBI"}
+{"id": "ndbi-127", "text": "Built-up land around Agra in March 2024", "intent": "NDBI"}
+{"id": "sar-001", "text": "Analyze SAR backscatter around Marina Beach, Chennai in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-002", "text": "What is the radar backscatter of Kochi in March 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-003", "text": "Show Sentinel-1 VV and VH over Mumbai in October 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-004", "text": "Radar image statistics for Guwahati in July 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-005", "text": "compute backscatter for Kolkata port on 3 May 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-006", "text": "Give me the SAR response of the Sundarbans in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-007", "text": "How strong is the radar return around Alappuzha in September 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-008", "text": "Measure VV backscatter near Pulicat Lake in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-009", "text": "sentinel 1 radar over Dhaka in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-010", "text": "SAR please, Pune, June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-011", "text": "Show radar backscatter in decibels around Patna in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-012", "text": "What does Sentinel-1 say about Chilika Lake in May 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-013", "text": "Assess the VH polarisation over Majuli in August 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-014", "text": "Microwave backscatter near Assam's Barpeta in November 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-015", "text": "Radar reflectivity near Dhemaji, February 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-016", "text": "I need the gamma naught backscatter for Lake Victoria in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-017", "text": "Map radar intensity across the Rann of Kutch in September 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-018", "text": "raddar backscatter near Silchar in july 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-019", "text": "Check the SAR data around Srinagar in March 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-020", "text": "Report VV and VH over the Nile Delta in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-021", "text": "Radar across the Mekong Delta around Can Tho in February 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-022", "text": "What is the SAR signal around Manaus in August 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-023", "text": "C-band radar near Kigali, June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-024", "text": "Can you compute radar backscatter for Lucknow in April 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-025", "text": "How bright is the radar signal over Kuttanad in June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-026", "text": "Backscatter at Hussain Sagar in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-027", "text": "Get SAR values for Chandigarh on 2024-03-15", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-028", "text": "Show Sentinel-1 radar over Thane creek in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-029", "text": "What's the VV minus VH ratio for Faridabad in Feb 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-030", "text": "Radar through the monsoon clouds around Mangaluru in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-031", "text": "estimate backscater around Nagpur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-032", "text": "SAR for Jaipur in September 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-033", "text": "Show me the radar image of Kathmandu in April 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-034", "text": "Dual-pol backscatter around Colombo in January 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-035", "text": "Is the radar return strong over Howrah in March 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-036", "text": "Give the mean VV backscatter of Karachi in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-037", "text": "Analyse the synthetic aperture radar data around Secunderabad in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-038", "text": "How strong is VH backscatter near Nairobi in July 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-039", "text": "Report the radar backscatter near Lusaka for April 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-040", "text": "Check the radar signal near Varanasi in November 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-041", "text": "Sentinel-1 backscatter around Cusco in March 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-042", "text": "Compute the SAR backscatter of Porto in May 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-043", "text": "Radar sigma nought near Izmir in June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-044", "text": "Backscatter in dB at Ghaziabad, February 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-045", "text": "Radar over the industrial estate near Hosur for January 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-046", "text": "How much radar energy comes back from Bhopal in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-047", "text": "Is the SAR backscatter high over Rajarhat in October 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-048", "text": "sentinal-1 backscatter for Ludhiana in March 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-049", "text": "Show radar over Kanpur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-050", "text": "backscatter statistics for Raipur in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-051", "text": "Assess SAR at 28.61, 77.21 in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-052", "text": "Please run the radar analysis for Mysuru in Feb 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-053", "text": "How does the VV channel look numerically for Kakkanad in August 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-054", "text": "Radar polarization values around Vapi, June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-055", "text": "Measure radar backscatter of Coimbatore in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-056", "text": "SAR of Imphal in November 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-057", "text": "Sentinel1 Ranchi January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-058", "text": "What is the radar backscatter like around Visakhapatnam in March 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-059", "text": "Show SAR intensity for the suburbs of Pune in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-060", "text": "Radar backscatter in Dehradun in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-061", "text": "check sar around Nashik in october 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-062", "text": "All-weather radar data near Addis Ababa in July 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-063", "text": "Map radar returns around Phoenix for June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-064", "text": "SAR statistics please for Vijayawada in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-065", "text": "Tell me the radar backscatter over Jodhpur in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-066", "text": "Radar intensity around Cairo in April 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-067", "text": "How is the VH backscatter near Madurai in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-068", "text": "Get Sentinel-1 backscatter for Amaravati on 1 March 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-069", "text": "Rate the radar response around Kochi from January to March 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-070", "text": "Radar returns around Guntur between June and August 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-071", "text": "VV backscatter near Bhuj in September 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-072", "text": "Radar over Mumbai's Mira Road in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-073", "text": "How much backscatter comes from Kanpur in Jan 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-074", "text": "SAR backscatter for Bhubaneswar on 5 December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-075", "text": "Is Amritsar bright in radar in March 2025?", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-076", "text": "Show me the Sentinel-1 radar for Visakhapatnam in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-077", "text": "radar at Hebbal in may 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-078", "text": "vv vh around shillong october 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-079", "text": "Radar backscatter index for Akola in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-080", "text": "Compute gamma naught around Almaty in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-081", "text": "The SAR backscatter at Aizawl for 2023, please", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-082", "text": "Radar status for Valencia in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-083", "text": "Backscatter condition around Tbilisi in January 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-084", "text": "Get the radar values for Kampala in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-085", "text": "SAR reading for Salem in November 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-086", "text": "How reflective is Ranchi to radar in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-087", "text": "S A R for Patna in April 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-088", "text": "radar backscatter around Bologna in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-089", "text": "Show SAR around Karimnagar using Sentinel-1 for Jan 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-090", "text": "I want radar backscatter for the Tumkur area for February 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-091", "text": "Radar analysis of Andheri in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-092", "text": "Microwave returns around Kuala Lumpur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-093", "text": "Give backscatter numbers for Ndola in Feb 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-094", "text": "What's the SAR backscatter at Sholinganallur in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-095", "text": "How strong are radar echoes around Gachibowli in August 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-096", "text": "VH polarization around Srinagar in June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-097", "text": "Radar please: Vijayawada, March 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-098", "text": "Examine SAR backscatter around Madurai in 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-099", "text": "Show me radar data for Hyderabad's Kukatpally in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-100", "text": "Radar condition for Durban in April 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-101", "text": "Is the radar return strong around Marathahalli in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-102", "text": "calculate backscatter around surat in january 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-103", "text": "Radar reflectivity of the Konkan coast near Ratnagiri in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-104", "text": "Radar echoes over Jakarta in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-105", "text": "backscattering coefficient near Chilika in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-106", "text": "Cloud-penetrating radar data for Mumbai in July 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-107", "text": "How bright is Kochi in C-band in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-108", "text": "Sigma0 values around Kolkata in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-109", "text": "SAR amplitude for Hyderabad in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-110", "text": "Radar brightness of the Sundarbans in monsoon-free January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-111", "text": "All-weather satellite radar for Guwahati in August 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-112", "text": "Give me the radar reflectance of Surat in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-113", "text": "radar measurements over Bhopal in March 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-114", "text": "How does Pune respond to microwave imaging in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-115", "text": "Dual polarisation radar for Nagpur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-116", "text": "VH/VV numbers for Varanasi in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-117", "text": "Show the gamma nought in dB for Patna in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-118", "text": "Sentinel-1A data over Kakinada in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-119", "text": "C band backscatter at Ahmedabad in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-120", "text": "radar return strength for Indore in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-121", "text": "Synthetic aperture radar over Lucknow in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-122", "text": "Radar signal in decibels for Madurai in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-123", "text": "What does radar show numerically for Bhubaneswar in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-124", "text": "Backscatter numbers for Siliguri in March 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-125", "text": "Radar polarimetry values for Jammu in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-126", "text": "Show SAR decibels for Thrissur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-127", "text": "Microwave backscatter statistics for Tezpur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "tndwi-001", "text": "Compare water at Marina Beach, Chennai between January 2024 and January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-002", "text": "How has the water in Chembarambakkam lake changed from March 2023 to March 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-003", "text": "Compare NDWI of Hussain Sagar between January and July 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-004", "text": "Did Powai Lake lose water between February 2024 and February 2025?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-005", "text": "water change at Loktak Lake from May 2023 to May 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-006", "text": "How did the water spread of Hirakud reservoir evolve from 2022 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-007", "text": "Compare the water index of Vembanad Lake in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-008", "text": "Has the open water at Pulicat Lake shrunk between 2021 and 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-009", "text": "Difference in water between December 2023 and December 2024 at Puzhal Lake", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-010", "text": "NDWI change for Dal Lake, June 2023 versus June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-011", "text": "Compare surface water around the Sundarbans in 2022 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-012", "text": "How much did Sambhar Lake's water change between May and August 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-013", "text": "water index then vs now for Bellandur lake: 2019 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-014", "text": "Compare reservoir water at Krishna Raja Sagara in November 2023 and November 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-015", "text": "Is there more water in Tehri dam in February 2025 than in February 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-016", "text": "Compare the normalized difference water index of Bhakra reservoir in 2022 and 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-017", "text": "Track water across the Rann of Kutch between March and September 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-018", "text": "compair water near Guwahati between january and july 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-019", "text": "Water in the lakes of Srinagar: March 2023 compared with March 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-020", "text": "Lake Victoria near Kisumu water index, 2020 versus 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-021", "text": "Compare water across the Mekong Delta around Can Tho in February 2023 and February 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-022", "text": "Did the water around Manaus rise between August 2023 and August 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-023", "text": "pond water near Kigali, June 2023 vs June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-024", "text": "Can you compare water for the tanks around Madurai in April 2023 and April 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-025", "text": "How did the wetness of the paddies around Alappuzha shift from January to June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-026", "text": "Water extent at Ulsoor lake before and after 2024 monsoon, January vs October 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-027", "text": "Compare NDWI of the backwaters near Kollam on 2024-01-15 and 2024-03-15", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-028", "text": "Change in water over Pallikaranai marsh from January 2024 to January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-029", "text": "Has Nagarjuna Sagar gained water between Feb 2023 and Feb 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-030", "text": "Compare the salt pan water near Tuticorin in December 2023 and December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-031", "text": "water difference around Sriperumbudur lakes between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-032", "text": "NDWI change for Bellandur lake from September 2022 to September 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-033", "text": "Compare the water index of Phewa Lake, Pokhara in April 2024 and April 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-034", "text": "Water trend at Inle Lake between January 2023 and January 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-035", "text": "Did Chembarambakkam lake have more water in March 2024 than March 2023?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-036", "text": "Mean NDWI difference for Laguna de Bay between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-037", "text": "Compare Osman Sagar water in December 2023 and December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-038", "text": "How did Lake Naivasha's water change from July 2023 to July 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-039", "text": "Water comparison near Lake Kariba for April 2023 and April 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-040", "text": "Has the river water near Varanasi decreased from November 2023 to November 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-041", "text": "Water around Lake Titicaca near Puno in March 2022 versus March 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-042", "text": "Compare the water index of the Ria Formosa lagoon in May 2023 and May 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-043", "text": "How has water spread at Ukai dam differed between June 2023 and June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-044", "text": "Water in the canals of Alleppey, February 2024 compared to February 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-045", "text": "Reservoir water near Nashik, change between January 2023 and January 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-046", "text": "How much surface water did Mettur dam lose between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-047", "text": "Has the wetland near Keoladeo gained water from April to October 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-048", "text": "water index change for Salt Lake, Kolkata between March 2024 and March 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-049", "text": "Compare NDWI over the Brahmaputra near Dibrugarh in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-050", "text": "chnage in water for Bhopal's Upper Lake between December 2023 and December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-051", "text": "Compare water at 17.42, 78.47 in January 2024 and January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-052", "text": "Please compare the water analysis for Kukkarahalli lake in Feb 2024 and Feb 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-053", "text": "How did the floodplain water of the Yamuna near Delhi vary between May and August 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-054", "text": "Lake water around Nainital, June 2023 against June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-055", "text": "Measure how the water surface of Wular Lake changed between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-056", "text": "Water of the Majuli river channels in November 2023 vs November 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-057", "text": "NDWI Udaipur lakes January 2024 and January 2025 compared", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-058", "text": "What is the water difference around Bhimtal between March 2023 and March 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-059", "text": "Compare water for the reservoirs near Pune in 2022 and 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-060", "text": "How much water has Red Hills lake lost from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-061", "text": "check water chnage around Telibandha lake between october 2023 and october 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-062", "text": "Open water near Tonle Sap in January 2024 versus July 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-063", "text": "Compare reservoir water around Fresno between June 2023 and June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-064", "text": "NDWI comparison please for the tanks near Kanchipuram in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-065", "text": "Tell me how the water index over Man Sagar differed from 2022 to 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-066", "text": "Water surface around Hanoi's West Lake, April 2023 vs April 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-067", "text": "How did the water level near Chilika move between January 2024 and January 2025 in index terms", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-068", "text": "Water index change for the Kabini reservoir from 1 March 2023 to 1 March 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-069", "text": "Compare water presence around Kochi in January 2024 and March 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-070", "text": "Water around the Godavari near Rajahmundry in June 2024 compared with August 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-071", "text": "water index difference near the Little Rann between September 2023 and September 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-072", "text": "How did creek water near Thane change between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-073", "text": "Is there less water in the ponds near Kanpur in Jan 2025 than in Jan 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-074", "text": "Compare the water index for Kanjia lake on 5 December 2023 and 5 December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-075", "text": "Did the ponds around Amritsar dry up between March 2024 and March 2025?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-076", "text": "Show me how much water changed around Visakhapatnam between 2022 and 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-077", "text": "lake water change at Hebbal lake from may 2023 to may 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-078", "text": "ndwi difference umiam lake october 2023 october 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-079", "text": "Water index comparison for the reservoir near Akola in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-080", "text": "Compare water extent around Lake Tana between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-081", "text": "The water index change at Loktak between 2022 and 2023, please", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-082", "text": "Water status for the Albufera lagoon near Valencia, 2023 vs 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-083", "text": "How did open water around Lake Taupo evolve from January 2023 to January 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-084", "text": "Get the water index difference for Lake Nakuru between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-085", "text": "Water readings for Stanley reservoir compared between November 2022 and November 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-086", "text": "How much has the water at Kanke dam changed between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-087", "text": "Compare N D W I for Patna's Ganga banks in April 2023 and April 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-088", "text": "water fraction around Venice lagoon: 2023 versus 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-089", "text": "Compare water bodies around Karimnagar using the water index for Jan 2023 and Jan 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-090", "text": "I want to compare NDWI for my village pond near Tumkur in February 2024 and February 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-091", "text": "Water change analysis of Vihar lake from December 2023 to December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-092", "text": "Did the water around Putrajaya lake increase between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-093", "text": "Give the water index difference for Kafue flats near Lusaka, Feb 2023 and Feb 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-094", "text": "What's the NDWI change at the Adyar estuary from January 2024 to January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-095", "text": "How much wetter was the delta around Sagar Island in August 2024 than in August 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-096", "text": "river water around Srinagar's Jhelum, June 2023 compared with June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-097", "text": "Water index before and after: Prakasam barrage, March 2023 and March 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-098", "text": "Examine how the water bodies around Madurai changed between 2024 and 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-099", "text": "Show me the water shift in Himayat Sagar between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-100", "text": "Compare the water condition for Durban harbour in April 2023 and April 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-101", "text": "Has the Vaigai dam held more water in 2024 than in 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-102", "text": "compare water around surat in january 2024 and january 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-103", "text": "How did the lake's water extent evolve from 2022 to 2024 at Bhimtal", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-104", "text": "Water at Kolleru lake then and now, 2019 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-105", "text": "Reservoir levels at Idukki in December 2023 against December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-106", "text": "Water in Ujani dam, year over year from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-107", "text": "How different was the water at Harike in January 2024 and January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-108", "text": "Did Sukhna lake fill up between March 2024 and September 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-109", "text": "Water spread in Pong dam: 2022 against 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-110", "text": "Was there more open water at Lake Chad in 2024 than in 2020?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-111", "text": "Track how the Kuttanad backwaters' water shifted from January to June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-112", "text": "Water extent at Pulicat, dry season 2024 vs wet season 2024, January and November 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-113", "text": "How much did the reservoir near Hosur drain between April 2024 and June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-114", "text": "Water index for Kaptai lake in 2023 and again in 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-115", "text": "Is Ranganathittu wetter in July 2024 than in March 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-116", "text": "water then vs now for Kolleru: January 2020 and January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-117", "text": "Did the temple tanks of Kumbakonam dry out between 2023 and 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-118", "text": "How did the water at Point Calimere marsh vary from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-119", "text": "Reservoir water at Idukki: how full in 2023 versus 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-120", "text": "Water in the Kosi near Supaul, August 2023 and August 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-121", "text": "Compare how much water Tungabhadra dam held in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-122", "text": "How has open water at Loktak moved between 2021 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-123", "text": "Water body shrinkage at Bellandur lake between 2018 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-124", "text": "How much did the lagoons near Pondicherry dry between January and May 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-125", "text": "Water surface of Ujani dam: which was higher, June 2023 or June 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-126", "text": "Show whether Sambhar Lake held more water in 2024 than in 2022", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-127", "text": "Water index at Wular Lake, 2020 compared to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "rgb-001", "text": "Show the satellite image of Marina Beach, Chennai in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-002", "text": "Display true colour imagery of Hussain Sagar in March 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-003", "text": "Give me an RGB view of Pune in October 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-004", "text": "natural colour picture of Guwahati, July 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-005", "text": "Show me a Sentinel-2 photo of Kochi on 3 May 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-006", "text": "I want to see the true-color scene for the Sundarbans in 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-007", "text": "Get the satellite picture of Alappuzha in September 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-008", "text": "Show imagery of Pulicat Lake from January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-009", "text": "true colour composite of Dhaka in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-010", "text": "Satellite view please, Nagpur, June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-011", "text": "Show the optical image over Patna in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-012", "text": "Pull up the Sentinel-2 image of Chilika Lake in May 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-013", "text": "Display the natural color image of Majuli in August 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-014", "text": "RGB composite near Barpeta in November 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-015", "text": "Satellite photo near Dhemaji, February 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-016", "text": "I need a true colour satellite image of Lake Victoria in 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-017", "text": "Render the image of the Rann of Kutch in September 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-018", "text": "sattelite image near Silchar in july 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-019", "text": "Fetch the imagery around Srinagar in March 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-020", "text": "Show the Nile Delta in true colour in 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-021", "text": "Image of the Mekong Delta around Can Tho in February 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-022", "text": "What does the satellite picture of Manaus in August 2024 show? just display it", "intent": "TRUE_COLOR"}
+{"id": "rgb-023", "text": "RGB image near Kigali, June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-024", "text": "Can you display the satellite scene for Lucknow in April 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-025", "text": "Bring up a natural-colour view of Kuttanad in June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-026", "text": "Imagery at Hussain Sagar in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-027", "text": "Get the true color picture for Chandigarh on 2024-03-15", "intent": "TRUE_COLOR"}
+{"id": "rgb-028", "text": "Show the optical satellite scene over Thane creek in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-029", "text": "Display a Sentinel-2 RGB for Faridabad in Feb 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-030", "text": "Show the true-colour image around Mangaluru in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-031", "text": "visualise the satellite image of Nagpur in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-032", "text": "image for Jaipur in September 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-033", "text": "Show me the satellite image of Kathmandu in April 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-034", "text": "Natural colour scene around Colombo in January 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-035", "text": "Put the Sentinel-2 picture of Howrah on the map for March 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-036", "text": "Display the RGB image of Karachi in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-037", "text": "Show the photo from space of Secunderabad in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-038", "text": "True colour view near Nairobi in July 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-039", "text": "Display imagery near Lusaka for April 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-040", "text": "Show the Sentinel-2 true colour scene near Varanasi in November 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-041", "text": "Satellite image around Cusco in March 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-042", "text": "Give the true-color imagery of Porto in May 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-043", "text": "Natural colour imagery near Izmir in June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-044", "text": "Picture of Ghaziabad from satellite, February 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-045", "text": "Show the true colour image over the industrial estate near Hosur for January 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-046", "text": "Satellite photograph of Bhopal in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-047", "text": "Can I get the satellite image of Rajarhat for October 2024?", "intent": "TRUE_COLOR"}
+{"id": "rgb-048", "text": "true colur image for Ludhiana in March 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-049", "text": "Show the image over Kanpur in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-050", "text": "imagry for Raipur in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-051", "text": "Show the satellite image at 28.61, 77.21 in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-052", "text": "Please display the true colour scene for Mysuru in Feb 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-053", "text": "Show an RGB snapshot of Kakkanad in August 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-054", "text": "Colour image around Vapi, June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-055", "text": "Display the satellite imagery of Coimbatore in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-056", "text": "Image of Imphal in November 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-057", "text": "satellite image Ranchi January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-058", "text": "Can I see the true colour image of Visakhapatnam in March 2024 on the map", "intent": "TRUE_COLOR"}
+{"id": "rgb-059", "text": "Show the optical imagery for the suburbs of Pune in 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-060", "text": "Satellite picture of Dehradun in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-061", "text": "show image around Nashik in october 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-062", "text": "Natural colour scene near Addis Ababa in July 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-063", "text": "Map the true colour image around Phoenix for June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-064", "text": "Show RGB please for Vijayawada in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-065", "text": "Just show me the satellite image over Jodhpur in 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-066", "text": "True colour imagery of Cairo in April 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-067", "text": "Display the latest Sentinel-2 scene I can get of Madurai for January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-068", "text": "Get the Sentinel-2 picture for Amaravati on 1 March 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-069", "text": "Show the RGB image around Kochi from January to March 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-070", "text": "Satellite pictures around Guntur between June and August 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-071", "text": "Natural colour view near Bhuj in September 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-072", "text": "Imagery over Mumbai's Mira Road in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-073", "text": "Show the Sentinel-2 image of Kanpur in Jan 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-074", "text": "True colour image for Bhubaneswar on 5 December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-075", "text": "Show a photo of Amritsar from orbit in March 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-076", "text": "Show me the Sentinel-2 imagery for Visakhapatnam in 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-077", "text": "picture at Hebbal in may 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-078", "text": "rgb around shillong october 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-079", "text": "Satellite scene for Akola in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-080", "text": "Display true colour around Almaty in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-081", "text": "The satellite image of Aizawl for 2023, please", "intent": "TRUE_COLOR"}
+{"id": "rgb-082", "text": "Show Valencia in natural colour in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-083", "text": "Satellite imagery for Tbilisi in January 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-084", "text": "Get the RGB picture of Kampala in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-085", "text": "Image of Salem in November 2023", "intent": "TRUE_COLOR"}
+{"id": "rgb-086", "text": "Display Ranchi in true colour for 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-087", "text": "satellite photo of Patna in April 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-088", "text": "true colour image around Bologna in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-089", "text": "Show the imagery around Karimnagar using Sentinel-2 for Jan 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-090", "text": "I want the satellite picture of the Tumkur area for February 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-091", "text": "Visual imagery of Andheri in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-092", "text": "Show Kuala Lumpur in true colour in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-093", "text": "Give me the picture from the satellite for Ndola in Feb 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-094", "text": "What's the true colour image of Sholinganallur in January 2025? display it", "intent": "TRUE_COLOR"}
+{"id": "rgb-095", "text": "Pull up the RGB image of Gachibowli in August 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-096", "text": "Natural colour photo around Srinagar in June 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-097", "text": "Image please: Vijayawada, March 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-098", "text": "Display the satellite imagery around Madurai in 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-099", "text": "Show me the true colour scene for Hyderabad's Kukatpally in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-100", "text": "Colour satellite image for Durban in April 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-101", "text": "Show a Sentinel-2 view of Marathahalli in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-102", "text": "display image around surat in january 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-103", "text": "Natural colour snapshot of Kolleru lake in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-104", "text": "Show the plain optical picture of Leh in August 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-105", "text": "Visual satellite image of Jaisalmer in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-106", "text": "Just the picture of Idukki from Sentinel-2 in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-107", "text": "Satellite snapshot of Andaman's Havelock island in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-108", "text": "Show the colour photo of Rishikesh from space in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-109", "text": "Give me the real colour view of Goa's coastline in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-110", "text": "Put a natural-colour satellite image of Kochi on the map for January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-111", "text": "Plain satellite picture of Bhopal, no analysis, March 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-112", "text": "Show what Sentinel-2 captured over Mangaluru in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-113", "text": "The visible-band composite of Surat in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-114", "text": "Satellite image only for Kanyakumari in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-115", "text": "Map image of Puri from the satellite in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-116", "text": "Show the Sentinel-2 true colour tile over Ajmer in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-117", "text": "Bring up the orbital photo of Udupi for 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-118", "text": "Show me the scene over Tirupati in true colour for 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-119", "text": "optical imagery please for Munnar in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-120", "text": "Display the satellite capture of Hampi in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-121", "text": "The colour composite image of Varkala in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-122", "text": "Satellite picture of the Gateway of India area in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-123", "text": "Show the RGB view of Madikeri in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-124", "text": "Natural-colour image near Gokarna in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-125", "text": "Display Sentinel-2 imagery of Kochi port in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-126", "text": "Unprocessed look, I mean the plain image, of Nashik in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-127", "text": "True colour satellite photo of Alibag in 2024", "intent": "TRUE_COLOR"}
+{"id": "clar-001", "text": "Analyze Chennai", "intent": "CLARIFICATION"}
+{"id": "clar-002", "text": "Tell me about Pune", "intent": "CLARIFICATION"}
+{"id": "clar-003", "text": "What is happening in Nagpur?", "intent": "CLARIFICATION"}
+{"id": "clar-004", "text": "Give me data for Kochi", "intent": "CLARIFICATION"}
+{"id": "clar-005", "text": "Run an analysis on Guwahati in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-006", "text": "Analyze this area", "intent": "CLARIFICATION"}
+{"id": "clar-007", "text": "Show me something interesting about Lucknow", "intent": "CLARIFICATION"}
+{"id": "clar-008", "text": "What can you tell me about Jaipur in March 2024", "intent": "CLARIFICATION"}
+{"id": "clar-009", "text": "Report on Bhopal for 2024", "intent": "CLARIFICATION"}
+{"id": "clar-010", "text": "insights for Surat please", "intent": "CLARIFICATION"}
+{"id": "clar-011", "text": "Check this location", "intent": "CLARIFICATION"}
+{"id": "clar-012", "text": "What's going on around Vijayawada", "intent": "CLARIFICATION"}
+{"id": "clar-013", "text": "Do a satellite analysis of Mysuru", "intent": "CLARIFICATION"}
+{"id": "clar-014", "text": "Analyse Shillong in January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-015", "text": "Status of Srinagar in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-016", "text": "I want information about Leh", "intent": "CLARIFICATION"}
+{"id": "clar-017", "text": "Look into Patna for me", "intent": "CLARIFICATION"}
+{"id": "clar-018", "text": "Run the usual analysis on Ranchi", "intent": "CLARIFICATION"}
+{"id": "clar-019", "text": "Assess Bhubaneswar", "intent": "CLARIFICATION"}
+{"id": "clar-020", "text": "Evaluate Visakhapatnam in 2023", "intent": "CLARIFICATION"}
+{"id": "clar-021", "text": "Compute an index for Madurai in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-022", "text": "Which index should I use for Coimbatore?", "intent": "CLARIFICATION"}
+{"id": "clar-023", "text": "Give me statistics for Thiruvananthapuram", "intent": "CLARIFICATION"}
+{"id": "clar-024", "text": "What do the satellites say about Panaji?", "intent": "CLARIFICATION"}
+{"id": "clar-025", "text": "Study Dehradun in December 2024", "intent": "CLARIFICATION"}
+{"id": "clar-026", "text": "Show change", "intent": "CLARIFICATION"}
+{"id": "clar-027", "text": "Compare January and March 2025 for Nagpur", "intent": "CLARIFICATION"}
+{"id": "clar-028", "text": "What changed in Shimla between 2023 and 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-029", "text": "Compare Hampi in 2022 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-030", "text": "Analyze the region around Madurai", "intent": "CLARIFICATION"}
+{"id": "clar-031", "text": "help", "intent": "CLARIFICATION"}
+{"id": "clar-032", "text": "What can SatQuery do?", "intent": "CLARIFICATION"}
+{"id": "clar-033", "text": "Tell me everything about the Nile Delta", "intent": "CLARIFICATION"}
+{"id": "clar-034", "text": "Summarise Lake Victoria for me", "intent": "CLARIFICATION"}
+{"id": "clar-035", "text": "Analyse Manaus in August 2024", "intent": "CLARIFICATION"}
+{"id": "clar-036", "text": "Show numbers for Rotterdam", "intent": "CLARIFICATION"}
+{"id": "clar-037", "text": "Give me a report on Nairobi in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-038", "text": "Examine Dhaka", "intent": "CLARIFICATION"}
+{"id": "clar-039", "text": "Process Kathmandu for January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-040", "text": "I need an analysis for Colombo", "intent": "CLARIFICATION"}
+{"id": "clar-041", "text": "investigate Jakarta", "intent": "CLARIFICATION"}
+{"id": "clar-042", "text": "Check Hanoi in 2023", "intent": "CLARIFICATION"}
+{"id": "clar-043", "text": "analyse karachi", "intent": "CLARIFICATION"}
+{"id": "clar-044", "text": "Run satellite analytics over Cairo in March 2024", "intent": "CLARIFICATION"}
+{"id": "clar-045", "text": "Look at Lima", "intent": "CLARIFICATION"}
+{"id": "clar-046", "text": "Kigali 2024", "intent": "CLARIFICATION"}
+{"id": "clar-047", "text": "Do something with Addis Ababa", "intent": "CLARIFICATION"}
+{"id": "clar-048", "text": "What's up with Ulaanbaatar?", "intent": "CLARIFICATION"}
+{"id": "clar-049", "text": "Analyze Almaty in May 2024", "intent": "CLARIFICATION"}
+{"id": "clar-050", "text": "Explore Tbilisi", "intent": "CLARIFICATION"}
+{"id": "clar-051", "text": "tell me about porto in 2023", "intent": "CLARIFICATION"}
+{"id": "clar-052", "text": "Evaluate the area around Valencia", "intent": "CLARIFICATION"}
+{"id": "clar-053", "text": "Get me the data for Lyon in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-054", "text": "Bologna analysis", "intent": "CLARIFICATION"}
+{"id": "clar-055", "text": "What does the data show for Kraków in 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-056", "text": "Analyse Tromsø", "intent": "CLARIFICATION"}
+{"id": "clar-057", "text": "Measure Reykjavik", "intent": "CLARIFICATION"}
+{"id": "clar-058", "text": "Can you analyse Halifax for 2023", "intent": "CLARIFICATION"}
+{"id": "clar-059", "text": "Give me results for Tucson", "intent": "CLARIFICATION"}
+{"id": "clar-060", "text": "Run it for Boise in June 2024", "intent": "CLARIFICATION"}
+{"id": "clar-061", "text": "Analyze Winnipeg", "intent": "CLARIFICATION"}
+{"id": "clar-062", "text": "Assess Oaxaca in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-063", "text": "check cusco", "intent": "CLARIFICATION"}
+{"id": "clar-064", "text": "Numbers for Bogotá in 2024 please", "intent": "CLARIFICATION"}
+{"id": "clar-065", "text": "Santiago in March 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-066", "text": "What about Perth", "intent": "CLARIFICATION"}
+{"id": "clar-067", "text": "Darwin, January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-068", "text": "Please analyse Hobart", "intent": "CLARIFICATION"}
+{"id": "clar-069", "text": "Tell me what's there in Christchurch", "intent": "CLARIFICATION"}
+{"id": "clar-070", "text": "Suva analysis 2023", "intent": "CLARIFICATION"}
+{"id": "clar-071", "text": "Analyze Mandalay in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-072", "text": "Chiang Mai report", "intent": "CLARIFICATION"}
+{"id": "clar-073", "text": "What should I measure for Cebu?", "intent": "CLARIFICATION"}
+{"id": "clar-074", "text": "Run the analysis for Davao in February 2024", "intent": "CLARIFICATION"}
+{"id": "clar-075", "text": "Look at Kuching please", "intent": "CLARIFICATION"}
+{"id": "clar-076", "text": "Check Muscat in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-077", "text": "Doha", "intent": "CLARIFICATION"}
+{"id": "clar-078", "text": "Analyze Tabriz between January and March 2024", "intent": "CLARIFICATION"}
+{"id": "clar-079", "text": "Compare Konya in 2023 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-080", "text": "Izmir in 2024, analyse it", "intent": "CLARIFICATION"}
+{"id": "clar-081", "text": "Tunis report for 2024", "intent": "CLARIFICATION"}
+{"id": "clar-082", "text": "Fez please", "intent": "CLARIFICATION"}
+{"id": "clar-083", "text": "Accra, run analysis", "intent": "CLARIFICATION"}
+{"id": "clar-084", "text": "What's the situation in Kumasi?", "intent": "CLARIFICATION"}
+{"id": "clar-085", "text": "Analyse the imagery data for Lusaka", "intent": "CLARIFICATION"}
+{"id": "clar-086", "text": "Get me insights on Harare in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-087", "text": "Maputo analysis please", "intent": "CLARIFICATION"}
+{"id": "clar-088", "text": "investigate antananarivo in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-089", "text": "Durban", "intent": "CLARIFICATION"}
+{"id": "clar-090", "text": "Compute the index for this place", "intent": "CLARIFICATION"}
+{"id": "clar-091", "text": "Show the difference for Pune between 2022 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-092", "text": "Calculate something for Bengaluru", "intent": "CLARIFICATION"}
+{"id": "clar-093", "text": "I want to analyse Hyderabad", "intent": "CLARIFICATION"}
+{"id": "clar-094", "text": "Analyse the area near 12.97, 77.59", "intent": "CLARIFICATION"}
+{"id": "clar-095", "text": "Run a query on Mumbai for last year", "intent": "CLARIFICATION"}
+{"id": "clar-096", "text": "Which analysis is best for Delhi in 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-097", "text": "Give me a satellite analysis of Kolkata", "intent": "CLARIFICATION"}
+{"id": "clar-098", "text": "What's new in Ahmedabad?", "intent": "CLARIFICATION"}
+{"id": "clar-099", "text": "Show stats for Indore in January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-100", "text": "Do a quick check on Nashik", "intent": "CLARIFICATION"}
+{"id": "clar-101", "text": "Evaluate Raipur for 2024", "intent": "CLARIFICATION"}
+{"id": "clar-102", "text": "Tell me more about Amritsar", "intent": "CLARIFICATION"}
+{"id": "clar-103", "text": "Run a comparison for Mysuru between 2023 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-104", "text": "analyze vizag", "intent": "CLARIFICATION"}
+{"id": "clar-105", "text": "Compare Pune in 2020 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-106", "text": "Compare Hubli between January and June 2024", "intent": "CLARIFICATION"}
+{"id": "clar-107", "text": "What changed around Nagpur from 2019 to 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-108", "text": "Show the difference for Kochi between 2023 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-109", "text": "Compare the two dates for Jaipur, March 2023 and March 2024", "intent": "CLARIFICATION"}
+{"id": "clar-110", "text": "How has Surat changed between 2022 and 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-111", "text": "Run a before and after for Indore, 2021 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-112", "text": "Compare Madurai in January 2024 and January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-113", "text": "Calculate the index for Nashik", "intent": "CLARIFICATION"}
+{"id": "clar-114", "text": "Measure Pune in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-115", "text": "Give me the value for Kolkata in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-116", "text": "Show results for Lucknow in March 2025", "intent": "CLARIFICATION"}
+{"id": "clar-117", "text": "Run the default analysis on Bhopal", "intent": "CLARIFICATION"}
+{"id": "clar-118", "text": "What should I look at for Guntur?", "intent": "CLARIFICATION"}
+{"id": "clar-119", "text": "Analyse it for 2024", "intent": "CLARIFICATION"}
+{"id": "clar-120", "text": "Do the analysis for Hyderabad please", "intent": "CLARIFICATION"}
+{"id": "clar-121", "text": "Compute the statistics for Ranchi in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-122", "text": "I need numbers for Coimbatore", "intent": "CLARIFICATION"}
+{"id": "clar-123", "text": "Show the index value around Salem in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-124", "text": "Can you analyse my area near Mysuru", "intent": "CLARIFICATION"}
+{"id": "clar-125", "text": "Tell me the trends in Vadodara", "intent": "CLARIFICATION"}
+{"id": "clar-126", "text": "Show the comparison for Nellore between 2022 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-127", "text": "Report for Kakinada, January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-128", "text": "Evaluate the site near Belgaum", "intent": "CLARIFICATION"}
+{"id": "clar-129", "text": "Check Bikaner for me", "intent": "CLARIFICATION"}
+{"id": "unsup-001", "text": "Count ships in Chennai harbor", "intent": "UNSUPPORTED"}
+{"id": "unsup-002", "text": "Detect cars in the parking lots around Whitefield in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-003", "text": "Classify land cover around Pune in January 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-004", "text": "Predict crop yield near Ludhiana for 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-005", "text": "Map flooding in Chennai in December 2023", "intent": "UNSUPPORTED"}
+{"id": "unsup-006", "text": "What is the soil moisture around Nagpur in May 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-007", "text": "Show land surface temperature over Delhi in June 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-008", "text": "Measure air pollution over Kanpur in November 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-009", "text": "How much rainfall did Mumbai get in July 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-010", "text": "Estimate snow cover on the Himalayas near Leh in January 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-011", "text": "Detect deforestation in the Amazon near Manaus between 2020 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-012", "text": "Show the burn severity of the wildfire near Uttarakhand forests in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-013", "text": "Give me the elevation of Shimla", "intent": "UNSUPPORTED"}
+{"id": "unsup-014", "text": "Extract building footprints for Gurugram in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-015", "text": "Track urban growth around Hyderabad between 2015 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-016", "text": "Identify aircraft at Delhi airport in March 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-017", "text": "Find oil spills off the coast of Mumbai in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-018", "text": "How many trees are there in Cubbon Park?", "intent": "UNSUPPORTED"}
+{"id": "unsup-019", "text": "Show night lights of Kolkata in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-020", "text": "What is the NO2 concentration over Ahmedabad in 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-021", "text": "Forecast the weather for Kochi next week", "intent": "UNSUPPORTED"}
+{"id": "unsup-022", "text": "Count the number of houses in Dharavi", "intent": "UNSUPPORTED"}
+{"id": "unsup-023", "text": "Detect vessels near Kochi port in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-024", "text": "Segment the roads in Bengaluru from satellite imagery", "intent": "UNSUPPORTED"}
+{"id": "unsup-025", "text": "Map land use of Jaipur in 2023", "intent": "UNSUPPORTED"}
+{"id": "unsup-026", "text": "Estimate the population of Patna", "intent": "UNSUPPORTED"}
+{"id": "unsup-027", "text": "Show vegetation change around Chennai between January 2024 and January 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-028", "text": "Compare NDVI of Pune in 2020 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-029", "text": "How has the built-up area of Noida grown between 2016 and 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-030", "text": "Calculate carbon stock in the Sundarbans mangroves in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-031", "text": "Predict drought risk for Anantapur in 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-032", "text": "Map glacier retreat near Gangotri between 2000 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-033", "text": "Detect illegal mining around Bellary in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-034", "text": "What is the sea surface temperature off Chennai in May 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-035", "text": "Show a 3D model of Mumbai skyline", "intent": "UNSUPPORTED"}
+{"id": "unsup-036", "text": "Give me the slope map of the Western Ghats", "intent": "UNSUPPORTED"}
+{"id": "unsup-037", "text": "Classify crop types around Ludhiana in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-038", "text": "Count the solar panels on rooftops in Bengaluru", "intent": "UNSUPPORTED"}
+{"id": "unsup-039", "text": "Detect landslides in Kerala in August 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-040", "text": "Show traffic density on the Mumbai-Pune expressway", "intent": "UNSUPPORTED"}
+{"id": "unsup-041", "text": "Estimate evapotranspiration over Punjab in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-042", "text": "Map salinity in the Rann of Kutch in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-043", "text": "Detect plastic waste in the Yamuna in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-044", "text": "Measure the height of buildings in Gurugram", "intent": "UNSUPPORTED"}
+{"id": "unsup-045", "text": "Show me the flood extent in Assam in July 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-046", "text": "How deep is Dal Lake?", "intent": "UNSUPPORTED"}
+{"id": "unsup-047", "text": "Calculate biomass of the forest near Kodagu in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-048", "text": "Detect ships in the Strait of Malacca in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-049", "text": "Count cattle near Anand in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-050", "text": "Find the locations of wind turbines near Jaisalmer", "intent": "UNSUPPORTED"}
+{"id": "unsup-051", "text": "Show the air quality index for Lucknow in January 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-052", "text": "Predict urban sprawl for Pune in 2030", "intent": "UNSUPPORTED"}
+{"id": "unsup-053", "text": "Estimate groundwater levels around Chennai in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-054", "text": "Map the snowline near Gulmarg in February 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-055", "text": "Show wildfire hotspots near Similipal in March 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-056", "text": "Detect cloud cover percentage over Bhopal tomorrow", "intent": "UNSUPPORTED"}
+{"id": "unsup-057", "text": "Measure humidity over Guwahati in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-058", "text": "Give me the chlorophyll concentration in the Arabian Sea in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-059", "text": "Identify crop disease in the fields near Nashik in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-060", "text": "Count the boats on Vembanad Lake in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-061", "text": "Map inundation around Patna during the 2024 floods", "intent": "UNSUPPORTED"}
+{"id": "unsup-062", "text": "What is the canopy height of the Western Ghats forest?", "intent": "UNSUPPORTED"}
+{"id": "unsup-063", "text": "Estimate crop yield loss in Punjab between 2023 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-064", "text": "Show urban heat islands in Delhi in May 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-065", "text": "Detect new construction in Navi Mumbai between 2022 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-066", "text": "Classify wetlands types in the Sundarbans in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-067", "text": "Measure the width of the Ganga at Patna in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-068", "text": "Detect encroachment on Bellandur lake in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-069", "text": "Show the land surface temperature of Chennai in April 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-070", "text": "Find the flooded roads in Chennai in December 2023", "intent": "UNSUPPORTED"}
+{"id": "unsup-071", "text": "Count swimming pools in Hyderabad", "intent": "UNSUPPORTED"}
+{"id": "unsup-072", "text": "Estimate the rice acreage in Thanjavur for 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-073", "text": "Show the aerosol optical depth over Kolkata in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-074", "text": "Map erosion along the Majuli banks between 2015 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-075", "text": "Detect dams in Karnataka", "intent": "UNSUPPORTED"}
+{"id": "unsup-076", "text": "Estimate methane emissions near Jharia in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-077", "text": "Show the ocean currents near Chennai", "intent": "UNSUPPORTED"}
+{"id": "unsup-078", "text": "Detect airplanes at Mumbai airport in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-079", "text": "Classify the terrain around Leh", "intent": "UNSUPPORTED"}
+{"id": "unsup-080", "text": "Show me a heat map of COVID cases in Delhi", "intent": "UNSUPPORTED"}
+{"id": "unsup-081", "text": "Track deforestation around Kodagu between 2018 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-082", "text": "Compare built-up area in Bengaluru between 2010 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-083", "text": "Did the vegetation around Nagpur decline between 2022 and 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-084", "text": "Estimate the snow water equivalent in Himachal in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-085", "text": "Detect mangrove loss in the Sundarbans between 2015 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-086", "text": "Map flood risk zones for Guwahati", "intent": "UNSUPPORTED"}
+{"id": "unsup-087", "text": "Show the rainfall anomaly for Kerala in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-088", "text": "Detect sand mining in the Cauvery in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-089", "text": "Measure noise pollution in Mumbai", "intent": "UNSUPPORTED"}
+{"id": "unsup-090", "text": "Identify palm oil plantations near Kuching in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-091", "text": "Count greenhouses near Almería in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-092", "text": "Estimate the number of people in the crowd at Kumbh Mela 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-093", "text": "Find illegal fishing boats near Lakshadweep in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-094", "text": "What is the ozone level over Delhi in 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-095", "text": "Detect potholes on Chennai roads", "intent": "UNSUPPORTED"}
+{"id": "unsup-096", "text": "Map soil types around Anantapur", "intent": "UNSUPPORTED"}
+{"id": "unsup-097", "text": "Classify urban and rural areas of Tamil Nadu", "intent": "UNSUPPORTED"}
+{"id": "unsup-098", "text": "Show the wind speed over Rameswaram in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-099", "text": "Detect changes in the Aral Sea between 1990 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-100", "text": "Describe what you see in the satellite image of Kochi in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-101", "text": "Tell me what the image of Pune looks like in January 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-102", "text": "Is there visible smoke over Delhi in November 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-103", "text": "Estimate the land surface temperature of Jaipur in May 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-104", "text": "Show urban heat islands in Chennai in April 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-105", "text": "Spot blight in the potato fields near Hooghly in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-106", "text": "Map pest infestation in the cotton near Yavatmal in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-107", "text": "Detect locust swarms near Barmer in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-108", "text": "Show the thermal image of Delhi at night", "intent": "UNSUPPORTED"}
+{"id": "unsup-109", "text": "Measure the temperature of Vembanad Lake in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-110", "text": "Predict next month's water level in Mettur dam", "intent": "UNSUPPORTED"}
+{"id": "unsup-111", "text": "Estimate the volume of water in Tehri reservoir in cubic metres", "intent": "UNSUPPORTED"}
+{"id": "unsup-112", "text": "How many hectares of rice are planted in Thanjavur in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-113", "text": "Estimate tree species in the Western Ghats", "intent": "UNSUPPORTED"}
+{"id": "unsup-114", "text": "Map fishing zones off Kerala in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-115", "text": "Detect illegal constructions on the Yamuna floodplain in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-116", "text": "Show landslide susceptibility for Wayanad", "intent": "UNSUPPORTED"}
+{"id": "unsup-117", "text": "Estimate the carbon emissions of Mumbai in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-118", "text": "Show earthquake damage in Nepal in 2015", "intent": "UNSUPPORTED"}
+{"id": "unsup-119", "text": "Find parking availability in Bengaluru", "intent": "UNSUPPORTED"}
+{"id": "unsup-120", "text": "Show forest fire risk around Bandipur in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-121", "text": "Measure the depth of snow in Gulmarg in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-122", "text": "Show the drought index for Marathwada in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-123", "text": "Map the vegetation species of Kaziranga", "intent": "UNSUPPORTED"}
+{"id": "unsup-124", "text": "Classify buildings by height in Mumbai", "intent": "UNSUPPORTED"}
+{"id": "unsup-125", "text": "Estimate how many people live in Dharavi", "intent": "UNSUPPORTED"}
+{"id": "unsup-126", "text": "Detect cyclone damage in Odisha in 2019", "intent": "UNSUPPORTED"}
+{"id": "unsup-127", "text": "Show methane plumes over Bhopal in 2024", "intent": "UNSUPPORTED"}
+{"id": "ndvi-128", "text": "How leafy is the campus of IIT Madras in January 2025", "intent": "NDVI"}
+{"id": "ndvi-129", "text": "How leafy are the avenues of Jayanagar in February 2024", "intent": "NDVI"}
+{"id": "ndvi-130", "text": "How green was Kotagiri in November 2023?", "intent": "NDVI"}
+{"id": "ndvi-131", "text": "How green is Malabar Hill in March 2024", "intent": "NDVI"}
+{"id": "ndvi-132", "text": "Vegetation health of the Sanjay Van forest in 2024", "intent": "NDVI"}
+{"id": "ndvi-133", "text": "Check the vegetation health near Vellayani in January 2025", "intent": "NDVI"}
+{"id": "ndvi-134", "text": "Crop vigour index for the paddy near Mandya in October 2024", "intent": "NDVI"}
+{"id": "ndvi-135", "text": "What is the crop vigor around Sirsa in February 2024", "intent": "NDVI"}
+{"id": "ndvi-136", "text": "greenness around Ponda in December 2024", "intent": "NDVI"}
+{"id": "ndvi-137", "text": "Greenness score for the Nallamala forest in 2023", "intent": "NDVI"}
+{"id": "ndvi-138", "text": "How healthy is the plant cover near Hosur in 2024", "intent": "NDVI"}
+{"id": "ndvi-139", "text": "Plant life condition around Coonoor in May 2024", "intent": "NDVI"}
+{"id": "ndvi-140", "text": "Is the canopy near Bhimashankar in good health in 2024", "intent": "NDVI"}
+{"id": "ndvi-141", "text": "How vigorous are the sugarcane farms near Belagavi in 2024", "intent": "NDVI"}
+{"id": "ndvi-142", "text": "Give me vegetation vigour for Kallar in April 2025", "intent": "NDVI"}
+{"id": "ndvi-143", "text": "leafiness of the tea slopes near Valparai in 2024", "intent": "NDVI"}
+{"id": "ndvi-144", "text": "Is the grass cover green near Kodachadri in August 2024", "intent": "NDVI"}
+{"id": "ndvi-145", "text": "How much green is left in Aarey colony in 2024", "intent": "NDVI"}
+{"id": "ndvi-146", "text": "Crop greenness for Kurukshetra fields, January 2025", "intent": "NDVI"}
+{"id": "ndvi-147", "text": "How lush was Agumbe in July 2024", "intent": "NDVI"}
+{"id": "ndvi-148", "text": "chlorophyll-rich vegetation around Mahe in 2024", "intent": "NDVI"}
+{"id": "ndvi-149", "text": "Check crop health near Palakkad for November 2024", "intent": "NDVI"}
+{"id": "ndvi-150", "text": "vegetation index Kolar January 2025", "intent": "NDVI"}
+{"id": "ndvi-151", "text": "greenery Hessarghatta 2024", "intent": "NDVI"}
+{"id": "ndvi-152", "text": "NDVI Tadoba March 2025", "intent": "NDVI"}
+{"id": "ndvi-153", "text": "How green is Horsley Hills in December 2024?", "intent": "NDVI"}
+{"id": "ndvi-154", "text": "Measure green vegetation at 11.41, 76.70 in January 2025", "intent": "NDVI"}
+{"id": "ndvi-155", "text": "How thriving is the forest near Dandeli in 2024", "intent": "NDVI"}
+{"id": "ndvi-156", "text": "Green canopy strength around Sakleshpur in 2024", "intent": "NDVI"}
+{"id": "ndvi-157", "text": "What's the plant health like near Madikeri in October 2024", "intent": "NDVI"}
+{"id": "ndwi-128", "text": "Water extent at Madiwala lake in January 2025", "intent": "NDWI"}
+{"id": "ndwi-129", "text": "How far does the water spread at Ulsoor in March 2024", "intent": "NDWI"}
+{"id": "ndwi-130", "text": "Surface water across the Kolleru wetlands in December 2024", "intent": "NDWI"}
+{"id": "ndwi-131", "text": "Water presence index for the Pallikaranai marsh in 2024", "intent": "NDWI"}
+{"id": "ndwi-132", "text": "How much surface water is at Sukhna in 2024", "intent": "NDWI"}
+{"id": "ndwi-133", "text": "Water status of Lake Pichola in February 2025", "intent": "NDWI"}
+{"id": "ndwi-134", "text": "How wet is the Vedanthangal sanctuary in November 2024", "intent": "NDWI"}
+{"id": "ndwi-135", "text": "Water fraction for the ponds around Sholinganallur in 2024", "intent": "NDWI"}
+{"id": "ndwi-136", "text": "Open water across the Harike wetland in January 2025", "intent": "NDWI"}
+{"id": "ndwi-137", "text": "Is the Puzhal reservoir holding water in December 2024", "intent": "NDWI"}
+{"id": "ndwi-138", "text": "water spread index Tungabhadra dam 2024", "intent": "NDWI"}
+{"id": "ndwi-139", "text": "Water extent Hussain Sagar January 2025", "intent": "NDWI"}
+{"id": "ndwi-140", "text": "surface water Nainital October 2024", "intent": "NDWI"}
+{"id": "ndwi-141", "text": "What is the water coverage of Sasthamkotta lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-142", "text": "Measure the water surface at Bhoj Wetland in 2024", "intent": "NDWI"}
+{"id": "ndwi-143", "text": "How wet are the backwaters near Kumarakom in 2024", "intent": "NDWI"}
+{"id": "ndwi-144", "text": "water index for the kere near Jakkur in March 2025", "intent": "NDWI"}
+{"id": "ndwi-145", "text": "Standing water around the Keoladeo park in September 2024", "intent": "NDWI"}
+{"id": "ndwi-146", "text": "How much of Loktak is covered by water in 2024", "intent": "NDWI"}
+{"id": "ndwi-147", "text": "Water reading at 12.99, 80.20 in January 2025", "intent": "NDWI"}
+{"id": "ndwi-148", "text": "Check surface water in the tanks near Tiruvannamalai in 2024", "intent": "NDWI"}
+{"id": "ndwi-149", "text": "Water presence at the Ansupa lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-150", "text": "Lake water extent near Bhopal's Van Vihar in 2024", "intent": "NDWI"}
+{"id": "ndwi-151", "text": "Map open water for Kanwar lake in 2024", "intent": "NDWI"}
+{"id": "ndwi-152", "text": "How much water is in the Vaigai reservoir in February 2025", "intent": "NDWI"}
+{"id": "ndwi-153", "text": "water status Chembarambakkam December 2024", "intent": "NDWI"}
+{"id": "ndwi-154", "text": "Is the Mettur reservoir full of water in 2024", "intent": "NDWI"}
+{"id": "ndwi-155", "text": "The extent of water at Kolleru in March 2024", "intent": "NDWI"}
+{"id": "ndwi-156", "text": "water presence Pong dam 2024", "intent": "NDWI"}
+{"id": "ndwi-157", "text": "Water spread for the Ujani backwaters in 2024", "intent": "NDWI"}
+{"id": "ndbi-128", "text": "How developed is Sarjapur Road in January 2025", "intent": "NDBI"}
+{"id": "ndbi-129", "text": "Urbanization level of Kharadi in 2024", "intent": "NDBI"}
+{"id": "ndbi-130", "text": "How urbanised is Perungudi in 2024", "intent": "NDBI"}
+{"id": "ndbi-131", "text": "Built-up footprint of Madhapur in December 2024", "intent": "NDBI"}
+{"id": "ndbi-132", "text": "Impervious-looking surfaces around Kondapur in 2024", "intent": "NDBI"}
+{"id": "ndbi-133", "text": "Concrete coverage at Guindy industrial estate in 2024", "intent": "NDBI"}
+{"id": "ndbi-134", "text": "How much developed land is around Manesar in 2024", "intent": "NDBI"}
+{"id": "ndbi-135", "text": "urbanisation index for Wakad in 2024", "intent": "NDBI"}
+{"id": "ndbi-136", "text": "Built-up density near Sion in March 2025", "intent": "NDBI"}
+{"id": "ndbi-137", "text": "How paved are the streets around Chickpet in 2024", "intent": "NDBI"}
+{"id": "ndbi-138", "text": "Construction density around Bhosari in 2024", "intent": "NDBI"}
+{"id": "ndbi-139", "text": "developed area Zirakpur 2024", "intent": "NDBI"}
+{"id": "ndbi-140", "text": "built up Kukatpally January 2025", "intent": "NDBI"}
+{"id": "ndbi-141", "text": "urban footprint Ambattur 2024", "intent": "NDBI"}
+{"id": "ndbi-142", "text": "Settlement cover around Sanganer in 2024", "intent": "NDBI"}
+{"id": "ndbi-143", "text": "How much of Porur is built over in 2024", "intent": "NDBI"}
+{"id": "ndbi-144", "text": "Rooftop coverage around Ameerpet in February 2025", "intent": "NDBI"}
+{"id": "ndbi-145", "text": "Check the urban land around Hosakote in 2024", "intent": "NDBI"}
+{"id": "ndbi-146", "text": "Built environment density at 12.92, 77.67 in January 2025", "intent": "NDBI"}
+{"id": "ndbi-147", "text": "Is Sriperumbudur heavily developed in 2024", "intent": "NDBI"}
+{"id": "ndbi-148", "text": "Measure the concrete around Navi Mumbai's Vashi in 2024", "intent": "NDBI"}
+{"id": "ndbi-149", "text": "How urban is Tambaram in 2024", "intent": "NDBI"}
+{"id": "ndbi-150", "text": "Paved and built land near Chakan in 2024", "intent": "NDBI"}
+{"id": "ndbi-151", "text": "Show impervious cover for Hinjewadi in December 2024", "intent": "NDBI"}
+{"id": "ndbi-152", "text": "Urban built-up index for Tirupur in 2024", "intent": "NDBI"}
+{"id": "ndbi-153", "text": "How much built-up area does Kalyan have in 2024", "intent": "NDBI"}
+{"id": "ndbi-154", "text": "Buildings and roads cover around Kazhakootam in 2024", "intent": "NDBI"}
+{"id": "ndbi-155", "text": "Developed land index near Dholera in 2024", "intent": "NDBI"}
+{"id": "ndbi-156", "text": "urban surfaces Bhiwandi 2024", "intent": "NDBI"}
+{"id": "ndbi-157", "text": "How concreted is Ghatkopar in 2024", "intent": "NDBI"}
+{"id": "sar-128", "text": "Check SAR at Kolkata port in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-129", "text": "Radar response over the Sundarbans in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-130", "text": "Gamma naught for Chilika in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-131", "text": "VH polarization values for Kochi in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-132", "text": "VV polarisation backscatter at Paradip in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-133", "text": "Sentinel-1 VH over Kakinada in February 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-134", "text": "Radar intensity around Haldia in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-135", "text": "What is the SAR signal at Ennore in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-136", "text": "backscatter strength near Mundra in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-137", "text": "Microwave radar return for Mangaluru in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-138", "text": "radar Vizag port January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-139", "text": "SAR Kandla 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-140", "text": "backscatter Tuticorin 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-141", "text": "How strong is radar backscatter at Pipavav in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-142", "text": "C-band radar intensity near Karwar in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-143", "text": "dB backscatter for Dahej in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-144", "text": "SAR data statistics for Ratnagiri in March 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-145", "text": "Radar returns from the Kuttanad fields in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-146", "text": "Measure VV and VH at Krishnapatnam in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-147", "text": "Sentinel 1 radar over Goa's Mormugao in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-148", "text": "Backscatter status for Kollam in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-149", "text": "radar echo strength at 22.57, 88.36 in January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-150", "text": "Check the radar backscatter of Nagapattinam in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-151", "text": "What does SAR measure over Puri in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-152", "text": "Radar reflectivity near Cuddalore in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-153", "text": "VV channel backscatter for Porbandar in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-154", "text": "Polarimetric backscatter values near Hazira in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-155", "text": "All-weather radar backscatter over Kochi in the 2024 monsoon months, June 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-156", "text": "Sigma naught near Ennore creek in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "sar-157", "text": "SAR intensity for Chennai port in February 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "tndwi-128", "text": "Has water at Madiwala lake increased from January 2024 to January 2025?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-129", "text": "Did surface water at Kolleru decrease between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-130", "text": "Water extent at Ulsoor before and after the 2024 rains, March 2024 vs November 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-131", "text": "Water at Sukhna in 2024 compared with 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-132", "text": "How did the water spread at Tungabhadra dam change from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-133", "text": "Is there less water in Puzhal in December 2024 than in December 2023?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-134", "text": "Water presence at Harike, January 2024 versus January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-135", "text": "Has Pichola gained water between February 2024 and February 2025?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-136", "text": "How much did the water extent of Loktak change from 2022 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-137", "text": "water change Hussain Sagar January 2024 January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-138", "text": "compare water Pong dam 2023 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-139", "text": "Did the Mettur reservoir fill up from May 2024 to September 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-140", "text": "Water surface at Bhoj Wetland, 2023 against 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-141", "text": "How has open water at Vedanthangal changed between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-142", "text": "Water in the Vaigai reservoir compared from February 2024 to February 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-143", "text": "Surface water increase at Sasthamkotta between 2022 and 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-144", "text": "Did the Ujani backwaters shrink from January to May 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-145", "text": "Water at 12.99, 80.20: January 2024 versus January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-146", "text": "Has standing water at Keoladeo risen from March to September 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-147", "text": "Compare surface water in the tanks near Tiruvannamalai in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-148", "text": "Water difference for Kanwar lake between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-149", "text": "How did water at Chembarambakkam differ between December 2023 and December 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-150", "text": "Is the Ansupa lake wetter in 2024 than in 2022", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-151", "text": "water extent change Kolleru 2023 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-152", "text": "Did the Pallikaranai marsh hold more water in 2024 than 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-153", "text": "Before vs after: water at Madiwala lake, January 2024 and July 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-154", "text": "How has the water level of Sukhna moved from 2023 to 2024 in index terms", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-155", "text": "Water decrease at Pulicat between January and May 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-156", "text": "Compare the water extent of Jakkur lake between March 2024 and March 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "tndwi-157", "text": "Water spread at Ujani: 2022 compared to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "rgb-128", "text": "Give me an RGB picture of Madikeri in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-129", "text": "Fetch the Sentinel-2 imagery of Kovalam in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-130", "text": "Satellite photo of Pondicherry's promenade in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-131", "text": "Show a true colour satellite view of Hampi in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-132", "text": "Fetch satellite imagery around Mahabalipuram in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-133", "text": "RGB snapshot of Kanyakumari in December 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-134", "text": "satellite image Varkala January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-135", "text": "true colour Gokarna 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-136", "text": "imagery Alleppey 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-137", "text": "Get the colour satellite image of Dharamshala in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-138", "text": "Show me the optical picture of Munnar in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-139", "text": "Pull the natural colour image for Ooty in February 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-140", "text": "Display a Sentinel-2 photo of Rameswaram in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-141", "text": "Give me the plain satellite image of Srirangapatna in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-142", "text": "Show the true-colour tile for Mysuru palace in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-143", "text": "RGB image of the Rann of Kutch near Dhordo in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-144", "text": "Get a satellite view of Tawang in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-145", "text": "Satellite photo at 15.34, 76.46 in January 2025", "intent": "TRUE_COLOR"}
+{"id": "rgb-146", "text": "Show the picture from Sentinel-2 over Kochi fort in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-147", "text": "Fetch the natural colour scene of Puri in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-148", "text": "Just display the satellite image of Amer fort in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-149", "text": "True colour picture for Chandipur in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-150", "text": "Visual RGB image of Diu in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-151", "text": "Show the satellite snapshot of Lakshadweep's Kavaratti in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-152", "text": "Download-free view: show the satellite image of Shimoga in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-153", "text": "Show Sentinel-2 true colour of Vagator in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-154", "text": "satellite picture Kodaikanal 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-155", "text": "Fetch the RGB tile for Pondicherry in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-156", "text": "Colour image from orbit for Tirunelveli in 2024", "intent": "TRUE_COLOR"}
+{"id": "rgb-157", "text": "Show the plain optical image of Karaikudi in 2024", "intent": "TRUE_COLOR"}
+{"id": "clar-130", "text": "Check Hanamkonda in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-131", "text": "Analyze Karimnagar in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-132", "text": "Analyze Hosur in January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-133", "text": "Show results for Salem", "intent": "CLARIFICATION"}
+{"id": "clar-134", "text": "Report on Vellore", "intent": "CLARIFICATION"}
+{"id": "clar-135", "text": "What changed around Nellore?", "intent": "CLARIFICATION"}
+{"id": "clar-136", "text": "Compare Tirupati in 2023 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-137", "text": "Compare Kurnool between January and June 2024", "intent": "CLARIFICATION"}
+{"id": "clar-138", "text": "Run an analysis for Kakinada in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-139", "text": "What is going on at Madurai?", "intent": "CLARIFICATION"}
+{"id": "clar-140", "text": "Check this place in January 2025", "intent": "CLARIFICATION"}
+{"id": "clar-141", "text": "Evaluate Hubli in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-142", "text": "Show me insights for Belgaum", "intent": "CLARIFICATION"}
+{"id": "clar-143", "text": "What about Ooty in 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-144", "text": "Give me everything for Nashik", "intent": "CLARIFICATION"}
+{"id": "clar-145", "text": "Status report for Aurangabad in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-146", "text": "How is Mangalore doing?", "intent": "CLARIFICATION"}
+{"id": "clar-147", "text": "Check Nagpur please", "intent": "CLARIFICATION"}
+{"id": "clar-148", "text": "Tell me what you know about Kolhapur", "intent": "CLARIFICATION"}
+{"id": "clar-149", "text": "Show analysis results for Siliguri", "intent": "CLARIFICATION"}
+{"id": "clar-150", "text": "Do the standard analysis on Dharwad", "intent": "CLARIFICATION"}
+{"id": "clar-151", "text": "I want numbers for Tumkur in 2024", "intent": "CLARIFICATION"}
+{"id": "clar-152", "text": "Analyse the area near 12.30, 76.64", "intent": "CLARIFICATION"}
+{"id": "clar-153", "text": "Compare it between 2023 and 2024", "intent": "CLARIFICATION"}
+{"id": "clar-154", "text": "What happened in Guntur in 2024?", "intent": "CLARIFICATION"}
+{"id": "clar-155", "text": "Check on Davanagere for December 2024", "intent": "CLARIFICATION"}
+{"id": "clar-156", "text": "Show me the data around Udupi", "intent": "CLARIFICATION"}
+{"id": "clar-157", "text": "Quick analysis of Erode", "intent": "CLARIFICATION"}
+{"id": "clar-158", "text": "Analyse Bhilai in March 2025", "intent": "CLARIFICATION"}
+{"id": "clar-159", "text": "Show me what changed in Ranchi between 2022 and 2024", "intent": "CLARIFICATION"}
+{"id": "unsup-128", "text": "What is the soil moisture near Anantapur in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-129", "text": "Map snow cover near Gulmarg in January 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-130", "text": "Estimate carbon stock of the Nilgiris forest", "intent": "UNSUPPORTED"}
+{"id": "unsup-131", "text": "Show the drought severity for Bundelkhand in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-132", "text": "Give me a slope map of the Nilgiris", "intent": "UNSUPPORTED"}
+{"id": "unsup-133", "text": "What is the ozone concentration over Kanpur in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-134", "text": "Sea surface temperature near Kochi in May 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-135", "text": "Show the elevation profile of the Western Ghats", "intent": "UNSUPPORTED"}
+{"id": "unsup-136", "text": "Predict crop yield for Karnal in 2025", "intent": "UNSUPPORTED"}
+{"id": "unsup-137", "text": "Classify the land use around Pune in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-138", "text": "How much snow fell on Kedarnath in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-139", "text": "Detect deforestation around Kodagu between 2020 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-140", "text": "Has the vegetation around Nagpur declined between 2021 and 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-141", "text": "Did urbanization increase in Whitefield between 2015 and 2024?", "intent": "UNSUPPORTED"}
+{"id": "unsup-142", "text": "Compare the built-up area of Gurugram in 2016 and 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-143", "text": "Track greenness change around Coimbatore from 2019 to 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-144", "text": "Estimate the biomass of the Sundarbans mangroves", "intent": "UNSUPPORTED"}
+{"id": "unsup-145", "text": "Measure the PM2.5 over Delhi in November 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-146", "text": "Map groundwater depth near Jaipur", "intent": "UNSUPPORTED"}
+{"id": "unsup-147", "text": "Estimate evaporation from Tehri reservoir in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-148", "text": "Count the trees in Lalbagh", "intent": "UNSUPPORTED"}
+{"id": "unsup-149", "text": "Detect oil tankers near Mumbai port in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-150", "text": "Find the heat stress zones in Ahmedabad in May 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-151", "text": "Map the flood extent in Kerala in August 2018", "intent": "UNSUPPORTED"}
+{"id": "unsup-152", "text": "Measure the salinity of Chilika lake", "intent": "UNSUPPORTED"}
+{"id": "unsup-153", "text": "Predict next year's monsoon rainfall for Kerala", "intent": "UNSUPPORTED"}
+{"id": "unsup-154", "text": "Describe the colours you can see over Goa in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-155", "text": "Estimate soil erosion on the Majuli island banks", "intent": "UNSUPPORTED"}
+{"id": "unsup-156", "text": "Classify crop types near Guntur in 2024", "intent": "UNSUPPORTED"}
+{"id": "unsup-157", "text": "Detect night-time lights over Hyderabad in 2024", "intent": "UNSUPPORTED"}

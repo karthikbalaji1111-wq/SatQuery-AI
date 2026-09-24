@@ -39,14 +39,16 @@ const EXAMPLE_QUESTIONS = [
     label: "Water index",
     question: "What is the NDWI of Marina Beach, Chennai in January 2025?",
   },
+  // Whole cities (Bengaluru, Hyderabad) are larger than one native-resolution
+  // read and are refused by the analysis gate; these are real places inside
+  // them, each verified to return a measurement.
   {
     label: "Vegetation",
-    question:
-      "What is the vegetation condition around Bengaluru in December 2024?",
+    question: "Show vegetation around Cubbon Park, Bengaluru in December 2024.",
   },
   {
     label: "Built-up area",
-    question: "Analyse the built-up area around Hyderabad in December 2024.",
+    question: "Show built-up area around Ameerpet, Hyderabad in January 2025.",
   },
   {
     label: "Radar backscatter",
@@ -450,7 +452,11 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
       )}
 
       {result?.status === "needs_clarification" && result.clarification && (
-        <ClarificationPrompt clarification={result.clarification} />
+        <ClarificationPrompt
+          clarification={result.clarification}
+          disabled={busy}
+          onChoose={setQuestion}
+        />
       )}
 
       {askState.status === "error" && (
@@ -467,13 +473,21 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
  *
  * Everything shown is the server's: its message, the choices it named as
  * supported, and what it had already understood. Nothing is inferred here and
- * nothing is run - editing the question and asking again is the answer.
+ * nothing is run - editing the question and asking again is the answer. A
+ * choice that the server phrased as a complete question fills the query box
+ * with it; the user still reads it, completes it if needed, and runs it.
  */
 function ClarificationPrompt({
   clarification,
+  disabled,
+  onChoose,
 }: {
   clarification: AgentClarification;
+  disabled: boolean;
+  onChoose: (question: string) => void;
 }) {
+  const questions = clarification.option_questions ?? [];
+  const choosable = questions.length === clarification.options.length;
   const understood = [
     ...clarification.understood_analyses,
     ...(clarification.understood_location
@@ -492,8 +506,22 @@ function ClarificationPrompt({
       <p className="clarification-message">{clarification.message}</p>
       {clarification.options.length > 0 && (
         <ul className="clarification-options" aria-label="Supported choices">
-          {clarification.options.map((option) => (
-            <li key={option}>{option}</li>
+          {clarification.options.map((option, index) => (
+            <li key={option}>
+              {choosable ? (
+                <button
+                  type="button"
+                  className="clarification-option"
+                  disabled={disabled}
+                  title={questions[index]}
+                  onClick={() => onChoose(questions[index])}
+                >
+                  {capitalise(option)}
+                </button>
+              ) : (
+                capitalise(option)
+              )}
+            </li>
           ))}
         </ul>
       )}
@@ -504,6 +532,11 @@ function ClarificationPrompt({
       )}
     </div>
   );
+}
+
+/** Display form only: "vegetation (NDVI)" -> "Vegetation (NDVI)". */
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /* ========================================================= pipeline (centre) */

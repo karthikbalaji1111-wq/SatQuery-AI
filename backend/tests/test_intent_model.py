@@ -61,8 +61,10 @@ from pydantic import ValidationError
 from tests.test_standard_workflow import EngineAnalysis, RecordingQueryExecution
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
-REPORT = BACKEND / "data" / "intent" / "evaluation_v1.json"
-DATASET = BACKEND / "data" / "intent" / "satquery_intents_v1.jsonl"
+REPORT = BACKEND / "data" / "intent" / "evaluation_v2.json"
+DATASET = BACKEND / "data" / "intent" / "satquery_intents_v2.jsonl"
+#: The shipped threshold never goes below this (scripts/train_intent_model.py).
+THRESHOLD_FLOOR = 0.90
 TODAY = date(2026, 9, 24)
 
 
@@ -85,13 +87,13 @@ def artifact_document() -> dict:
 def test_the_shipped_artifact_loads_with_exactly_the_supported_labels(model: Any) -> None:
     assert sorted(model.labels) == sorted(INTENT_LABELS)
     assert len(INTENT_LABELS) == 8
-    assert model.version == "satquery-intent-v1"
+    assert model.version == "satquery-intent-v2"
     assert 0.0 < model.threshold < 1.0
 
 
 def test_the_artifact_is_small_and_is_data_not_code() -> None:
     raw = DEFAULT_ARTIFACT.read_bytes()
-    assert len(raw) < 1_000_000  # ~185 KB today
+    assert len(raw) < 1_000_000  # ~192 KB today
     assert raw[:2] == b"\x1f\x8b"  # gzip...
     assert isinstance(json.loads(gzip.decompress(raw)), dict)  # ...of plain JSON
 
@@ -109,17 +111,35 @@ def test_the_reported_quality_does_not_regress() -> None:
 
     report = json.loads(REPORT.read_text())
     assert report["test"]["macro_f1"] >= 0.85
-    assert report["challenge"]["model"]["macro_f1"] >= 0.85
     # What a user gets: no wrong operation EXECUTED by the full pipeline.
     assert report["system_on_test"]["full_pipeline_model_plus_rules"][
         "wrong_operation_executed"
     ] == 0
-    assert report["challenge"]["system"]["full_pipeline_model_plus_rules"][
-        "wrong_operation_executed"
-    ] == 0
     # And no acted-on prediction was wrong at the shipped threshold.
     assert report["test_at_threshold"]["accepted_errors"] == 0
-    assert report["challenge"]["at_threshold"]["accepted_errors"] == 0
+    assert set(report["challenges"]) == {"challenge_v2", "challenge_v1"}
+    for name, challenge in report["challenges"].items():
+        assert challenge["model"]["macro_f1"] >= 0.85, name
+        assert challenge["system"]["full_pipeline_model_plus_rules"][
+            "wrong_operation_executed"
+        ] == 0, name
+        assert challenge["at_threshold"]["accepted_errors"] == 0, name
+
+
+def test_coverage_rose_without_loosening_the_threshold() -> None:
+    """v2 against v1 on the SAME held-out set, through the same rules."""
+
+    report = json.loads(REPORT.read_text())
+    assert report["threshold"] >= THRESHOLD_FLOOR
+    baseline = report["baseline"]
+    assert baseline["model_version"] == "satquery-intent-v1"
+    before = baseline["challenges"]["challenge_v2"]
+    after = report["challenges"]["challenge_v2"]
+    assert after["role"].startswith("held out")
+    assert after["at_threshold"]["accepted"] > before["at_threshold"]["accepted"]
+    assert after["at_threshold"]["accepted_errors"] == 0
+    full = "full_pipeline_model_plus_rules"
+    assert after["system"][full]["correct"] >= before["system"][full]["correct"]
 
 
 def test_numpy_inference_reproduces_scikit_learn_exactly(model: Any) -> None:
@@ -206,7 +226,7 @@ def test_the_shipped_model_names_each_operation(model: Any, question: str, label
 def test_the_model_adds_what_the_vocabulary_misses(model: Any) -> None:
     """ "Lush tea gardens" names no index; the rules alone ask what to analyse."""
 
-    question = "How lush are the tea gardens around Darjeeling in June 2024"
+    question = "How green are the tea gardens around Darjeeling in June 2024"
     with pytest.raises(ClarificationRequiredError):
         route_operation(question, None)
     chosen, comparison, decision = route_operation(question, model)
@@ -373,13 +393,14 @@ def test_a_low_confidence_prediction_is_never_acted_on() -> None:
     ) == (["ndvi"], False, "low_confidence")
     # Rules see nothing; a weak NDVI must not execute - the rules ask.
     assert asked(
-        "How lush are the tea gardens around Darjeeling in June 2024",
+        "How green are the tea gardens around Darjeeling in June 2024",
         FakeClassifier("NDVI", 0.89),
     ) == "analysis_missing"
 
 
 def test_the_threshold_is_the_artifacts_own(model: Any) -> None:
-    assert model.threshold == artifact_document()["threshold"] == 0.9
+    assert model.threshold == artifact_document()["threshold"]
+    assert model.threshold >= THRESHOLD_FLOOR
 
 
 @pytest.mark.parametrize(
@@ -476,7 +497,7 @@ def test_the_model_cannot_override_a_safety_guard() -> None:
 
 
 def test_the_model_cannot_change_the_place_or_the_dates() -> None:
-    question = "How lush are the tea gardens around Darjeeling in June 2024"
+    question = "How green are the tea gardens around Darjeeling in June 2024"
     interpretation, _ = route(question, FakeClassifier("NDVI"), today=TODAY)
     assert interpretation.location_query == "Darjeeling"
     assert interpretation.windows == (
@@ -486,7 +507,7 @@ def test_the_model_cannot_change_the_place_or_the_dates() -> None:
 
 def test_a_missing_slot_is_still_asked_whoever_chose_the_operation() -> None:
     with pytest.raises(ClarificationRequiredError) as raised:
-        route("How lush are the tea gardens around Darjeeling", FakeClassifier("NDVI"),
+        route("How green are the tea gardens around Darjeeling", FakeClassifier("NDVI"),
               today=TODAY)
     assert raised.value.clarification.reason == "date_missing"
 
@@ -526,7 +547,7 @@ def answer(question: str, classifier: Any) -> tuple[Any, Any, Any]:
          [], True, False, ["sentinel-1-sar"]),
         ("Compare water at Marina Beach, Chennai between January 2024 and January 2025",
          [], False, True, ["sentinel-2-optical"]),
-        ("How lush are the tea gardens around Darjeeling in June 2024",
+        ("How green are the tea gardens around Darjeeling in June 2024",
          ["ndvi"], False, False, ["sentinel-2-optical"]),
     ],
 )
@@ -630,7 +651,7 @@ def test_the_standard_route_uses_the_model_without_any_provider(
     client = TestClient(create_app(), raise_server_exceptions=False)
     response = client.post(
         "/api/v1/query/agent",
-        json={"question": "How lush are the tea gardens around Darjeeling in June 2024"},
+        json={"question": "How green are the tea gardens around Darjeeling in June 2024"},
     )
 
     body = response.json()
@@ -643,6 +664,6 @@ def test_the_standard_route_uses_the_model_without_any_provider(
 def test_readiness_names_the_loaded_model() -> None:
     body = TestClient(create_app()).get("/ready").json()
     detail = {c["name"]: c for c in body["capabilities"]}["interpretation"]["detail"]
-    assert "satquery-intent-v1" in detail
-    assert "0.90" in detail
+    assert "satquery-intent-v2" in detail
+    assert f"{read_artifact(DEFAULT_ARTIFACT).threshold:.2f}" in detail
     assert "No external AI provider" in detail

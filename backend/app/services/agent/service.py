@@ -138,11 +138,13 @@ def _oversized_place(plan: AgentPlan, steps: list[AgentToolStep]) -> AgentClarif
     ) or "The area is too large to measure at native resolution."
     reason = reason.split(": ", 1)[-1]  # drop the "plan.bbox: " field prefix
     named = f"'{place}' is too large to analyse: {reason}" if place else reason
+    # The user's own place frames the answer; no place is suggested for them.
+    within = f" in {place}" if place else ""
     return AgentClarification(
         reason="area_too_large",
         message=(
-            f"{named} Name a neighbourhood, landmark or smaller district - for "
-            "example '<landmark>, <city>' - or give coordinates as 'lat, lon'."
+            f"{named} Name a neighbourhood, park or landmark{within} together "
+            "with the city name, or give coordinates as 'lat, lon'."
         )[:1000],
         understood_location=place,
     )
@@ -156,8 +158,8 @@ def _unresolved_place(plan: AgentPlan) -> AgentClarification:
     return AgentClarification(
         reason="location_not_found",
         message=named
-        + "Name a city, district or landmark - adding the city or state helps, "
-        "for example '<landmark>, <city>' - or give coordinates as 'lat, lon'.",
+        + "Name a city, district or landmark - adding the city or state helps "
+        "- or give coordinates as 'lat, lon'.",
         understood_location=place,
     )
 

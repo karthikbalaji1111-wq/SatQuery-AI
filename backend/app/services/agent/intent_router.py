@@ -7,7 +7,7 @@
              -> QueryInterpretation    -> the unchanged M5.5 plan
 
 The model adds recall: it recognises operations the fixed vocabularies miss
-("how lush are the tea gardens", "radar reflectivity"). The rules add
+("how green are the tea gardens", "radar reflectivity"). The rules add
 precision: an explicit "NDVI" or "compare" is not a guess. So the model is
 allowed to decide only where the two cannot contradict each other, and the
 system prefers a question to a wrong measurement.

@@ -298,7 +298,9 @@ def test_a_missing_date_keeps_what_was_understood() -> None:
         ("What is NDWI?", "analysis_missing"),
         ("Find water around this reservoir in January 2025", "location_missing"),
         ("Show NDVI in January 2025", "location_missing"),
-        ("Chennai NDVI January 2025", "location_missing"),
+        # Two separate names and nothing deciding between them: asked back.
+        # ("Chennai NDVI January 2025" names ONE place and now resolves.)
+        ("Chennai NDVI Pune January 2025", "location_missing"),
     ],
 )
 def test_an_unstated_analysis_or_place_is_asked_for(question: str, reason: str) -> None:
@@ -314,7 +316,7 @@ def test_the_analysis_question_offers_only_supported_analyses() -> None:
         "water (NDWI)",
         "built-up area (NDBI)",
         "SAR backscatter (Sentinel-1 VV/VH)",
-        "water compared between two periods (NDWI)",
+        "water change between two periods (NDWI)",
     ]
 
 
@@ -656,6 +658,7 @@ def test_a_place_the_geocoder_cannot_find_is_a_clarification() -> None:
     assert result.clarification is not None
     assert result.clarification.reason == "location_not_found"
     assert result.clarification.understood_location == "Qwxzt"
+    assert "<" not in result.clarification.message
     assert result.answer is None
     assert analysis.calls == []
 
@@ -684,6 +687,11 @@ def test_a_place_too_large_to_measure_is_a_clarification() -> None:
     assert result.clarification.understood_location == "Chennai"
     assert "about 20.9 x 42.4 km" in result.clarification.message
     assert "plan.bbox" not in result.clarification.message
+    # A real example of the form, never a placeholder the user must decode.
+    assert "<" not in result.clarification.message
+    assert "park or landmark in Chennai together with the city name" in (
+        result.clarification.message
+    )
     assert analysis.calls == []
     # The refused step stays in the trace: nothing is hidden.
     assert result.trace.steps[0].status == "failed"

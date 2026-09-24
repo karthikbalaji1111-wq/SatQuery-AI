@@ -137,15 +137,15 @@ Core intended capabilities:
 16. Local intent model (M5.6): a small TF-IDF + logistic-regression classifier
    (`agent/intent_model.py`, artifact `agent/intent_artifacts/`) names the
    OPERATION; the rules still own places, dates and every guard. It is acted on
-   only at >= its calibrated threshold (0.90) and only when it does not
-   contradict an operation the rules read explicitly
+   only at >= its calibrated threshold (0.95 for v2; never below 0.90) and only
+   when it does not contradict an operation the rules read explicitly
    (`agent/intent_router.py`); otherwise the rules decide or the user is asked.
-   Local, numpy-only at runtime, no network. See section 25.
+   Local, numpy-only at runtime, no network. See sections 25 and 26 (v2).
 
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 25 (M5.6). Section 23 (the scientific core,
+current figures are in section 26 (demo readiness, intent model v2). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2137,3 +2137,128 @@ the script and keep `tests/test_intent_model.py` green (it pins the report).
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **368 passed** (367 before) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 26. Demo readiness / UX hardening, intent model v2 - IMPLEMENTED (2026-09-24)
+
+No scientific change: M0-M5, formulas, SCL, radiometric and geometric rules and
+the analysis area limit are untouched. No new model, provider, service or
+dependency. Everything here is reading, wording, data and presentation.
+
+**Example chips.** "Vegetation around Bengaluru" and "built-up area around
+Hyderabad" were refused by the M1 area gate (`area_too_large`) - whole cities
+are larger than one native 10 m read. Option A: replaced with real places
+inside those cities, each verified live to return a measurement:
+"Show vegetation around Cubbon Park, Bengaluru in December 2024." (NDVI 0.5204,
+16,988 px, S2B_43PGQ_20241208) and "Show built-up area around Ameerpet,
+Hyderabad in January 2025." (NDBI -0.02482, 196,620 px, S2B_43QHV_20250107).
+January 2025 at Cubbon Park was NOT used: its least-cloudy scene is S2C on
+baseline 05.11 with `boa_offset_applied=false`, which M4 correctly refuses as
+`radiometric_undetermined` (section 23's known limitation - selection does not
+yet prefer radiometrically usable scenes). Nothing was loosened to make a chip
+pass. A frontend test pins that every chip names a comma-qualified place.
+
+**Places without lead words** (`interpretation._residual_place`). When no
+"around / in / at / near / of" phrase names a place, the ONE contiguous run of
+name-like words the question leaves is the place ("NDVI Chennai January 2025",
+"water Dal Lake January 2025", "Isle of Man NDVI 2024"). Analysis, comparison,
+season, visual, detection and unsupported words, commands, question words and
+generic nouns are removed first; in mixed case only Capitalised words join; two
+separate runs are asked back as candidates; a Capitalised analysis word beside
+the run ("water Forest Hill") is asked back for confirmation. The geocoder
+stays the authority. Fixed on the way: `_DEICTIC` matched a PREFIX, so
+"Mysuru", "Itanagar" and "Hereford" read as "my" / "it" / "here" (M5.5 bug);
+a lowercase visual phrase ended nothing, so "the image of Pune looks like" made
+"Pune looks like" the place; opening auxiliaries ("Did", "Has") became a second
+candidate.
+
+**Clarification UX.** Every clarification asks for everything missing at once,
+in plain words, with no placeholder and no internal name ("Analyze Chennai" ->
+"What would you like to analyse at Chennai?" + five options; "Show vegetation"
+-> place AND date; "Compare water" -> place AND both periods). New
+`AgentClarification.option_questions`: one complete question per option, built
+only from what the user said (their place and their periods, never a guessed
+date); a validator requires one per option or none. The UI shows options
+capitalised and, when the questions line up, as links that FILL the query box
+- nothing runs until the user presses Run. `area_too_large` and
+`location_not_found` no longer print `'<landmark>, <city>'`; the area message
+names the user's own place ("a neighbourhood, park or landmark in Chennai
+together with the city name").
+
+**Rule gaps the evaluation exposed, fixed** (tests in
+`tests/test_demo_readiness.py`, section C):
+- change verbs are comparisons: declined, risen/rising, rose, fell/fallen,
+  drop(ped), shrinkage, receded, dried up/out ("fall" left out - it is also a
+  season). Before, "Has the vegetation of Kodagu declined from 2020 to 2024?"
+  EXECUTED a single NDVI over 2020-2024; now it is refused (vegetation change is
+  not implemented) and a water change runs temporal NDWI;
+- yield and forecasting are refused ("Predict the crop yield near Bathinda"
+  used to execute NDVI);
+- vocabulary: leafy, foliage, canopy, lush, verdant, greening (NDVI); developed
+  area/land (NDBI); sigma/gamma naught, sigma0, gamma0 (SAR);
+- "How leafy is X" was read as a DEFINITION ("<term> is ..."); a lowercase word
+  straight after "how" is now a degree question (`plan_completion.
+  _DEGREE_QUESTION`); "What is vegetation?" and "How NDVI is computed" stay
+  definitions.
+The model tests that used "How lush are the tea gardens" as a phrase the
+vocabulary misses now use "How green are the tea gardens" ("green" is left out
+of the vocabulary on purpose - place names).
+
+**Intent model v2** (`satquery-intent-v2`, `data/intent/README.md`). Dataset
+v2 = v1 + ~30 diverse examples per label targeting the recurring v1 challenge
+misses (leafy/lush/green/crop vigour; extent/surface water/spread;
+concrete/developed/impervious/urbanisation; radar/backscatter/microwave;
+changed/rose/fell/before vs after/compared with/from-to), with hard negatives
+(vegetation or built-up change -> UNSUPPORTED; bare "compare" ->
+CLARIFICATION). 1,258 rows. A fresh 120-item challenge set was written BEFORE
+any v2 training. Same features and protocol; the threshold rule gained a floor
+(`THRESHOLD_FLOOR = 0.90`, never lowered for coverage) and calibration itself
+chose **0.95**; C = 100. Artifact 190,567 bytes, 2,217 word + 3,639 char
+features, numpy vs scikit-learn max |dp| 2.4e-9, predict ~0.05 ms.
+
+| Held-out challenge v2 (n=120), full pipeline | acted on (wrong) | correct | clarified | WRONG executed |
+| --- | --- | --- | --- | --- |
+| DEPLOYED M5.6 (v1 model + M5.6 rules, from `git archive HEAD`) | 80 (0) | 90 | 28 | **2** |
+| v1 model + today's rules | 81 (0) | 114 | 6 | 0 |
+| **v2 model + today's rules (shipped)** | **106 (0)** | **118** | **2** | **0** |
+| rules only, today | - | 102 | 18 | 0 |
+
+The FIRST, blind v2 evaluation (threshold then 0.90, rules before the fixes
+above): v2 114 / 5 / 1 wrong, v1 109 / 9 / 2 wrong, rules only 93 / 24 / 3
+wrong. The rule fixes were informed by that evaluation (and by the v2 test
+split), so the table above is not fully blind for the items that exposed them.
+Model-only on challenge v2: accuracy 0.9833, macro F1 0.9830; 39 of 120 items
+are >= 0.75 similar to a training sentence after masking (short skeletons).
+Test split (n=184): accuracy 0.9402, macro F1 0.9406; at 0.95, 125 acted on, 0
+wrong; full pipeline 175 correct / 9 clarified / 0 wrong (rules only 162 / 21 /
+1). Challenge v1 (development for v2): 114 / 6 / 0 (deployed M5.6: 101 / 19 /
+0). Every model-acted prediction on every set was correct.
+
+**Mutation-checked (7/7, restored byte-identical):** deictic prefix (3 fail),
+change verbs (3), forecast refusal (3), degree question (3), visual cut (1),
+area placeholder (1), frontend option/question alignment (1).
+
+**Verified locally against live services** (standard workflow, no AI key
+used): the 9-query matrix - NDVI -0.06131, NDWI 0.1466, NDBI 0.01244 (Marina
+Beach, S2B_44PMV_20250104), SAR VV -5.444 / VH -17.85 dB, temporal NDWI
+0.02658 -> 0.1466 (difference 0.12), "How leafy is Marina Beach" -> NDVI,
+"NDVI Chennai January 2025" -> `area_too_large` naming Chennai's 20.9 x 42.4 km,
+"Analyze Chennai" -> five clickable options, "Count ships in Chennai harbor" ->
+`analysis_unsupported`.
+
+**Known limitations.** "NDVI Chennai January 2025" is correctly refused as too
+large: sub-areas are not suggested (option B was not chosen). Scene selection
+still ignores radiometric usability, so some place/month pairs return a scene
+with the index withheld (honestly, with the reason). "fall" is not read as a
+change verb. Vague water-level phrasings ("how did the water level move") stay
+the model's call. English only.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3000 passed** (2938 at M5.6) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **372 passed** (368 at M5.6) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds (with `VITE_API_BASE_URL`) |

@@ -588,9 +588,19 @@ class AgentClarification(_StrictModel):
     message: str = Field(min_length=1, max_length=1000)
     #: The supported choices that would resolve it, when there is a closed set.
     options: list[str] = Field(default_factory=list, max_length=10)
+    #: For each option, a complete question that asks for it - built only from
+    #: what the question already established, so choosing one never adds a
+    #: place or a date the user did not give. Empty, or one per option.
+    option_questions: list[str] = Field(default_factory=list, max_length=10)
     understood_analyses: list[str] = Field(default_factory=list, max_length=10)
     understood_location: str | None = Field(default=None, max_length=300)
     understood_periods: list[TimeRange] = Field(default_factory=list, max_length=2)
+
+    @model_validator(mode="after")
+    def _questions_match_options(self) -> Self:
+        if self.option_questions and len(self.option_questions) != len(self.options):
+            raise ValueError("option_questions must be empty or one per option")
+        return self
 
 
 class AgentResult(_StrictModel):

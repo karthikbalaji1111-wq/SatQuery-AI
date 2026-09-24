@@ -1488,9 +1488,69 @@ describe("AgentPanel - clarification", () => {
 
     const list = await screen.findByRole("list", { name: "Supported choices" });
     expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-      "vegetation (NDVI)",
-      "water (NDWI)",
+      "Vegetation (NDVI)",
+      "Water (NDWI)",
     ]);
+    // No questions came with the options, so they are read, not clicked.
+    expect(within(list).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("fills the query box with a chosen option's question and runs nothing", async () => {
+    const fetchMock = stubAgent({
+      body: {
+        ...CLARIFICATION,
+        clarification: {
+          ...CLARIFICATION.clarification,
+          reason: "analysis_missing",
+          message: "What would you like to analyse at Chennai?",
+          options: ["vegetation (NDVI)", "water change between two periods (NDWI)"],
+          option_questions: [
+            "Show vegetation (NDVI) around Chennai",
+            "Compare water (NDWI) around Chennai",
+          ],
+          understood_analyses: [],
+        },
+      },
+    });
+    render(<AgentPanel />);
+
+    await askAndWait("Analyze Chennai");
+
+    const list = await screen.findByRole("list", { name: "Supported choices" });
+    const choices = within(list).getAllByRole("button");
+    expect(choices.map((button) => button.textContent)).toEqual([
+      "Vegetation (NDVI)",
+      "Water change between two periods (NDWI)",
+    ]);
+    fireEvent.click(choices[1]);
+
+    expect(screen.getByLabelText(/question/i)).toHaveValue(
+      "Compare water (NDWI) around Chennai",
+    );
+    // Filling the box is not asking: the user reads it and runs it.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer choices whose questions do not line up with them", async () => {
+    stubAgent({
+      body: {
+        ...CLARIFICATION,
+        clarification: {
+          ...CLARIFICATION.clarification,
+          reason: "analysis_missing",
+          message: "What would you like to analyse?",
+          options: ["vegetation (NDVI)", "water (NDWI)"],
+          option_questions: ["Show vegetation (NDVI) around Chennai"],
+          understood_analyses: [],
+        },
+      },
+    });
+    render(<AgentPanel />);
+
+    await askAndWait("Analyze Chennai");
+
+    const list = await screen.findByRole("list", { name: "Supported choices" });
+    expect(within(list).queryAllByRole("button")).toEqual([]);
   });
 
   it("asks back when the intent model and the rules disagree", async () => {
@@ -1517,7 +1577,7 @@ describe("AgentPanel - clarification", () => {
     expect(block).toHaveAttribute("data-reason", "analysis_ambiguous");
     expect(
       within(block).getAllByRole("listitem").map((li) => li.textContent),
-    ).toEqual(["vegetation (NDVI)", "built-up area (NDBI)"]);
+    ).toEqual(["Vegetation (NDVI)", "Built-up area (NDBI)"]);
   });
 
   it("reads 'Needs clarification' in the pipeline, not a failure", async () => {
@@ -1545,5 +1605,50 @@ describe("AgentPanel - clarification", () => {
       await screen.findByText(/No analysis ran: the question needs one more detail/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/mean NDVI/i)).not.toBeInTheDocument();
+  });
+});
+
+
+// ===========================================================================
+// Demo readiness: every example names an area small enough to measure
+// ===========================================================================
+
+describe("AgentPanel - example questions", () => {
+  it("offers only places inside a city, never a whole city the gate refuses", () => {
+    render(<AgentPanel />);
+
+    const vegetation = screen.getByRole("button", { name: "Vegetation" });
+    const builtUp = screen.getByRole("button", { name: "Built-up area" });
+    expect(vegetation).toHaveAttribute(
+      "title",
+      "Show vegetation around Cubbon Park, Bengaluru in December 2024.",
+    );
+    expect(builtUp).toHaveAttribute(
+      "title",
+      "Show built-up area around Ameerpet, Hyderabad in January 2025.",
+    );
+    for (const name of [
+      "Water index",
+      "Vegetation",
+      "Built-up area",
+      "Radar backscatter",
+      "Temporal comparison",
+    ]) {
+      const title = screen.getByRole("button", { name }).getAttribute("title") ?? "";
+      // "<landmark>, <city>": a comma-qualified place, never a bare city.
+      expect(title).toMatch(/(?:around|of|at) [A-Z][\w ]+, [A-Z]\w+ (?:in|between)/);
+    }
+  });
+
+  it("fills the query box without running it", () => {
+    const fetchMock = stubAgent({ body: {} });
+    render(<AgentPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Vegetation" }));
+
+    expect(screen.getByLabelText(/question/i)).toHaveValue(
+      "Show vegetation around Cubbon Park, Bengaluru in December 2024.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

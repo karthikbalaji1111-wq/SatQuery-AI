@@ -797,6 +797,12 @@ export interface AgentClarification {
   reason: ClarificationReason;
   message: string;
   options: string[];
+  /**
+   * One complete question per option, built only from what the question
+   * already established; empty when the options are not questions to ask.
+   * Optional so a response from an older server still type-checks.
+   */
+  option_questions?: string[];
   understood_analyses: string[];
   understood_location: string | null;
   understood_periods: TimeRange[];
