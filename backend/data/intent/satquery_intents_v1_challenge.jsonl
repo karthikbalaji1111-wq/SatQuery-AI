@@ -1,0 +1,120 @@
+{"id": "challenge-ndvi-01", "text": "How is the vegetation doing around Rajkot in November 2024?", "intent": "NDVI"}
+{"id": "challenge-ndvi-02", "text": "ndvi near Hubballi for march 2025", "intent": "NDVI"}
+{"id": "challenge-ndvi-03", "text": "Are the forests of Nagarhole healthy this far into 2024, check December 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-04", "text": "Greenness of the banana farms around Jalgaon in 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-05", "text": "What is the vegetation index for the Bhitarkanika mangroves in 2023", "intent": "NDVI"}
+{"id": "challenge-ndvi-06", "text": "Give me crop health numbers around Moga for January 2025", "intent": "NDVI"}
+{"id": "challenge-ndvi-07", "text": "How much plant growth is there near Anand Vihar park in 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-08", "text": "Vegetation vigor in the hills around Kalimpong, October 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-09", "text": "Check green cover at 23.03, 72.58 in February 2025", "intent": "NDVI"}
+{"id": "challenge-ndvi-10", "text": "calculate the vegetation index of Kodaikanal in 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-11", "text": "Is there healthy foliage around Shillong's Laitlum in 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-12", "text": "plant health index for vineyards near Nashik, Feb 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-13", "text": "How green was Wayanad in September 2024?", "intent": "NDVI"}
+{"id": "challenge-ndvi-14", "text": "Measure the canopy greenness in Bandhavgarh for 2024", "intent": "NDVI"}
+{"id": "challenge-ndvi-15", "text": "vegetaton health around Thrissur in 2024", "intent": "NDVI"}
+{"id": "challenge-ndwi-01", "text": "How much water does Vembanad hold in December 2024?", "intent": "NDWI"}
+{"id": "challenge-ndwi-02", "text": "ndwi near Hubballi's Unkal lake for march 2025", "intent": "NDWI"}
+{"id": "challenge-ndwi-03", "text": "Is Osmansagar holding water in November 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-04", "text": "Water surface around the Chilika lagoon in 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-05", "text": "Give me the water index for Kolleru in 2023", "intent": "NDWI"}
+{"id": "challenge-ndwi-06", "text": "Map water bodies near Bhuj for January 2025", "intent": "NDWI"}
+{"id": "challenge-ndwi-07", "text": "How full is the Linganamakki reservoir, water index for 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-08", "text": "surface water near Kalimpong in October 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-09", "text": "Check water at 21.15, 79.09 in February 2025", "intent": "NDWI"}
+{"id": "challenge-ndwi-10", "text": "calculate the water index of Kodaikanal lake in 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-11", "text": "Is there open water at Umiam in 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-12", "text": "water presence in the ponds near Nashik, Feb 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-13", "text": "How wet was the Kuttanad region in September 2024?", "intent": "NDWI"}
+{"id": "challenge-ndwi-14", "text": "Measure the water extent in Pong reservoir for 2024", "intent": "NDWI"}
+{"id": "challenge-ndwi-15", "text": "watter bodies around Thrissur in 2024", "intent": "NDWI"}
+{"id": "challenge-ndbi-01", "text": "How built up is Rajkot in November 2024?", "intent": "NDBI"}
+{"id": "challenge-ndbi-02", "text": "ndbi near Hubballi for march 2025", "intent": "NDBI"}
+{"id": "challenge-ndbi-03", "text": "How much urban land is there around Navi Mumbai in December 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-04", "text": "Concrete cover of Kochi's Edappally in 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-05", "text": "What is the built-up index for Bhiwandi in 2023", "intent": "NDBI"}
+{"id": "challenge-ndbi-06", "text": "Give me settlement density numbers around Moga for January 2025", "intent": "NDBI"}
+{"id": "challenge-ndbi-07", "text": "How much of Anand Vihar is paved in 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-08", "text": "Urban footprint of Siliguri, October 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-09", "text": "Check built-up land at 23.03, 72.58 in February 2025", "intent": "NDBI"}
+{"id": "challenge-ndbi-10", "text": "calculate the built up index of Kodaikanal town in 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-11", "text": "Is Shillong's Police Bazar heavily built up in 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-12", "text": "urban index for the industrial belt near Nashik, Feb 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-13", "text": "How developed was Wakad in September 2024?", "intent": "NDBI"}
+{"id": "challenge-ndbi-14", "text": "Measure impervious surfaces in Bengaluru's Hebbal for 2024", "intent": "NDBI"}
+{"id": "challenge-ndbi-15", "text": "bult up area around Thrissur in 2024", "intent": "NDBI"}
+{"id": "challenge-sar-01", "text": "What is the radar backscatter over Rajkot in November 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-02", "text": "sar near Hubballi for march 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-03", "text": "Sentinel-1 VV over the Chilika lagoon in December 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-04", "text": "Radar return from Kochi port in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-05", "text": "What is the backscatter in dB for Bhiwandi in 2023", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-06", "text": "Give me VH polarisation numbers around Moga for January 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-07", "text": "How strong is the SAR signal near Anand Vihar in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-08", "text": "C-band radar over Siliguri, October 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-09", "text": "Check radar at 23.03, 72.58 in February 2025", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-10", "text": "calculate the radar backscatter of Kodaikanal in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-11", "text": "Microwave backscatter over Shillong in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-12", "text": "radar intensity for the fields near Nashik, Feb 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-13", "text": "How bright was Wayanad in radar in September 2024?", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-14", "text": "Measure the Sentinel 1 backscatter in Bandhavgarh for 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-sar-15", "text": "backscater around Thrissur in 2024", "intent": "SAR_BACKSCATTER"}
+{"id": "challenge-tndwi-01", "text": "Has Vembanad lost water between December 2023 and December 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-02", "text": "compare ndwi at Unkal lake for march 2024 and march 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-03", "text": "How did water in Osmansagar change from November 2023 to November 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-04", "text": "Water at the Chilika lagoon in 2023 versus 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-05", "text": "Compare the water index for Kolleru in 2022 and 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-06", "text": "Did the water bodies near Bhuj shrink between January 2024 and January 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-07", "text": "How much did the Linganamakki reservoir water change from 2023 to 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-08", "text": "surface water near Kalimpong in October 2023 compared with October 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-09", "text": "Compare water at 21.15, 79.09 in February 2024 and February 2025", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-10", "text": "water difference at Kodaikanal lake between 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-11", "text": "Is there more open water at Umiam in 2024 than 2023", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-12", "text": "Compare the ponds near Nashik for water, Feb 2023 and Feb 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-13", "text": "How did the wetness of Kuttanad differ between May and September 2024?", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-14", "text": "Water extent in Pong reservoir: 2023 against 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-tndwi-15", "text": "comapre water around Thrissur in 2023 and 2024", "intent": "TEMPORAL_NDWI"}
+{"id": "challenge-rgb-01", "text": "Show me the satellite image of Rajkot in November 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-02", "text": "rgb image near Hubballi for march 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-03", "text": "Display the true colour picture of the Chilika lagoon in December 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-04", "text": "Natural colour view of Kochi port in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-05", "text": "Show the Sentinel-2 image of Bhiwandi in 2023", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-06", "text": "Give me a satellite photo around Moga for January 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-07", "text": "Pull up the imagery of Anand Vihar in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-08", "text": "Colour satellite picture of Siliguri, October 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-09", "text": "Show the image at 23.03, 72.58 in February 2025", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-10", "text": "display the true color scene of Kodaikanal in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-11", "text": "Show Shillong from the satellite in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-12", "text": "satellite picture for the fields near Nashik, Feb 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-13", "text": "Show the optical imagery of Wayanad in September 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-14", "text": "Display the RGB composite over Bandhavgarh for 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-rgb-15", "text": "sattelite image around Thrissur in 2024", "intent": "TRUE_COLOR"}
+{"id": "challenge-clar-01", "text": "Analyse Rajkot", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-02", "text": "hubballi please", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-03", "text": "What is happening around the Chilika lagoon?", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-04", "text": "Tell me about Kochi in 2024", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-05", "text": "Give me the numbers for Bhiwandi", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-06", "text": "Compare Moga in January 2024 and January 2025", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-07", "text": "Run something on Anand Vihar", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-08", "text": "Siliguri, October 2024", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-09", "text": "Analyse the point 23.03, 72.58", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-10", "text": "calculate the index for Kodaikanal", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-11", "text": "What can you find in Shillong?", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-12", "text": "report for the fields near Nashik", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-13", "text": "How was Wayanad in September 2024?", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-14", "text": "Evaluate Bandhavgarh for 2024", "intent": "CLARIFICATION"}
+{"id": "challenge-clar-15", "text": "check thrissur", "intent": "CLARIFICATION"}
+{"id": "challenge-unsup-01", "text": "Count the buses at Rajkot depot", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-02", "text": "What is the land surface temperature in Hubballi in May 2025", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-03", "text": "Detect illegal fishing nets in the Chilika lagoon", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-04", "text": "Predict the rice yield for Kochi farmers in 2025", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-05", "text": "Map air pollution over Bhiwandi in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-06", "text": "Classify the crops around Moga in January 2025", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-07", "text": "Estimate the number of trees in Anand Vihar", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-08", "text": "Show the flood damage in Siliguri in October 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-09", "text": "What is the soil moisture at 23.03, 72.58 in February 2025", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-10", "text": "How much snow is on the hills near Kodaikanal", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-11", "text": "Identify buildings with solar panels in Shillong", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-12", "text": "Map the vegetation change near Nashik between 2020 and 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-13", "text": "Describe what the satellite sees over Wayanad in September 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-14", "text": "Measure the rainfall over Bandhavgarh in 2024", "intent": "UNSUPPORTED"}
+{"id": "challenge-unsup-15", "text": "Detect landslides around Thrissur in 2024", "intent": "UNSUPPORTED"}

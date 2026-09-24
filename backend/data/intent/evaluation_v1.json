@@ -1,0 +1,2071 @@
+{
+  "model_version": "satquery-intent-v1",
+  "artifact": {
+    "path": "app/services/agent/intent_artifacts/satquery_intent_v1.json.gz",
+    "bytes": 185182,
+    "json_bytes": 718668,
+    "sha256": "02f8c6272e084d567838f5bfc1adaee92aba36be29ee6bbb7cad2ede6d4bfb52",
+    "features_word": 2135,
+    "features_char": 3500,
+    "peak_load_memory_bytes": 3745484,
+    "sklearn_equivalence_max_abs_diff": 2.0073370743389773e-09,
+    "sklearn_equivalence_same_argmax": true
+  },
+  "latency_ms": {
+    "predict_mean": 0.046483054144406004,
+    "predict_p95": 0.06463124736910686,
+    "route_operation_mean": 0.22329633592514592,
+    "route_operation_p95": 0.3124834496702533
+  },
+  "threshold": 0.9,
+  "threshold_calibration": [
+    {
+      "threshold": 0.3,
+      "accepted": 848,
+      "coverage": 0.9792147806004619,
+      "accepted_errors": 73,
+      "accepted_precision": 0.9139150943396226
+    },
+    {
+      "threshold": 0.35,
+      "accepted": 836,
+      "coverage": 0.9653579676674365,
+      "accepted_errors": 66,
+      "accepted_precision": 0.9210526315789473
+    },
+    {
+      "threshold": 0.4,
+      "accepted": 816,
+      "coverage": 0.9422632794457275,
+      "accepted_errors": 59,
+      "accepted_precision": 0.9276960784313726
+    },
+    {
+      "threshold": 0.45,
+      "accepted": 789,
+      "coverage": 0.9110854503464203,
+      "accepted_errors": 53,
+      "accepted_precision": 0.9328263624841572
+    },
+    {
+      "threshold": 0.5,
+      "accepted": 770,
+      "coverage": 0.8891454965357968,
+      "accepted_errors": 45,
+      "accepted_precision": 0.9415584415584416
+    },
+    {
+      "threshold": 0.55,
+      "accepted": 737,
+      "coverage": 0.851039260969977,
+      "accepted_errors": 37,
+      "accepted_precision": 0.9497964721845319
+    },
+    {
+      "threshold": 0.6,
+      "accepted": 709,
+      "coverage": 0.8187066974595842,
+      "accepted_errors": 30,
+      "accepted_precision": 0.9576868829337094
+    },
+    {
+      "threshold": 0.65,
+      "accepted": 681,
+      "coverage": 0.7863741339491916,
+      "accepted_errors": 28,
+      "accepted_precision": 0.9588839941262849
+    },
+    {
+      "threshold": 0.7,
+      "accepted": 652,
+      "coverage": 0.7528868360277137,
+      "accepted_errors": 22,
+      "accepted_precision": 0.9662576687116564
+    },
+    {
+      "threshold": 0.75,
+      "accepted": 610,
+      "coverage": 0.7043879907621247,
+      "accepted_errors": 13,
+      "accepted_precision": 0.978688524590164
+    },
+    {
+      "threshold": 0.8,
+      "accepted": 558,
+      "coverage": 0.6443418013856813,
+      "accepted_errors": 10,
+      "accepted_precision": 0.982078853046595
+    },
+    {
+      "threshold": 0.85,
+      "accepted": 490,
+      "coverage": 0.5658198614318707,
+      "accepted_errors": 5,
+      "accepted_precision": 0.9897959183673469
+    },
+    {
+      "threshold": 0.9,
+      "accepted": 384,
+      "coverage": 0.44341801385681295,
+      "accepted_errors": 3,
+      "accepted_precision": 0.9921875
+    },
+    {
+      "threshold": 0.95,
+      "accepted": 267,
+      "coverage": 0.3083140877598152,
+      "accepted_errors": 3,
+      "accepted_precision": 0.9887640449438202
+    }
+  ],
+  "validation": {
+    "count": 152,
+    "accuracy": 0.9144736842105263,
+    "macro_f1": 0.9105711896870434,
+    "weighted_f1": 0.9105711896870433,
+    "per_class": {
+      "NDVI": {
+        "precision": 0.8636363636363636,
+        "recall": 1.0,
+        "f1": 0.926829268292683,
+        "support": 19
+      },
+      "NDWI": {
+        "precision": 1.0,
+        "recall": 0.9473684210526315,
+        "f1": 0.972972972972973,
+        "support": 19
+      },
+      "NDBI": {
+        "precision": 0.95,
+        "recall": 1.0,
+        "f1": 0.9743589743589743,
+        "support": 19
+      },
+      "SAR_BACKSCATTER": {
+        "precision": 1.0,
+        "recall": 0.9473684210526315,
+        "f1": 0.972972972972973,
+        "support": 19
+      },
+      "TEMPORAL_NDWI": {
+        "precision": 0.8636363636363636,
+        "recall": 1.0,
+        "f1": 0.926829268292683,
+        "support": 19
+      },
+      "TRUE_COLOR": {
+        "precision": 0.9047619047619048,
+        "recall": 1.0,
+        "f1": 0.95,
+        "support": 19
+      },
+      "CLARIFICATION": {
+        "precision": 0.8823529411764706,
+        "recall": 0.7894736842105263,
+        "f1": 0.8333333333333334,
+        "support": 19
+      },
+      "UNSUPPORTED": {
+        "precision": 0.8571428571428571,
+        "recall": 0.631578947368421,
+        "f1": 0.7272727272727273,
+        "support": 19
+      }
+    },
+    "confusion_matrix": {
+      "labels": [
+        "NDVI",
+        "NDWI",
+        "NDBI",
+        "SAR_BACKSCATTER",
+        "TEMPORAL_NDWI",
+        "TRUE_COLOR",
+        "CLARIFICATION",
+        "UNSUPPORTED"
+      ],
+      "rows_true_columns_predicted": [
+        [
+          19,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          18,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          19,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          18,
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          19,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          19,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          15,
+          2
+        ],
+        [
+          3,
+          0,
+          1,
+          0,
+          0,
+          2,
+          1,
+          12
+        ]
+      ]
+    }
+  },
+  "test": {
+    "count": 152,
+    "accuracy": 0.9144736842105263,
+    "macro_f1": 0.9161460911460911,
+    "weighted_f1": 0.9161460911460911,
+    "per_class": {
+      "NDVI": {
+        "precision": 0.8571428571428571,
+        "recall": 0.9473684210526315,
+        "f1": 0.9,
+        "support": 19
+      },
+      "NDWI": {
+        "precision": 1.0,
+        "recall": 0.8421052631578947,
+        "f1": 0.9142857142857143,
+        "support": 19
+      },
+      "NDBI": {
+        "precision": 1.0,
+        "recall": 0.9473684210526315,
+        "f1": 0.972972972972973,
+        "support": 19
+      },
+      "SAR_BACKSCATTER": {
+        "precision": 1.0,
+        "recall": 0.8947368421052632,
+        "f1": 0.9444444444444444,
+        "support": 19
+      },
+      "TEMPORAL_NDWI": {
+        "precision": 0.9,
+        "recall": 0.9473684210526315,
+        "f1": 0.9230769230769231,
+        "support": 19
+      },
+      "TRUE_COLOR": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 19
+      },
+      "CLARIFICATION": {
+        "precision": 0.7391304347826086,
+        "recall": 0.8947368421052632,
+        "f1": 0.8095238095238095,
+        "support": 19
+      },
+      "UNSUPPORTED": {
+        "precision": 0.8888888888888888,
+        "recall": 0.8421052631578947,
+        "f1": 0.8648648648648649,
+        "support": 19
+      }
+    },
+    "confusion_matrix": {
+      "labels": [
+        "NDVI",
+        "NDWI",
+        "NDBI",
+        "SAR_BACKSCATTER",
+        "TEMPORAL_NDWI",
+        "TRUE_COLOR",
+        "CLARIFICATION",
+        "UNSUPPORTED"
+      ],
+      "rows_true_columns_predicted": [
+        [
+          18,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          1,
+          16,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          18,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          17,
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          18,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          19,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          17,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          16
+        ]
+      ]
+    }
+  },
+  "test_at_threshold": {
+    "threshold": 0.9,
+    "accepted": 74,
+    "coverage": 0.4868421052631579,
+    "accepted_errors": 0,
+    "accepted_precision": 1.0
+  },
+  "test_misclassified": [
+    {
+      "id": "ndvi-052",
+      "text": "Please run the vegetation analysis for Mysuru in Feb 2025",
+      "masked": "Please run the vegetation analysis for Mysuru in DATE",
+      "intent": "NDVI",
+      "predicted": "CLARIFICATION",
+      "confidence": 0.7343,
+      "acted_on": false
+    },
+    {
+      "id": "ndwi-052",
+      "text": "Please run the water analysis for Mysuru's Kukkarahalli lake in Feb 2025",
+      "masked": "Please run the water analysis for Mysuru's Kukkarahalli lake in DATE",
+      "intent": "NDWI",
+      "predicted": "CLARIFICATION",
+      "confidence": 0.7757,
+      "acted_on": false
+    },
+    {
+      "id": "ndwi-069",
+      "text": "Rate the water presence around Kochi from January to March 2024",
+      "masked": "Rate the water presence around PLACE from DATE to DATE",
+      "intent": "NDWI",
+      "predicted": "TEMPORAL_NDWI",
+      "confidence": 0.852,
+      "acted_on": false
+    },
+    {
+      "id": "ndwi-126",
+      "text": "wetness index for the lagoons near Pondicherry in January 2025",
+      "masked": "wetness index for the lagoons near PLACE in DATE",
+      "intent": "NDWI",
+      "predicted": "NDVI",
+      "confidence": 0.4089,
+      "acted_on": false
+    },
+    {
+      "id": "ndbi-052",
+      "text": "Please run the urban analysis for Mysuru in Feb 2025",
+      "masked": "Please run the urban analysis for Mysuru in DATE",
+      "intent": "NDBI",
+      "predicted": "CLARIFICATION",
+      "confidence": 0.8863,
+      "acted_on": false
+    },
+    {
+      "id": "sar-052",
+      "text": "Please run the radar analysis for Mysuru in Feb 2025",
+      "masked": "Please run the radar analysis for Mysuru in DATE",
+      "intent": "SAR_BACKSCATTER",
+      "predicted": "CLARIFICATION",
+      "confidence": 0.7946,
+      "acted_on": false
+    },
+    {
+      "id": "sar-107",
+      "text": "How bright is Kochi in C-band in 2024",
+      "masked": "How bright is Kochi in PLACE in DATE",
+      "intent": "SAR_BACKSCATTER",
+      "predicted": "UNSUPPORTED",
+      "confidence": 0.3451,
+      "acted_on": false
+    },
+    {
+      "id": "tndwi-052",
+      "text": "Please compare the water analysis for Kukkarahalli lake in Feb 2024 and Feb 2025",
+      "masked": "Please compare the water analysis for PLACE in DATE and DATE",
+      "intent": "TEMPORAL_NDWI",
+      "predicted": "CLARIFICATION",
+      "confidence": 0.5196,
+      "acted_on": false
+    },
+    {
+      "id": "clar-112",
+      "text": "Compare Madurai in January 2024 and January 2025",
+      "masked": "Compare Madurai in DATE and DATE",
+      "intent": "CLARIFICATION",
+      "predicted": "TEMPORAL_NDWI",
+      "confidence": 0.5556,
+      "acted_on": false
+    },
+    {
+      "id": "clar-128",
+      "text": "Evaluate the site near Belgaum",
+      "masked": "Evaluate the site near PLACE",
+      "intent": "CLARIFICATION",
+      "predicted": "UNSUPPORTED",
+      "confidence": 0.2971,
+      "acted_on": false
+    },
+    {
+      "id": "unsup-094",
+      "text": "What is the ozone level over Delhi in 2024?",
+      "masked": "What is the ozone level over PLACE in DATE ?",
+      "intent": "UNSUPPORTED",
+      "predicted": "NDVI",
+      "confidence": 0.3402,
+      "acted_on": false
+    },
+    {
+      "id": "unsup-122",
+      "text": "Show the drought index for Marathwada in 2024",
+      "masked": "Show the drought index for PLACE in DATE",
+      "intent": "UNSUPPORTED",
+      "predicted": "CLARIFICATION",
+      "confidence": 0.2688,
+      "acted_on": false
+    },
+    {
+      "id": "unsup-123",
+      "text": "Map the vegetation species of Kaziranga",
+      "masked": "Map the vegetation species of PLACE",
+      "intent": "UNSUPPORTED",
+      "predicted": "NDVI",
+      "confidence": 0.5534,
+      "acted_on": false
+    }
+  ],
+  "system_on_test": {
+    "model_plus_rules": {
+      "correct": 139,
+      "clarified_safely": 13,
+      "wrong_operation_executed": 0,
+      "examples": [
+        {
+          "id": "ndvi-043",
+          "text": "What is the plant vigour like around Konya in June 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-101",
+          "text": "Is the canopy of Silent Valley healthy in 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-104",
+          "text": "How alive is the plant life around Coorg in November 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndwi-126",
+          "text": "wetness index for the lagoons near Pondicherry in January 2025",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-025",
+          "text": "How much concrete is there around Sriperumbudur in June 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-075",
+          "text": "Is Amritsar densely constructed in March 2025?",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-103",
+          "text": "How paved is the city centre of Kanpur in 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-080",
+          "text": "Compute gamma naught around Almaty in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-107",
+          "text": "How bright is Kochi in C-band in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-025",
+          "text": "How did the wetness of the paddies around Alappuzha shift from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-105",
+          "text": "Reservoir levels at Idukki in December 2023 against December 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-108",
+          "text": "Did Sukhna lake fill up between March 2024 and September 2024?",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "rgb-050",
+          "text": "imagry for Raipur in December 2024",
+          "intent": "TRUE_COLOR",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        }
+      ]
+    },
+    "rules_only": {
+      "correct": 129,
+      "clarified_safely": 18,
+      "wrong_operation_executed": 5,
+      "examples": [
+        {
+          "id": "ndvi-043",
+          "text": "What is the plant vigour like around Konya in June 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-053",
+          "text": "How green is Chandigarh in August 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-061",
+          "text": "check greeness around Raipur in october 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-101",
+          "text": "Is the canopy of Silent Valley healthy in 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-104",
+          "text": "How alive is the plant life around Coorg in November 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-120",
+          "text": "Evaluate the green canopy near Tirupati in 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndwi-126",
+          "text": "wetness index for the lagoons near Pondicherry in January 2025",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-025",
+          "text": "How much concrete is there around Sriperumbudur in June 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-075",
+          "text": "Is Amritsar densely constructed in March 2025?",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-103",
+          "text": "How paved is the city centre of Kanpur in 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-126",
+          "text": "How built-over is the coastline near Kovalam in 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-080",
+          "text": "Compute gamma naught around Almaty in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-107",
+          "text": "How bright is Kochi in C-band in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-018",
+          "text": "compair water near Guwahati between january and july 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "tndwi-025",
+          "text": "How did the wetness of the paddies around Alappuzha shift from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-101",
+          "text": "Has the Vaigai dam held more water in 2024 than in 2023",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "tndwi-105",
+          "text": "Reservoir levels at Idukki in December 2023 against December 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-108",
+          "text": "Did Sukhna lake fill up between March 2024 and September 2024?",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-110",
+          "text": "Was there more open water at Lake Chad in 2024 than in 2020?",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "tndwi-111",
+          "text": "Track how the Kuttanad backwaters' water shifted from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "tndwi-123",
+          "text": "Water body shrinkage at Bellandur lake between 2018 and 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "rgb-024",
+          "text": "Can you display the satellite scene for Lucknow in April 2024",
+          "intent": "TRUE_COLOR",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "rgb-050",
+          "text": "imagry for Raipur in December 2024",
+          "intent": "TRUE_COLOR",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        }
+      ]
+    },
+    "full_pipeline_model_plus_rules": {
+      "correct": 127,
+      "clarified_safely": 25,
+      "wrong_operation_executed": 0,
+      "examples": [
+        {
+          "id": "ndvi-043",
+          "text": "What is the plant vigour like around Konya in June 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-052",
+          "text": "Please run the vegetation analysis for Mysuru in Feb 2025",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndvi-053",
+          "text": "How green is Chandigarh in August 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndvi-101",
+          "text": "Is the canopy of Silent Valley healthy in 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-104",
+          "text": "How alive is the plant life around Coorg in November 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndwi-052",
+          "text": "Please run the water analysis for Mysuru's Kukkarahalli lake in Feb 2025",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndwi-101",
+          "text": "Is the Vaigai dam holding water in 2024",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndwi-126",
+          "text": "wetness index for the lagoons near Pondicherry in January 2025",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-025",
+          "text": "How much concrete is there around Sriperumbudur in June 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-052",
+          "text": "Please run the urban analysis for Mysuru in Feb 2025",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndbi-057",
+          "text": "NDBI Ranchi January 2025",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndbi-075",
+          "text": "Is Amritsar densely constructed in March 2025?",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-103",
+          "text": "How paved is the city centre of Kanpur in 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-046",
+          "text": "How much radar energy comes back from Bhopal in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "sar-052",
+          "text": "Please run the radar analysis for Mysuru in Feb 2025",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "sar-080",
+          "text": "Compute gamma naught around Almaty in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-086",
+          "text": "How reflective is Ranchi to radar in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "sar-107",
+          "text": "How bright is Kochi in C-band in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-025",
+          "text": "How did the wetness of the paddies around Alappuzha shift from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-101",
+          "text": "Has the Vaigai dam held more water in 2024 than in 2023",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "tndwi-105",
+          "text": "Reservoir levels at Idukki in December 2023 against December 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-108",
+          "text": "Did Sukhna lake fill up between March 2024 and September 2024?",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-111",
+          "text": "Track how the Kuttanad backwaters' water shifted from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "tndwi-121",
+          "text": "Compare how much water Tungabhadra dam held in 2023 and 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "rgb-050",
+          "text": "imagry for Raipur in December 2024",
+          "intent": "TRUE_COLOR",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        }
+      ]
+    },
+    "full_pipeline_rules_only": {
+      "correct": 120,
+      "clarified_safely": 30,
+      "wrong_operation_executed": 2,
+      "examples": [
+        {
+          "id": "ndvi-043",
+          "text": "What is the plant vigour like around Konya in June 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-052",
+          "text": "Please run the vegetation analysis for Mysuru in Feb 2025",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndvi-053",
+          "text": "How green is Chandigarh in August 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-061",
+          "text": "check greeness around Raipur in october 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-101",
+          "text": "Is the canopy of Silent Valley healthy in 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-104",
+          "text": "How alive is the plant life around Coorg in November 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndvi-120",
+          "text": "Evaluate the green canopy near Tirupati in 2024",
+          "intent": "NDVI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndwi-052",
+          "text": "Please run the water analysis for Mysuru's Kukkarahalli lake in Feb 2025",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndwi-101",
+          "text": "Is the Vaigai dam holding water in 2024",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndwi-126",
+          "text": "wetness index for the lagoons near Pondicherry in January 2025",
+          "intent": "NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-025",
+          "text": "How much concrete is there around Sriperumbudur in June 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-052",
+          "text": "Please run the urban analysis for Mysuru in Feb 2025",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndbi-057",
+          "text": "NDBI Ranchi January 2025",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "ndbi-075",
+          "text": "Is Amritsar densely constructed in March 2025?",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-103",
+          "text": "How paved is the city centre of Kanpur in 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "ndbi-126",
+          "text": "How built-over is the coastline near Kovalam in 2024",
+          "intent": "NDBI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-046",
+          "text": "How much radar energy comes back from Bhopal in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "sar-052",
+          "text": "Please run the radar analysis for Mysuru in Feb 2025",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "sar-080",
+          "text": "Compute gamma naught around Almaty in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "sar-086",
+          "text": "How reflective is Ranchi to radar in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "sar-107",
+          "text": "How bright is Kochi in C-band in 2024",
+          "intent": "SAR_BACKSCATTER",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-018",
+          "text": "compair water near Guwahati between january and july 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "tndwi-025",
+          "text": "How did the wetness of the paddies around Alappuzha shift from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-101",
+          "text": "Has the Vaigai dam held more water in 2024 than in 2023",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "tndwi-105",
+          "text": "Reservoir levels at Idukki in December 2023 against December 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-108",
+          "text": "Did Sukhna lake fill up between March 2024 and September 2024?",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "tndwi-110",
+          "text": "Was there more open water at Lake Chad in 2024 than in 2020?",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:date_ambiguous"
+        },
+        {
+          "id": "tndwi-111",
+          "text": "Track how the Kuttanad backwaters' water shifted from January to June 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "tndwi-121",
+          "text": "Compare how much water Tungabhadra dam held in 2023 and 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "clarified",
+          "detail": "clarify:location_missing"
+        },
+        {
+          "id": "tndwi-123",
+          "text": "Water body shrinkage at Bellandur lake between 2018 and 2024",
+          "intent": "TEMPORAL_NDWI",
+          "outcome": "WRONG",
+          "detail": "execute:ndwi"
+        },
+        {
+          "id": "rgb-024",
+          "text": "Can you display the satellite scene for Lucknow in April 2024",
+          "intent": "TRUE_COLOR",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "rgb-050",
+          "text": "imagry for Raipur in December 2024",
+          "intent": "TRUE_COLOR",
+          "outcome": "clarified",
+          "detail": "clarify:analysis_missing"
+        }
+      ]
+    }
+  },
+  "challenge": {
+    "path": "data/intent/satquery_intents_v1_challenge.jsonl",
+    "sha256": "3ae896a0f6ca9a52baeeb07e3e23c616203bec08c95752880f9ba0ee2550ffa4",
+    "model": {
+      "count": 120,
+      "accuracy": 0.9416666666666667,
+      "macro_f1": 0.9401051598336776,
+      "weighted_f1": 0.9401051598336776,
+      "per_class": {
+        "NDVI": {
+          "precision": 0.9333333333333333,
+          "recall": 0.9333333333333333,
+          "f1": 0.9333333333333333,
+          "support": 15
+        },
+        "NDWI": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 15
+        },
+        "NDBI": {
+          "precision": 0.9375,
+          "recall": 1.0,
+          "f1": 0.967741935483871,
+          "support": 15
+        },
+        "SAR_BACKSCATTER": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 15
+        },
+        "TEMPORAL_NDWI": {
+          "precision": 0.8823529411764706,
+          "recall": 1.0,
+          "f1": 0.9375,
+          "support": 15
+        },
+        "TRUE_COLOR": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 15
+        },
+        "CLARIFICATION": {
+          "precision": 0.8461538461538461,
+          "recall": 0.7333333333333333,
+          "f1": 0.7857142857142857,
+          "support": 15
+        },
+        "UNSUPPORTED": {
+          "precision": 0.9285714285714286,
+          "recall": 0.8666666666666667,
+          "f1": 0.896551724137931,
+          "support": 15
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "NDVI",
+          "NDWI",
+          "NDBI",
+          "SAR_BACKSCATTER",
+          "TEMPORAL_NDWI",
+          "TRUE_COLOR",
+          "CLARIFICATION",
+          "UNSUPPORTED"
+        ],
+        "rows_true_columns_predicted": [
+          [
+            14,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            15,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            15,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            15,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            15,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            15,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            2,
+            0,
+            11,
+            1
+          ],
+          [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            13
+          ]
+        ]
+      }
+    },
+    "at_threshold": {
+      "threshold": 0.9,
+      "accepted": 75,
+      "coverage": 0.625,
+      "accepted_errors": 0,
+      "accepted_precision": 1.0
+    },
+    "system": {
+      "model_plus_rules": {
+        "correct": 111,
+        "clarified_safely": 6,
+        "wrong_operation_executed": 3,
+        "examples": [
+          {
+            "id": "challenge-ndvi-07",
+            "text": "How much plant growth is there near Anand Vihar park in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-13",
+            "text": "How green was Wayanad in September 2024?",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndwi-13",
+            "text": "How wet was the Kuttanad region in September 2024?",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-07",
+            "text": "How much of Anand Vihar is paved in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-13",
+            "text": "How developed was Wakad in September 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-tndwi-11",
+            "text": "Is there more open water at Umiam in 2024 than 2023",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "WRONG",
+            "detail": "execute:ndwi"
+          },
+          {
+            "id": "challenge-tndwi-14",
+            "text": "Water extent in Pong reservoir: 2023 against 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "WRONG",
+            "detail": "execute:ndwi"
+          },
+          {
+            "id": "challenge-tndwi-15",
+            "text": "comapre water around Thrissur in 2023 and 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "WRONG",
+            "detail": "execute:ndwi"
+          },
+          {
+            "id": "challenge-rgb-11",
+            "text": "Show Shillong from the satellite in 2024",
+            "intent": "TRUE_COLOR",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          }
+        ]
+      },
+      "rules_only": {
+        "correct": 101,
+        "clarified_safely": 16,
+        "wrong_operation_executed": 3,
+        "examples": [
+          {
+            "id": "challenge-ndvi-07",
+            "text": "How much plant growth is there near Anand Vihar park in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-11",
+            "text": "Is there healthy foliage around Shillong's Laitlum in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-12",
+            "text": "plant health index for vineyards near Nashik, Feb 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-13",
+            "text": "How green was Wayanad in September 2024?",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-15",
+            "text": "vegetaton health around Thrissur in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndwi-13",
+            "text": "How wet was the Kuttanad region in September 2024?",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndwi-15",
+            "text": "watter bodies around Thrissur in 2024",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-01",
+            "text": "How built up is Rajkot in November 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-04",
+            "text": "Concrete cover of Kochi's Edappally in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-07",
+            "text": "How much of Anand Vihar is paved in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-13",
+            "text": "How developed was Wakad in September 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-15",
+            "text": "bult up area around Thrissur in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-sar-15",
+            "text": "backscater around Thrissur in 2024",
+            "intent": "SAR_BACKSCATTER",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-tndwi-11",
+            "text": "Is there more open water at Umiam in 2024 than 2023",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "WRONG",
+            "detail": "execute:ndwi"
+          },
+          {
+            "id": "challenge-tndwi-13",
+            "text": "How did the wetness of Kuttanad differ between May and September 2024?",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-tndwi-14",
+            "text": "Water extent in Pong reservoir: 2023 against 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "WRONG",
+            "detail": "execute:ndwi"
+          },
+          {
+            "id": "challenge-tndwi-15",
+            "text": "comapre water around Thrissur in 2023 and 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "WRONG",
+            "detail": "execute:ndwi"
+          },
+          {
+            "id": "challenge-rgb-04",
+            "text": "Natural colour view of Kochi port in 2024",
+            "intent": "TRUE_COLOR",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-rgb-11",
+            "text": "Show Shillong from the satellite in 2024",
+            "intent": "TRUE_COLOR",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          }
+        ]
+      },
+      "full_pipeline_model_plus_rules": {
+        "correct": 101,
+        "clarified_safely": 19,
+        "wrong_operation_executed": 0,
+        "examples": [
+          {
+            "id": "challenge-ndvi-03",
+            "text": "Are the forests of Nagarhole healthy this far into 2024, check December 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-ndvi-07",
+            "text": "How much plant growth is there near Anand Vihar park in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-13",
+            "text": "How green was Wayanad in September 2024?",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndwi-01",
+            "text": "How much water does Vembanad hold in December 2024?",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndwi-03",
+            "text": "Is Osmansagar holding water in November 2024",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndwi-07",
+            "text": "How full is the Linganamakki reservoir, water index for 2024",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndwi-13",
+            "text": "How wet was the Kuttanad region in September 2024?",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-01",
+            "text": "How built up is Rajkot in November 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndbi-07",
+            "text": "How much of Anand Vihar is paved in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-11",
+            "text": "Is Shillong's Police Bazar heavily built up in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndbi-13",
+            "text": "How developed was Wakad in September 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-sar-04",
+            "text": "Radar return from Kochi port in 2024",
+            "intent": "SAR_BACKSCATTER",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-sar-13",
+            "text": "How bright was Wayanad in radar in September 2024?",
+            "intent": "SAR_BACKSCATTER",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-tndwi-01",
+            "text": "Has Vembanad lost water between December 2023 and December 2024?",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-tndwi-07",
+            "text": "How much did the Linganamakki reservoir water change from 2023 to 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-tndwi-11",
+            "text": "Is there more open water at Umiam in 2024 than 2023",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-tndwi-14",
+            "text": "Water extent in Pong reservoir: 2023 against 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-tndwi-15",
+            "text": "comapre water around Thrissur in 2023 and 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-rgb-11",
+            "text": "Show Shillong from the satellite in 2024",
+            "intent": "TRUE_COLOR",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          }
+        ]
+      },
+      "full_pipeline_rules_only": {
+        "correct": 92,
+        "clarified_safely": 28,
+        "wrong_operation_executed": 0,
+        "examples": [
+          {
+            "id": "challenge-ndvi-03",
+            "text": "Are the forests of Nagarhole healthy this far into 2024, check December 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-ndvi-07",
+            "text": "How much plant growth is there near Anand Vihar park in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-11",
+            "text": "Is there healthy foliage around Shillong's Laitlum in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-12",
+            "text": "plant health index for vineyards near Nashik, Feb 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-13",
+            "text": "How green was Wayanad in September 2024?",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndvi-15",
+            "text": "vegetaton health around Thrissur in 2024",
+            "intent": "NDVI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndwi-01",
+            "text": "How much water does Vembanad hold in December 2024?",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndwi-03",
+            "text": "Is Osmansagar holding water in November 2024",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndwi-07",
+            "text": "How full is the Linganamakki reservoir, water index for 2024",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndwi-13",
+            "text": "How wet was the Kuttanad region in September 2024?",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndwi-15",
+            "text": "watter bodies around Thrissur in 2024",
+            "intent": "NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-01",
+            "text": "How built up is Rajkot in November 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-04",
+            "text": "Concrete cover of Kochi's Edappally in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-07",
+            "text": "How much of Anand Vihar is paved in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-11",
+            "text": "Is Shillong's Police Bazar heavily built up in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-ndbi-13",
+            "text": "How developed was Wakad in September 2024?",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-ndbi-15",
+            "text": "bult up area around Thrissur in 2024",
+            "intent": "NDBI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-sar-04",
+            "text": "Radar return from Kochi port in 2024",
+            "intent": "SAR_BACKSCATTER",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-sar-13",
+            "text": "How bright was Wayanad in radar in September 2024?",
+            "intent": "SAR_BACKSCATTER",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-sar-15",
+            "text": "backscater around Thrissur in 2024",
+            "intent": "SAR_BACKSCATTER",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-tndwi-01",
+            "text": "Has Vembanad lost water between December 2023 and December 2024?",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-tndwi-07",
+            "text": "How much did the Linganamakki reservoir water change from 2023 to 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:location_missing"
+          },
+          {
+            "id": "challenge-tndwi-11",
+            "text": "Is there more open water at Umiam in 2024 than 2023",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-tndwi-13",
+            "text": "How did the wetness of Kuttanad differ between May and September 2024?",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-tndwi-14",
+            "text": "Water extent in Pong reservoir: 2023 against 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-tndwi-15",
+            "text": "comapre water around Thrissur in 2023 and 2024",
+            "intent": "TEMPORAL_NDWI",
+            "outcome": "clarified",
+            "detail": "clarify:date_ambiguous"
+          },
+          {
+            "id": "challenge-rgb-04",
+            "text": "Natural colour view of Kochi port in 2024",
+            "intent": "TRUE_COLOR",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          },
+          {
+            "id": "challenge-rgb-11",
+            "text": "Show Shillong from the satellite in 2024",
+            "intent": "TRUE_COLOR",
+            "outcome": "clarified",
+            "detail": "clarify:analysis_missing"
+          }
+        ]
+      }
+    },
+    "max_masked_jaccard_to_train": 1.0,
+    "items_at_or_above_near_duplicate_threshold": 15,
+    "misclassified": [
+      {
+        "id": "challenge-ndvi-03",
+        "text": "Are the forests of Nagarhole healthy this far into 2024, check December 2024",
+        "intent": "NDVI",
+        "predicted": "CLARIFICATION",
+        "confidence": 0.3212,
+        "acted_on": false
+      },
+      {
+        "id": "challenge-clar-06",
+        "text": "Compare Moga in January 2024 and January 2025",
+        "intent": "CLARIFICATION",
+        "predicted": "TEMPORAL_NDWI",
+        "confidence": 0.6418,
+        "acted_on": false
+      },
+      {
+        "id": "challenge-clar-11",
+        "text": "What can you find in Shillong?",
+        "intent": "CLARIFICATION",
+        "predicted": "UNSUPPORTED",
+        "confidence": 0.5366,
+        "acted_on": false
+      },
+      {
+        "id": "challenge-clar-12",
+        "text": "report for the fields near Nashik",
+        "intent": "CLARIFICATION",
+        "predicted": "NDVI",
+        "confidence": 0.4902,
+        "acted_on": false
+      },
+      {
+        "id": "challenge-clar-13",
+        "text": "How was Wayanad in September 2024?",
+        "intent": "CLARIFICATION",
+        "predicted": "TEMPORAL_NDWI",
+        "confidence": 0.2758,
+        "acted_on": false
+      },
+      {
+        "id": "challenge-unsup-09",
+        "text": "What is the soil moisture at 23.03, 72.58 in February 2025",
+        "intent": "UNSUPPORTED",
+        "predicted": "CLARIFICATION",
+        "confidence": 0.252,
+        "acted_on": false
+      },
+      {
+        "id": "challenge-unsup-10",
+        "text": "How much snow is on the hills near Kodaikanal",
+        "intent": "UNSUPPORTED",
+        "predicted": "NDBI",
+        "confidence": 0.2861,
+        "acted_on": false
+      }
+    ]
+  },
+  "metadata": {
+    "dataset": {
+      "path": "data/intent/satquery_intents_v1.jsonl",
+      "sha256": "3fb655d31efe11a03a9419c49e833b003b9679f0ed28718c7169bf4ff1340d45",
+      "examples": 1018,
+      "per_class": {
+        "CLARIFICATION": 129,
+        "NDBI": 127,
+        "NDVI": 127,
+        "NDWI": 127,
+        "SAR_BACKSCATTER": 127,
+        "TEMPORAL_NDWI": 127,
+        "TRUE_COLOR": 127,
+        "UNSUPPORTED": 127
+      },
+      "split_counts": {
+        "train": 714,
+        "validation": 152,
+        "test": 152
+      },
+      "families": 863,
+      "largest_family": 19,
+      "family_rule": "same label and masked Jaccard >= 0.75, or any label and raw Jaccard >= 0.55 (char 4-grams)"
+    },
+    "training": {
+      "script": "scripts/train_intent_model.py",
+      "features": {
+        "word": {
+          "analyzer": "word",
+          "ngram_range": [
+            1,
+            2
+          ],
+          "min_df": 1,
+          "sublinear_tf": true
+        },
+        "char": {
+          "analyzer": "char_wb",
+          "ngram_range": [
+            2,
+            5
+          ],
+          "min_df": 2,
+          "sublinear_tf": true
+        }
+      },
+      "classifier": "LogisticRegression (multinomial, lbfgs)",
+      "c_grid": [
+        1.0,
+        3.0,
+        10.0,
+        30.0,
+        100.0
+      ],
+      "c_selected": 10.0,
+      "c_cv_macro_f1": {
+        "1.0": 0.8774737728405181,
+        "3.0": 0.8888189275328463,
+        "10.0": 0.8945286421211771,
+        "30.0": 0.8929221746919422,
+        "100.0": 0.8915822675666503
+      },
+      "threshold_rule": "lowest of 0.3..0.95 with accepted precision >= 0.99 on out-of-fold train plus validation predictions",
+      "scikit_learn": "1.9.1",
+      "input": "classifier_text(): places -> PLACE, dates -> DATE"
+    }
+  }
+}

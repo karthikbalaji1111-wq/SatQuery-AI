@@ -13,7 +13,7 @@ import type { MapAoi } from "../map/footprint";
 import { imageryRequested, shownWindow } from "./derive";
 
 /**
- * How the server's standard, model-free workflow is attributed. It mirrors the
+ * How the server's standard workflow (no external AI) is attributed. It mirrors the
  * backend's `STANDARD_INTERPRETER`: a run that named no AI provider.
  */
 export const STANDARD_INTERPRETER = "standard";
@@ -176,7 +176,7 @@ export function useAgentRun({
     // Frozen at the moment of submission, from the values this request actually
     // uses. Every provenance surface reads the snapshot from here on.
     // The EFFECTIVE interpreter. A request naming neither provider nor model
-    // runs the standard workflow - no model at all - so it must never be
+    // runs the standard workflow - no external AI - so it must never be
     // attributed to the deployment's default AI provider. Naming only a model
     // falls through to that default provider, which is what attribution says.
     const explicit = provider !== null || model !== null;

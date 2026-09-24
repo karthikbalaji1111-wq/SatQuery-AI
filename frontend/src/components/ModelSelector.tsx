@@ -11,7 +11,8 @@ const STANDARD_OPTION = "";
  * Which interpreter answers the next question.
  *
  * The first option - and the default - is the STANDARD workflow: the server
- * interprets supported questions deterministically, with no model and no
+ * interprets supported questions locally - a small intent classifier checked
+ * against deterministic rules - with no external AI provider and no
  * credential, so nothing here has to be configured for a query to run. Picking
  * an AI model opts the next run into AI interpretation with that provider; one
  * selection then covers planning, visual analysis and answer synthesis, since
@@ -36,7 +37,7 @@ export function ModelSelector({
   onChange,
   onDefaults,
 }: {
-  /** The selected `model_id`, or `null` for the standard, model-free workflow. */
+  /** The selected `model_id`, or `null` for the standard workflow (no external AI). */
   value: string | null;
   onChange: (selection: { provider: string; model: string } | null) => void;
   /**
@@ -162,7 +163,7 @@ export function ModelSelector({
           );
         }}
       >
-        <option value={STANDARD_OPTION}>Standard · no AI model</option>
+        <option value={STANDARD_OPTION}>Standard · no external AI</option>
         {models.map((model) => (
           <option
             key={`${model.provider}:${model.model_id}`}
@@ -186,7 +187,7 @@ export function ModelSelector({
         <span
           className="model-status"
           data-ready={true}
-          title="Supported questions are interpreted deterministically - no AI model or key is used."
+          title="Supported questions are interpreted locally: a small intent model checked against rules. No external AI provider or key is used."
         >
           Ready
         </span>

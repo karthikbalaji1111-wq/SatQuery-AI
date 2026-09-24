@@ -164,11 +164,22 @@ _UNSUPPORTED: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         _terms(
             r"count(?:s|ing)?|how\s+many|classif\w*|segment\w*|ships?|vessels?|"
-            r"vehicles?|cars?|aircraft|planes?|land[-\s]?cover|land[-\s]?use|objects?"
+            r"vehicles?|cars?|aircraft|planes?|land[-\s]?cover|land[-\s]?use|objects?|"
+            r"species"
         ),
         "Object identification and land-cover classification are not "
         "implemented. SatQuery measures spectral indices and SAR backscatter "
         "over an area.",
+    ),
+    (
+        _terms(
+            r"temperatures?|thermal|heat(?:\s+islands?)?|lst|diseases?|pests?|"
+            r"infestations?|volumes?|cubic|depths?|how\s+deep|bathymetr\w*"
+        ),
+        "Temperature, heat, crop-disease and water volume or depth assessments "
+        "are not implemented. "
+        "SatQuery measures spectral indices (vegetation, water, built-up) and "
+        "SAR backscatter over an area.",
     ),
 )
 
@@ -419,7 +430,12 @@ _LOCATION_END = re.compile(
     r"to\s+(?:compute|calculate|show|measure|find|see|analy[sz]e|compare|check|map|"
     r"detect|identify)|"
     r"today|yesterday|now|currently|latest|recently|last\s+\w+|this\s+(?:week|month|"
-    r"year)|next\s+\w+|past\s+(?:\d+\s+)?\w+|\d+\s+\w+\s+ago)\b",
+    r"year)|next\s+\w+|past\s+(?:\d+\s+)?\w+|\d+\s+\w+\s+ago|"
+    # A change verb after the place belongs to the question, not the place:
+    # "at Ukai dam differed between ..." names Ukai dam, and compares.
+    r"changed|changes?|changing|differ(?:s|ed)?|compared|shr[ai]nk|shrunk|grew|"
+    r"grown|rose|risen|fell|fallen|increased|decreased|declined|evolved|shifted|"
+    r"varied|vary|lost|gained|dropped|dried)\b",
     re.IGNORECASE,
 )
 
@@ -529,20 +545,51 @@ def _names_a_place_despite_terms(phrase: str) -> bool:
     return bool(leftover) and all(word[0].isupper() for word in words[:2])
 
 
+#: "the rice crop near <Name>": a lowercase head noun phrase, then an inner
+#: lead word, then a Capitalised name (or coordinates). The name is the place.
+_INNER_PLACE = re.compile(
+    r"^(?P<head>[^A-Z]*?)\s+(?:near|around|in|at|of|over|outside|by)\s+(?P<tail>[A-Z0-9])"
+)
+
+
+def _first_lowercase_term(phrase: str) -> int | None:
+    """Where the first lowercase analysis word starts, if any.
+
+    "Srinagar for water" names Srinagar; "water" is the request. A Capitalised
+    word ("Forest Hill") is taken as part of a name and left alone.
+    """
+
+    starts = [
+        match.start()
+        for pattern in (*_ANALYSIS_TERMS.values(), _COMPARISON)
+        for match in pattern.finditer(phrase)
+        if match.group(0) == match.group(0).lower() and match.start() > 0
+    ]
+    return min(starts) if starts else None
+
+
 def _scan_places(masked: str, *, allow_term_start: bool) -> _Place:
     deictic: str | None = None
     for lead in _LOCATION_LEAD.finditer(masked):
         begin = lead.end()
         stop = _LOCATION_END.search(masked, begin)
-        end = stop.start() if stop is not None else len(masked)
-        phrase = masked[begin:end]
+        raw = masked[begin : stop.start() if stop is not None else len(masked)]
 
-        # Drop connectors left behind by a removed date ("<place> in |").
+        inner = _INNER_PLACE.match(raw)
+        if inner is not None and inner.group("head").strip():
+            # The lowercase head stays readable: it may be the request itself.
+            begin += inner.start("tail")
+            raw = raw[inner.start("tail") :]
+        cut = _first_lowercase_term(raw)
+        if cut is not None:
+            raw = raw[:cut]
+        # Drop connectors left behind by a removed date ("<place> in |") or by
+        # the cut above ("<place> for").
         previous = None
-        while previous != phrase:
-            previous = phrase
-            phrase = _TRAILING_CONNECTOR.sub("", phrase.rstrip(" ,"))
-        phrase = " ".join(phrase.split())
+        while previous != raw:
+            previous = raw
+            raw = _TRAILING_CONNECTOR.sub("", raw.rstrip(" ,"))
+        phrase = " ".join(raw.split())
 
         if not phrase or _NOT_A_PLACE.fullmatch(phrase):
             continue
@@ -562,7 +609,7 @@ def _scan_places(masked: str, *, allow_term_start: bool) -> _Place:
             place = re.sub(r"\s+in\s+", ", ", place, flags=re.IGNORECASE)
         place = place.strip(" '\"“”‘’")
         if place:
-            return _Place(text=place[:300], span=(begin, begin + len(masked[begin:end])))
+            return _Place(text=place[:300], span=(begin, begin + len(raw)))
     return _Place(text=None, deictic=deictic)
 
 
@@ -683,15 +730,70 @@ def _requested(text: str, pattern: re.Pattern[str]) -> bool:
     return bool(requested_matches(text, pattern))
 
 
-def interpret(question: str, *, today: date | None = None) -> QueryInterpretation:
-    """Map ``question`` to a :class:`QueryInterpretation`, or say what is missing.
+@dataclass(frozen=True)
+class QuestionReading:
+    """Everything the deterministic reader establishes about a question.
 
-    Raises :class:`ClarificationRequiredError` whenever the question does not state
-    something the workflow needs, or asks for something it does not do.
+    Pure extraction - building one never raises and decides nothing. The
+    operation the rules detected is recorded beside the slots, so a caller that
+    has a second opinion on the OPERATION (the local intent model) can supply it
+    to :func:`resolve` while the places, dates and safety guards stay exactly
+    the rules' own.
     """
 
-    today = today or datetime.now(UTC).date()
-    original = " ".join(question.split())
+    #: The question with whitespace collapsed, apostrophes intact.
+    original: str
+    #: The same text with intra-word apostrophes protected (same offsets).
+    text: str
+    exprs: tuple[_DateExpr, ...]
+    place: _Place
+    #: Analyses the vocabularies found, requested (polarity-read), in order.
+    analyses: tuple[str, ...]
+    comparison: bool
+    #: The refusal message for a recognised unsupported request, if any.
+    unsupported: str | None
+    visual: bool
+    polarization: Literal["vv", "vh"]
+    #: The question with its place and dates replaced by ``PLACE`` / ``DATE``:
+    #: what a classifier of the OPERATION should see, so a place name cannot
+    #: decide an analysis ("Forest Hill" is not NDVI).
+    classifier_text: str
+
+    @property
+    def measured(self) -> tuple[str, ...]:
+        return tuple(key for key in self.analyses if key != "imagery")
+
+
+#: Acronyms a user may space or dot out ("N D V I", "S.A.R."). Only these are
+#: joined, so ordinary short words are never glued together.
+_ACRONYMS = frozenset({"NDVI", "NDWI", "NDBI", "SAR", "RGB", "VV", "VH"})
+_SPACED_LETTERS = re.compile(r"(?<![A-Za-z])((?:[A-Za-z][ .]){1,3}[A-Za-z])\.?(?![A-Za-z])")
+
+
+#: An index written out in full. "Difference" here is part of the NAME, not a
+#: request to compare two periods, so the name is read as its acronym.
+_SPELLED_INDEX = re.compile(
+    r"\bnormali[sz]ed[\s-]+difference[\s-]+(vegetation|water|built[\s-]?up)[\s-]+index\b",
+    re.IGNORECASE,
+)
+_SPELLED_ACRONYM = {"vegetation": "NDVI", "water": "NDWI"}
+
+
+def _join_acronyms(text: str) -> str:
+    def join(match: re.Match[str]) -> str:
+        letters = re.sub(r"[ .]", "", match.group(1))
+        return letters if letters.upper() in _ACRONYMS else match.group(0)
+
+    def spelled(match: re.Match[str]) -> str:
+        return _SPELLED_ACRONYM.get(match.group(1).lower(), "NDBI")
+
+    return _SPELLED_INDEX.sub(spelled, _SPACED_LETTERS.sub(join, text))
+
+
+def read_question(question: str) -> QuestionReading:
+    """Extract the slots and the rule-detected operation. Never raises."""
+
+    original = _join_acronyms(" ".join(question.split()))
     text = _protect_apostrophes(original)
 
     # -- dates: found first, so their words are never read as a place --------
@@ -720,9 +822,8 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
     for key, pattern in _ANALYSIS_TERMS.items():
         for match in requested_matches(reading, pattern):
             mentions.append((match.start(), key))
-    analyses: list[str] = list(dict.fromkeys(key for _, key in sorted(mentions)))
+    analyses = tuple(dict.fromkeys(key for _, key in sorted(mentions)))
     measured = [key for key in analyses if key != "imagery"]
-    comparison = _requested(reading, _COMPARISON)
 
     unsupported = next(
         (message for pattern, message in _UNSUPPORTED if _requested(reading, pattern)),
@@ -730,13 +831,79 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
     )
     if unsupported is None and not measured and _requested(reading, _DETECTION):
         unsupported = _DETECTION_MESSAGE
-    if unsupported is not None:
+
+    return QuestionReading(
+        original=original,
+        text=text,
+        exprs=tuple(exprs),
+        place=place,
+        analyses=analyses,
+        comparison=_requested(reading, _COMPARISON),
+        unsupported=unsupported,
+        visual=_requested(reading, _VISUAL),
+        polarization=(
+            "vh" if _requested(reading, _VH_ONLY) and not _requested(reading, _VV) else "vv"
+        ),
+        classifier_text=_classifier_text(text, date_spans, place.span),
+    )
+
+
+def _classifier_text(
+    text: str, date_spans: list[tuple[int, int]], place_span: tuple[int, int] | None
+) -> str:
+    """The question with its slots replaced by placeholder tokens."""
+
+    spans = [(start, end, "DATE") for start, end in date_spans]
+    if place_span is not None:
+        spans.append((place_span[0], place_span[1], "PLACE"))
+    out = text
+    for start, end, token in sorted(spans, reverse=True):
+        out = f"{out[:start]} {token} {out[end:]}"
+    return " ".join(out.replace(_APOSTROPHE, "'").split())
+
+
+def classifier_text(question: str) -> str:
+    """What the intent model classifies - shared by training and inference."""
+
+    return read_question(question).classifier_text
+
+
+def interpret(question: str, *, today: date | None = None) -> QueryInterpretation:
+    """Map ``question`` to a :class:`QueryInterpretation`, or say what is missing.
+
+    The rule-based interpreter: the operation comes from the vocabularies.
+    Raises :class:`ClarificationRequiredError` whenever the question does not
+    state something the workflow needs, or asks for something it does not do.
+    """
+
+    return resolve(read_question(question), today=today)
+
+
+def resolve_operation(
+    reading: QuestionReading,
+    *,
+    analyses: tuple[str, ...] | None = None,
+    comparison: bool | None = None,
+) -> tuple[list[str], bool]:
+    """The operation to run, after every guard - or a clarification.
+
+    Returns the chosen analyses (``["temporal_ndwi"]`` for a comparison) and
+    whether the question compares two periods. The places and dates are not
+    examined here; :func:`resolve` does that.
+    """
+
+    place = reading.place
+    chosen_analyses = reading.analyses if analyses is None else analyses
+    comparison = reading.comparison if comparison is None else comparison
+    measured = [key for key in chosen_analyses if key != "imagery"]
+
+    if reading.unsupported is not None:
         raise _clarify(
-            "analysis_unsupported", unsupported, options=SUPPORTED_OPTIONS,
+            "analysis_unsupported", reading.unsupported, options=SUPPORTED_OPTIONS,
             analyses=measured, location=place.text,
         )
 
-    if _requested(reading, _VISUAL):
+    if reading.visual:
         raise _clarify(
             "requires_ai_model",
             "Describing what is visible in an image needs an AI model. Select one "
@@ -750,7 +917,7 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
 
     # -- sensor contradictions --------------------------------------------------
     optical_asked = [key for key in measured if key in _OPTICAL_INDICES]
-    if optical_asked and _SAR_SOURCE.search(original):
+    if optical_asked and _SAR_SOURCE.search(reading.original):
         raise _clarify(
             "conflicting_request",
             "NDVI, NDWI and NDBI are computed from Sentinel-2 optical imagery; "
@@ -761,7 +928,11 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
             analyses=measured,
             location=place.text,
         )
-    if "sar_backscatter" in measured and _OPTICAL_SOURCE.search(original) and not optical_asked:
+    if (
+        "sar_backscatter" in measured
+        and _OPTICAL_SOURCE.search(reading.original)
+        and not optical_asked
+    ):
         raise _clarify(
             "conflicting_request",
             "SAR backscatter is measured from Sentinel-1 radar, not Sentinel-2 "
@@ -798,7 +969,7 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
             )
         chosen: list[str] = ["temporal_ndwi"]
     else:
-        if not analyses:
+        if not chosen_analyses:
             raise _clarify(
                 "analysis_missing",
                 "What would you like to analyse - vegetation (NDVI), water "
@@ -809,6 +980,30 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
         # Imagery rides along with every analysis; asked for alone, it is the
         # analysis.
         chosen = measured or ["imagery"]
+
+    return chosen, comparison
+
+
+def resolve(
+    reading: QuestionReading,
+    *,
+    analyses: tuple[str, ...] | None = None,
+    comparison: bool | None = None,
+    today: date | None = None,
+) -> QueryInterpretation:
+    """Apply the guards and the slots to an operation.
+
+    ``analyses`` / ``comparison`` override the operation the rules detected -
+    the ONLY thing a caller may override. The safety guards (unsupported
+    requests, visual questions, sensor contradictions) and the place and date
+    rules are the reader's, whoever chose the operation.
+    """
+
+    today = today or datetime.now(UTC).date()
+    chosen, comparison = resolve_operation(
+        reading, analyses=analyses, comparison=comparison
+    )
+    place = reading.place
 
     # -- where --------------------------------------------------------------------
     if place.text is None:
@@ -824,7 +1019,10 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
         raise _clarify("location_missing", message, analyses=chosen)
 
     # -- when ---------------------------------------------------------------------
-    periods = _periods(text, exprs, comparison=comparison, analyses=chosen, place=place.text)
+    periods = _periods(
+        reading.text, list(reading.exprs), comparison=comparison, analyses=chosen,
+        place=place.text,
+    )
     for window in periods:
         problem = observation_period_problem(window, today=today)
         if problem is not None:
@@ -841,15 +1039,12 @@ def interpret(question: str, *, today: date | None = None) -> QueryInterpretatio
             analyses=chosen, location=place.text, periods=periods,
         )
 
-    polarization: Literal["vv", "vh"] = (
-        "vh" if _requested(reading, _VH_ONLY) and not _requested(reading, _VV) else "vv"
-    )
     return QueryInterpretation(
         analyses=tuple(chosen),  # type: ignore[arg-type]
         location_query=place.text,
         windows=tuple(periods),
         comparison=comparison,
-        sar_polarization=polarization,
+        sar_polarization=reading.polarization,
     )
 
 

@@ -953,7 +953,7 @@ describe("App - AI provider and model selection", () => {
     await screen.findByText(OK_RESULT.answer);
 
     const attribution = screen.getByTestId("run-attribution").textContent;
-    expect(attribution).toMatch(/standard workflow · no AI model/);
+    expect(attribution).toMatch(/standard workflow · local intent model, no external AI/);
     expect(attribution).not.toMatch(/Gemini/);
   });
 
@@ -965,10 +965,10 @@ describe("App - AI provider and model selection", () => {
       /ai provider and model/i,
     )) as HTMLSelectElement;
 
-    // The default names no provider: the server's model-free workflow.
+    // The default names no provider: the server's standard workflow (no external AI).
     expect(select.value).toBe("");
     const options = [...select.options];
-    expect(options[0].textContent).toBe("Standard · no AI model");
+    expect(options[0].textContent).toBe("Standard · no external AI");
     expect(options.map((option) => option.value)).toEqual([
       "",
       "gemini-3.6-flash",

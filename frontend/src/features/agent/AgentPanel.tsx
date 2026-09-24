@@ -164,7 +164,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Claude",
   local: "Local",
   mock: "Mock",
-  [STANDARD_INTERPRETER]: "the standard workflow · no AI model",
+  [STANDARD_INTERPRETER]: "the standard workflow · local intent model, no external AI",
 };
 
 function providerLabel(provider: string): string {

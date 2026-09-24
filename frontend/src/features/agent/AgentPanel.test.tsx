@@ -1493,6 +1493,33 @@ describe("AgentPanel - clarification", () => {
     ]);
   });
 
+  it("asks back when the intent model and the rules disagree", async () => {
+    stubAgent({
+      body: {
+        ...CLARIFICATION,
+        clarification: {
+          ...CLARIFICATION.clarification,
+          reason: "analysis_ambiguous",
+          message:
+            "The question could mean vegetation (NDVI) or built-up area (NDBI). Which should be computed?",
+          options: ["vegetation (NDVI)", "built-up area (NDBI)"],
+          understood_analyses: ["vegetation (NDVI)"],
+        },
+      },
+    });
+    render(<AgentPanel />);
+
+    await askAndWait("Show NDVI around Pune in 2024");
+
+    const block = (await screen.findByText(/could mean vegetation/)).closest(
+      ".clarification",
+    ) as HTMLElement;
+    expect(block).toHaveAttribute("data-reason", "analysis_ambiguous");
+    expect(
+      within(block).getAllByRole("listitem").map((li) => li.textContent),
+    ).toEqual(["vegetation (NDVI)", "built-up area (NDBI)"]);
+  });
+
   it("reads 'Needs clarification' in the pipeline, not a failure", async () => {
     stubAgent({ body: CLARIFICATION });
     render(<AgentPanel />);
