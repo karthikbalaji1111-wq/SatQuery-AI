@@ -4,9 +4,17 @@ import { ApiError } from "../api/client";
 import { fetchModelCatalog } from "../api/models";
 import type { ModelOption } from "../api/types";
 
+/** The option meaning "name no provider": the server's standard workflow. */
+const STANDARD_OPTION = "";
+
 /**
- * Which provider and model run the AI reasoning path, from what the server
- * offers. One selection covers planning, visual analysis and answer synthesis:
+ * Which interpreter answers the next question.
+ *
+ * The first option - and the default - is the STANDARD workflow: the server
+ * interprets supported questions deterministically, with no model and no
+ * credential, so nothing here has to be configured for a query to run. Picking
+ * an AI model opts the next run into AI interpretation with that provider; one
+ * selection then covers planning, visual analysis and answer synthesis, since
  * the backend resolves all three roles from the same provider.
  *
  * The catalog - ids, capabilities, and whether a provider is configured -
@@ -28,7 +36,7 @@ export function ModelSelector({
   onChange,
   onDefaults,
 }: {
-  /** The selected `model_id`, or `null` for the deployment's default. */
+  /** The selected `model_id`, or `null` for the standard, model-free workflow. */
   value: string | null;
   onChange: (selection: { provider: string; model: string } | null) => void;
   /**
@@ -118,9 +126,11 @@ export function ModelSelector({
   }, [generation]);
 
   if (error !== null) {
+    // Only the optional AI models are unknown; the standard workflow the next
+    // question uses needs none of them.
     return (
       <span className="model-selector model-selector-error" title={error}>
-        AI unavailable
+        Standard · AI models unavailable
       </span>
     );
   }
@@ -128,7 +138,7 @@ export function ModelSelector({
     return <span className="model-selector">AI …</span>;
   }
 
-  const selected = value ?? defaults.model;
+  const selected = value ?? STANDARD_OPTION;
   const current = models.find((model) => model.model_id === selected);
 
   return (
@@ -138,6 +148,10 @@ export function ModelSelector({
         aria-label="AI provider and model"
         value={selected}
         onChange={(event) => {
+          if (event.target.value === STANDARD_OPTION) {
+            onChange(null);
+            return;
+          }
           const picked = models.find(
             (model) => model.model_id === event.target.value,
           );
@@ -148,6 +162,7 @@ export function ModelSelector({
           );
         }}
       >
+        <option value={STANDARD_OPTION}>Standard · no AI model</option>
         {models.map((model) => (
           <option
             key={`${model.provider}:${model.model_id}`}
@@ -166,6 +181,16 @@ export function ModelSelector({
           </option>
         ))}
       </select>
+      {selected === STANDARD_OPTION && (
+        // Always usable: the standard workflow depends on no provider.
+        <span
+          className="model-status"
+          data-ready={true}
+          title="Supported questions are interpreted deterministically - no AI model or key is used."
+        >
+          Ready
+        </span>
+      )}
       {current !== undefined && (
         <span
           className="model-status"

@@ -70,16 +70,48 @@ def test_health_says_nothing_about_capability() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_an_unconfigured_provider_is_not_ready_and_names_the_variable() -> None:
+def test_an_unconfigured_provider_is_reported_but_does_not_block_readiness() -> None:
+    """M5.5: AI interpretation is optional, so its absence is not unreadiness.
+
+    Supported questions are answered by the standard workflow with no provider,
+    so a deployment holding no key can still do its work. The provider's state
+    is still reported - unready, optional, and naming the variable to set.
+    """
+
     response = client().get("/ready")
 
-    assert response.status_code == 503  # orchestration reads the status code
+    assert response.status_code == 200
     body = response.json()
-    assert body["ready"] is False
+    assert body["ready"] is True
     ai = capabilities(body)["ai_provider"]
     assert ai["ready"] is False
+    assert ai["required"] is False
     # Actionable: which variable to set, not merely that something is wrong.
     assert "GEMINI_API_KEY" in ai["detail"]
+    assert capabilities(body)["interpretation"]["ready"] is True
+
+
+def test_a_missing_required_capability_still_makes_the_deployment_unready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-vacuity for the change above: optional is not the same as ignored.
+
+    The geocoder IS required - no question can be placed without it - so a
+    deployment without one must still answer 503.
+    """
+
+    monkeypatch.setattr(
+        health_route,
+        "_geocoder",
+        lambda settings: health_route.Capability(
+            name="geocoder", ready=False, detail="No geocoder base URL."
+        ),
+    )
+
+    response = client().get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["ready"] is False
 
 
 def test_a_configured_provider_is_ready(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,6 +169,7 @@ def test_every_advertised_capability_is_reported() -> None:
         "application",
         "satellite_catalogs",
         "geocoder",
+        "interpretation",
         "ai_provider",
     }
 
@@ -158,8 +191,12 @@ def test_local_is_not_ready_when_ollama_is_not_running(
 
     response = client().get("/ready")
 
-    assert response.status_code == 503
-    assert "not answering" in capabilities(response.json())["ai_provider"]["detail"]
+    # Reported as unready - but optional since M5.5, so the deployment is not.
+    ai = capabilities(response.json())["ai_provider"]
+    assert ai["ready"] is False
+    assert ai["required"] is False
+    assert "not answering" in ai["detail"]
+    assert response.status_code == 200
 
 
 def test_local_is_not_ready_when_the_model_is_missing(

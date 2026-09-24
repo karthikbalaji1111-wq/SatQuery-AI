@@ -297,8 +297,11 @@ def test_a_configured_key_never_reaches_a_response_or_the_logs(
     root.setLevel(logging.DEBUG)
     try:
         client = TestClient(create_app(), raise_server_exceptions=False)
+        # The provider is named: since M5.5 an unnamed question takes the
+        # model-free standard workflow, which would never touch the key.
         response = client.post(
-            "/api/v1/query/agent", json={"question": "show me Chennai"}
+            "/api/v1/query/agent",
+            json={"question": "show me Chennai", "provider": "nvidia"},
         )
     finally:
         root.removeHandler(handler)

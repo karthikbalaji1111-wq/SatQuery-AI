@@ -115,6 +115,30 @@ describe("response validation - an unusable response is refused", () => {
     expect(error.message).toMatch(/status/);
   });
 
+  it("accepts a clarification that carries its message and options", () => {
+    const body = {
+      ...AGENT,
+      status: "needs_clarification",
+      answer: null,
+      clarification: {
+        reason: "date_missing",
+        message: "For which date or period?",
+        options: [],
+        understood_analyses: ["vegetation (NDVI)"],
+        understood_location: "Chennai",
+        understood_periods: [],
+      },
+    };
+    expect(asAgentResult(body)).toBe(body);
+  });
+
+  it("refuses a clarification status with no clarification to show", () => {
+    const error = rejects(() =>
+      asAgentResult({ ...AGENT, status: "needs_clarification", answer: null }),
+    );
+    expect(error.code).toBe("invalid_response");
+  });
+
   it("refuses an agent result whose evidence is missing", () => {
     expect(rejects(() => asAgentResult({ ...AGENT, evidence: {} })).message).toMatch(
       /items/,

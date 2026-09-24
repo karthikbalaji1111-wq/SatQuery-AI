@@ -98,6 +98,55 @@ describe("BackendStatus", () => {
     );
   });
 
+  it("stays Operational when only the optional AI provider is missing", async () => {
+    // M5.5: supported questions need no AI provider, so the server reports it
+    // as optional and remains ready. The header must not invent a degradation.
+    stub({
+      "/health": { body: HEALTH },
+      "/ready": {
+        body: {
+          ...READY,
+          capabilities: [
+            { name: "application", ready: true, detail: "SatQuery API 0.1.0." },
+            { name: "interpretation", ready: true, detail: "Standard workflow." },
+            {
+              name: "ai_provider",
+              ready: false,
+              required: false,
+              detail: "gemini is the selected AI provider and GEMINI_API_KEY is not set.",
+            },
+          ],
+        },
+      },
+    });
+    render(<BackendStatus />);
+
+    expect(await screen.findByText("Operational")).toBeInTheDocument();
+    expect(screen.queryByText(/Degraded/)).not.toBeInTheDocument();
+  });
+
+  it("names only the REQUIRED capability when the deployment is degraded", async () => {
+    stub({
+      "/health": { body: HEALTH },
+      "/ready": {
+        status: 503,
+        body: {
+          ...READY,
+          ready: false,
+          capabilities: [
+            { name: "geocoder", ready: false, detail: "No geocoder base URL." },
+            { name: "ai_provider", ready: false, required: false, detail: "No key." },
+          ],
+        },
+      },
+    });
+    render(<BackendStatus />);
+
+    const status = await screen.findByText(/Degraded/);
+    expect(status).toHaveTextContent("Degraded — geocoder");
+    expect(status).not.toHaveTextContent("ai provider");
+  });
+
   it("keeps the previous wording when readiness cannot be determined", async () => {
     // An older backend, or a probe that failed: unknown is not failed.
     stub({ "/health": { body: HEALTH } });

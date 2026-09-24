@@ -2,6 +2,7 @@ import { Fragment } from "react";
 
 import { SarBackscatterPanel } from "./SarBackscatterPanel";
 import type {
+  AgentClarification,
   AgentResult,
   AgentStatus,
   AgentToolName,
@@ -26,7 +27,7 @@ import {
   visualStepState,
 } from "./derive";
 import { describeImageryError } from "../query/imageryError";
-import { useAgentRun } from "./agentRun";
+import { STANDARD_INTERPRETER, useAgentRun } from "./agentRun";
 import type { AgentRun, AgentRunHandlers } from "./agentRun";
 
 /**
@@ -34,11 +35,6 @@ import type { AgentRun, AgentRunHandlers } from "./agentRun";
  * the box rather than submitting: the question stays the user's to edit.
  */
 const EXAMPLE_QUESTIONS = [
-  {
-    label: "Visible water",
-    question:
-      "Is there visible water in the Sentinel-2 image of Marina Beach, Chennai?",
-  },
   {
     label: "Water index",
     question: "What is the NDWI of Marina Beach, Chennai in January 2025?",
@@ -53,8 +49,14 @@ const EXAMPLE_QUESTIONS = [
     question: "Analyse the built-up area around Hyderabad in December 2024.",
   },
   {
+    label: "Radar backscatter",
+    question:
+      "Analyse SAR backscatter around Marina Beach, Chennai in January 2025.",
+  },
+  {
     label: "Temporal comparison",
-    question: "Compare NDWI at Marina Beach between January and July 2025.",
+    question:
+      "Compare water at Marina Beach, Chennai between January 2024 and January 2025.",
   },
 ];
 
@@ -142,6 +144,12 @@ const STATUS_NOTICES: Record<Exclude<AgentStatus, "ok">, StatusNotice> = {
       "The measurements are unaffected and remain valid - the withheld text is the model's prose, not the analysis. The failed checks are listed below.",
     retryable: true,
   },
+  needs_clarification: {
+    summary: "No analysis ran: the question needs one more detail.",
+    detail:
+      "Nothing was measured - SatQuery asks rather than guessing a place, a period or an analysis. The question is shown under the query box.",
+    retryable: false,
+  },
 };
 
 /**
@@ -156,6 +164,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Claude",
   local: "Local",
   mock: "Mock",
+  [STANDARD_INTERPRETER]: "the standard workflow · no AI model",
 };
 
 function providerLabel(provider: string): string {
@@ -440,12 +449,60 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
         </div>
       )}
 
+      {result?.status === "needs_clarification" && result.clarification && (
+        <ClarificationPrompt clarification={result.clarification} />
+      )}
+
       {askState.status === "error" && (
         <p className="result-error" role="alert">
           {askState.message}
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * The question the server put back, placed where the user will answer it.
+ *
+ * Everything shown is the server's: its message, the choices it named as
+ * supported, and what it had already understood. Nothing is inferred here and
+ * nothing is run - editing the question and asking again is the answer.
+ */
+function ClarificationPrompt({
+  clarification,
+}: {
+  clarification: AgentClarification;
+}) {
+  const understood = [
+    ...clarification.understood_analyses,
+    ...(clarification.understood_location
+      ? [clarification.understood_location]
+      : []),
+    ...clarification.understood_periods.map(
+      (period) => `${period.start_date} → ${period.end_date}`,
+    ),
+  ];
+  return (
+    <div
+      className="clarification"
+      role="status"
+      data-reason={clarification.reason}
+    >
+      <p className="clarification-message">{clarification.message}</p>
+      {clarification.options.length > 0 && (
+        <ul className="clarification-options" aria-label="Supported choices">
+          {clarification.options.map((option) => (
+            <li key={option}>{option}</li>
+          ))}
+        </ul>
+      )}
+      {understood.length > 0 && (
+        <p className="clarification-understood">
+          Understood so far: {understood.join(" · ")}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -475,7 +532,9 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
       ? busy
         ? "running"
         : "idle"
-      : result.trace.plan === null || steps.length === 0
+      : result.status === "needs_clarification"
+        ? "clarify"
+        : result.trace.plan === null || steps.length === 0
         ? "not-run"
         : failed
           ? "failed"
@@ -487,6 +546,7 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
     idle: "Awaiting query",
     running: "Running",
     "not-run": "Not run",
+    clarify: "Needs clarification",
     failed: "Failed",
     partial: "Partial",
     complete: "Complete",
@@ -978,6 +1038,13 @@ function RunAttribution({
   asked?: { question: string; provider: string | null; model: string | null } | null;
 }) {
   if (!asked || (asked.provider === null && asked.model === null)) return null;
+  if (asked.provider === STANDARD_INTERPRETER) {
+    return (
+      <p className="run-attribution" data-testid="run-attribution">
+        Interpreted by {providerLabel(asked.provider)}
+      </p>
+    );
+  }
   return (
     <p className="run-attribution" data-testid="run-attribution">
       Produced by{" "}

@@ -13,6 +13,12 @@ export interface Capability {
   ready: boolean;
   /** Why, in the server's own words - populated whether ready or not. */
   detail: string;
+  /**
+   * Whether readiness depends on it. The AI provider is optional: supported
+   * questions are answered by the standard workflow without one. Absent means
+   * required (older servers sent no such field).
+   */
+  required?: boolean;
 }
 
 /**
@@ -756,22 +762,53 @@ export interface AgentEvidence {
 }
 
 /**
- * `ok` carries an answer. The other three do not: the answer is withheld or
+ * `ok` carries an answer. The next three do not: the answer is withheld or
  * was never produced, and the deterministic evidence is returned instead.
+ * `needs_clarification` means nothing was measured: the question did not say
+ * something the workflow needs, and `clarification` says what.
  */
 export type AgentStatus =
   | "ok"
   | "planner_unavailable"
   | "synthesis_unavailable"
-  | "answer_withheld";
+  | "answer_withheld"
+  | "needs_clarification";
+
+/** Why a question could not be executed as asked - one missing fact each. */
+export type ClarificationReason =
+  | "analysis_missing"
+  | "analysis_unsupported"
+  | "location_missing"
+  | "location_not_found"
+  | "area_too_large"
+  | "date_missing"
+  | "date_ambiguous"
+  | "date_invalid"
+  | "comparison_incomplete"
+  | "conflicting_request"
+  | "requires_ai_model";
+
+/**
+ * A question put back to the user instead of a guess. System-authored; the
+ * `understood_*` fields repeat what the question DID establish.
+ */
+export interface AgentClarification {
+  reason: ClarificationReason;
+  message: string;
+  options: string[];
+  understood_analyses: string[];
+  understood_location: string | null;
+  understood_periods: TimeRange[];
+}
 
 export interface AgentQuestionRequest {
   question: string;
   /**
-   * Which inference backend answers this run. Omitted uses the server's
-   * configured default. It selects an inference backend and nothing else -
-   * the deterministic pipeline, the grounding rules and the evidence shape
-   * are identical either way.
+   * Which AI backend interprets this run. Omitted - the default - runs the
+   * STANDARD workflow: deterministic interpretation, no model, no credential.
+   * Naming one opts this run into AI interpretation and changes nothing else -
+   * the deterministic pipeline, the grounding rules and the evidence shape are
+   * identical either way.
    */
   provider?: string | null;
   /** Which model that provider should use for this run. */
@@ -840,6 +877,8 @@ export interface AgentFailure {
 
 export interface AgentResult {
   failure?: AgentFailure | null;
+  /** Present exactly when `status` is `needs_clarification`. */
+  clarification?: AgentClarification | null;
   status: AgentStatus;
   answer: string | null;
   trace: AgentTrace;

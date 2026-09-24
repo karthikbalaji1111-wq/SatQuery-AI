@@ -12,6 +12,12 @@ import type { AiProvider } from "../../api/types";
 import type { MapAoi } from "../map/footprint";
 import { imageryRequested, shownWindow } from "./derive";
 
+/**
+ * How the server's standard, model-free workflow is attributed. It mirrors the
+ * backend's `STANDARD_INTERPRETER`: a run that named no AI provider.
+ */
+export const STANDARD_INTERPRETER = "standard";
+
 export type AskState =
   | { status: "idle" }
   | { status: "loading" }
@@ -169,13 +175,15 @@ export function useAgentRun({
     const startedAt = Date.now();
     // Frozen at the moment of submission, from the values this request actually
     // uses. Every provenance surface reads the snapshot from here on.
+    // The EFFECTIVE interpreter. A request naming neither provider nor model
+    // runs the standard workflow - no model at all - so it must never be
+    // attributed to the deployment's default AI provider. Naming only a model
+    // falls through to that default provider, which is what attribution says.
+    const explicit = provider !== null || model !== null;
     const submitted: AskedRequest = {
       question: question.trim(),
-      // The EFFECTIVE provider: what the request names, or the deployment
-      // default it will fall through to. Either way it is what produced this
-      // result, which is what attribution has to say.
-      provider: provider ?? defaultProvider ?? null,
-      model: model ?? defaultModel ?? null,
+      provider: explicit ? (provider ?? defaultProvider ?? null) : STANDARD_INTERPRETER,
+      model: explicit ? (model ?? defaultModel ?? null) : null,
     };
     setAsked(submitted);
     try {

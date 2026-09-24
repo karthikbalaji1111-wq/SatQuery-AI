@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.core.errors import AppError
 from app.core.limits import rate_limited, workflow_slot
 from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
@@ -14,6 +13,12 @@ from app.services.agent.providers.factory import (
 )
 from app.services.agent.schemas import AgentQuestionRequest, AgentResult
 from app.services.agent.service import AgentService
+from app.services.agent.standard import (
+    STANDARD_INTERPRETER,
+    StandardIntentParser,
+    StandardPlanner,
+    StandardReport,
+)
 from app.services.ai import AiService, ParsePromptRequest
 from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService
 from app.services.query import (
@@ -35,18 +40,18 @@ def get_query_service() -> QueryService:
 
 
 def get_ai_service() -> AiService:
-    """Production provider for :class:`AiService` - a provider-resolved parser.
+    """Production provider for :class:`AiService` - the standard parser.
 
     Overridden in tests to inject ``MockIntentParser`` or a fake parser.
 
-    The provider comes from the same factory the agent path uses, so
-    ``AI_PROVIDER`` governs this endpoint too - there is one selection
-    mechanism, not a second one here. A missing credential for the selected
-    provider raises at request time and is reported as an upstream failure; it
-    is never answered by the other provider.
+    A prompt that names no provider is parsed deterministically, with no model
+    and no credential: the same interpretation the standard agent workflow
+    uses, returned as an intent. An AI provider parses only when the request
+    names one (see :func:`parse_intent`), through the same factory the agent
+    path uses - one selection mechanism, and never a fallback between them.
     """
 
-    return AiService(parser=get_intent_parser())
+    return AiService(parser=StandardIntentParser())
 
 
 def get_query_execution_service() -> QueryExecutionService:
@@ -101,26 +106,35 @@ def build_agent_service(
     )
 
 
-def get_agent_service() -> AgentService | None:
-    """Provider for :class:`AgentService`; overridden in tests.
+def build_standard_agent_service() -> AgentService:
+    """The provider-independent workflow: no model, no credential.
 
-    Returns ``None`` instead of raising when the CONFIGURED DEFAULT provider
-    cannot be built. FastAPI resolves a dependency before the handler body
-    runs, so raising here decided the run before the request's own
-    ``provider`` had been read: a deployment holding only an NVIDIA key could
-    not use NVIDIA, because constructing the unconfigured Gemini default
-    failed first - and the error then named Gemini, a provider the caller had
-    not asked for.
-
-    The failure is not swallowed. The handler re-raises it, unchanged, when the
-    request does not name a provider of its own, so an unconfigured deployment
-    still gets the same actionable 502 naming the variable to set.
+    The planner and the report are deterministic; the executor is the SAME
+    executor, over the same deterministic services, that every AI provider
+    uses. There is no visual analyst, because describing a picture is the one
+    step that needs a model - the standard planner asks for clarification
+    rather than proposing it.
     """
 
-    try:
-        return build_agent_service()
-    except AppError:
-        return None
+    return AgentService(
+        planner=StandardPlanner(),
+        executor=AgentExecutor(
+            query_execution_service=QueryExecutionService(),
+            analysis_service=AnalysisService(),
+        ),
+        synthesizer=StandardReport(),
+    )
+
+
+def get_agent_service() -> AgentService:
+    """Provider for :class:`AgentService`; overridden in tests.
+
+    The standard workflow, always constructible. A question that names no AI
+    provider is answered by it, so a supported question never waits on - or
+    fails for want of - a language model. AI is opted into per request.
+    """
+
+    return build_standard_agent_service()
 
 
 @router.post(
@@ -136,8 +150,13 @@ async def parse_intent(
     """Convert a natural-language request into a structured ``SatQueryIntent``.
 
     This endpoint ONLY parses text into an intent. It does not geocode, build a
-    plan, call STAC, retrieve imagery, or perform external AI inference."""
+    plan, call STAC or retrieve imagery. With no ``provider`` it performs no AI
+    inference either: the standard parser answers, and a prompt it cannot map
+    is a 422 ``clarification_required`` naming what is missing. A named
+    provider parses with that provider and no other."""
 
+    if request.provider is not None:
+        service = AiService(parser=get_intent_parser(provider=request.provider))
     return await service.parse_intent(request.prompt)
 
 
@@ -232,27 +251,29 @@ async def answer_question(
     execution, no grounding and no model call of its own - ``AgentService`` owns
     all of that.
 
-    A request may name a ``provider`` and a ``model`` to select the inference
-    backend for that run. They change nothing else: the same plan, the same
-    deterministic tools, the same grounding and the same evidence shape. A
-    model that cannot accept an image is refused before the request is made
-    rather than being asked to describe a picture it never received."""
+    A request that names neither a ``provider`` nor a ``model`` runs the
+    STANDARD workflow: deterministic interpretation, the same tools, a fixed
+    sentence per measured value, the same grounding. No model is called and no
+    credential is needed; a question outside the supported set returns
+    ``needs_clarification`` instead of a guess.
+
+    Naming a ``provider`` or a ``model`` opts that run into AI interpretation
+    with that backend. It changes nothing else: the same deterministic tools,
+    the same grounding and the same evidence shape. A model that cannot accept
+    an image is refused before the request is made rather than being asked to
+    describe a picture it never received."""
 
     # One correlated scope for the whole run. Every line any layer emits while
     # it is open carries the same id, which is what makes an interleaved log
-    # readable - and the provider is recorded here because this is the only
+    # readable - and the interpreter is recorded here because this is the only
     # layer that knows which one was selected.
+    explicit = request.provider is not None or request.model is not None
     with workflow(
         "agent",
-        provider=request.provider or "configured-default",
-        model=request.model or "configured-default",
+        provider=request.provider or ("configured-default" if explicit else STANDARD_INTERPRETER),
+        model=request.model or ("configured-default" if explicit else "none"),
     ):
-        if request.provider is not None or request.model is not None:
-            # The request names its own backend, so the configured default is
-            # irrelevant to this run - including whether it could be built at all.
+        if explicit:
+            # AI was asked for by name; only then is a provider built.
             service = build_agent_service(request.provider, request.model)
-        elif service is None:
-            # No override, and the default could not be built: surface that now,
-            # with the message naming the provider actually selected.
-            service = build_agent_service()
         return await service.answer(request)

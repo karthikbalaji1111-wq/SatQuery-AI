@@ -429,38 +429,59 @@ def test_parse_endpoint_never_calls_geospatial_stac_or_imagery(
 # --------------------------------------------------------------------------- #
 
 
-def test_production_get_ai_service_uses_gemini_parser(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The wiring, proven with a credential this test supplies itself.
+def test_production_get_ai_service_uses_the_standard_parser() -> None:
+    """M5.5: a prompt naming no provider needs no model and no credential.
 
-    It asserts WHICH parser the factory builds, so it needs the provider to be
-    configured - and it must not borrow that configuration from whoever is
-    running the suite. The value is deliberately not a real key shape: nothing
-    here sends a request, and the factory only needs the credential to exist.
+    No key is configured in the suite, and the production dependency must
+    still build - it is the deterministic parser, not a provider adapter.
     """
 
-    monkeypatch.setenv("AI_PROVIDER", "gemini")
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-a-real-credential")
-    get_settings.cache_clear()
+    from app.services.agent.standard import StandardIntentParser
 
     service = get_ai_service()
     assert isinstance(service, AiService)
-    assert isinstance(service._parser, GeminiIntentParser)
+    assert isinstance(service._parser, StandardIntentParser)
 
 
-def test_production_get_ai_service_without_a_credential_fails_honestly() -> None:
-    """The counter-case, which the suite could not state before.
+def test_a_named_provider_uses_that_providers_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring for AI parsing, proven with a credential supplied here.
 
-    With no credential configured - the default for every test now - the
-    factory refuses and names the variable to set, rather than constructing a
-    parser that would fail at request time.
+    The value is deliberately not a real key shape: the parser is only
+    constructed and its request intercepted, so nothing is sent.
     """
 
-    with pytest.raises(UpstreamServiceError) as raised:
-        get_ai_service()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-a-real-credential")
+    get_settings.cache_clear()
+    seen: list[type] = []
 
-    assert "GEMINI_API_KEY" in str(raised.value)
+    async def record(self: object, prompt: str) -> None:
+        seen.append(type(self))
+        raise UpstreamServiceError("intercepted")
+
+    monkeypatch.setattr(GeminiIntentParser, "parse_intent", record)
+    response = TestClient(create_app()).post(
+        "/api/v1/query/parse", json={"prompt": "anything", "provider": "gemini"}
+    )
+
+    assert seen == [GeminiIntentParser]
+    assert response.status_code == 502
+
+
+def test_a_named_provider_without_a_credential_fails_honestly() -> None:
+    """The counter-case: AI asked for by name, and no key to answer with.
+
+    The request fails naming the variable to set, rather than silently falling
+    back to the standard parser - a result must be attributable to what ran.
+    """
+
+    response = TestClient(create_app()).post(
+        "/api/v1/query/parse", json={"prompt": "anything", "provider": "gemini"}
+    )
+
+    assert response.status_code == 502
+    assert "GEMINI_API_KEY" in response.json()["error"]["message"]
 
 
 def test_provider_coupling_is_confined_to_parser_module() -> None:
