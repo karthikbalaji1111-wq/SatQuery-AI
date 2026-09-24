@@ -692,6 +692,53 @@ describe("App - agent question reaches the map", () => {
     );
   });
 
+  it("keeps the map in place, marked as previous, while the next question runs", async () => {
+    // M6 continuity: the map no longer blanks (and the intro no longer
+    // reappears) the moment a new question is sent. The previous scene stays,
+    // SAID to be previous, until the new answer replaces it.
+    let release!: (response: Response) => void;
+    const router = stubRouter({
+      "/health": { status: "ok", service: "SatQuery API", version: "0.1.0", environment: "test" },
+      "/query/agent": AGENT_RESULT,
+    });
+    const route = router.getMockImplementation()!;
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Is there visible water in Marina Beach, Chennai?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+    await waitFor(() =>
+      expect(within(mapPanelNow()).getByRole("status")).toHaveTextContent(AGENT_SCENE),
+    );
+
+    router.mockImplementation((url: string) =>
+      String(url).includes("/query/agent")
+        ? new Promise<Response>((resolve) => { release = resolve; })
+        : route(url),
+    );
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Show water around Marina Beach, Chennai in January 2025" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+
+    await waitFor(() =>
+      expect(mapPanelNow()).toHaveTextContent(
+        "Previous result · updating for the new question",
+      ),
+    );
+    expect(mapPanelNow()).toHaveTextContent(AGENT_SCENE);
+    expect(screen.queryByText(/Ask a question about a place and a time/)).toBeNull();
+
+    await act(async () => {
+      release({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify(AGENT_RESULT)),
+      } as Response);
+    });
+    expect(mapPanelNow()).not.toHaveTextContent("Previous result");
+  });
+
   it("discards a pending manual preview when an agent run takes ownership", async () => {
     let finishPreview!: (response: Response) => void;
     const pending = new Promise<Response>((resolve) => { finishPreview = resolve; });

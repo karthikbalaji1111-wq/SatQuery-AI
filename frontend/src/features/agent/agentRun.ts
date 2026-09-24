@@ -20,7 +20,13 @@ export const STANDARD_INTERPRETER = "standard";
 
 export type AskState =
   | { status: "idle" }
-  | { status: "loading" }
+  /**
+   * `previous` is the result on screen when this run started, kept so the
+   * workspace does not blank out while the new question runs. It is shown
+   * ONLY as a previous result - marked stale - and is replaced, never merged,
+   * when this run completes.
+   */
+  | { status: "loading"; previous: AgentResult | null }
   | { status: "error"; message: string }
   | { status: "done"; result: AgentResult; elapsedMs: number };
 
@@ -94,10 +100,23 @@ export interface AgentRun {
    */
   asked: AskedRequest | null;
   askState: AskState;
+  /** The completed result of the CURRENT run, or null while one is running. */
   result: AgentResult | null;
+  /**
+   * What the result panels show: the current result, or - while a new run is
+   * in flight - the previous one, with `stale` set so it is presented as such.
+   */
+  displayed: AgentResult | null;
+  /** `displayed` belongs to an earlier question than the one now running. */
+  stale: boolean;
   busy: boolean;
   canAsk: boolean;
   handleAsk: (event: FormEvent) => Promise<void>;
+  /**
+   * Put `question` in the box and run it - for an example or a clarification
+   * choice. Refused while a run is in flight, exactly like the Run button.
+   */
+  ask: (question: string) => Promise<void>;
   clear: () => void;
 }
 
@@ -145,6 +164,8 @@ export function useAgentRun({
   const busy = askState.status === "loading";
   const canAsk = question.trim() !== "" && !busy;
   const result = askState.status === "done" ? askState.result : null;
+  const previous = askState.status === "loading" ? askState.previous : null;
+  const displayed = result ?? previous;
 
   function reset() {
     onImagery?.(null);
@@ -156,18 +177,36 @@ export function useAgentRun({
   async function handleAsk(event: FormEvent) {
     event.preventDefault();
     if (!canAsk) return;
+    await submit(question);
+  }
 
+  async function ask(text: string) {
+    const trimmed = text.trim();
+    if (trimmed === "" || busy) return;
+    setQuestion(trimmed);
+    await submit(trimmed);
+  }
+
+  async function submit(text: string) {
     const ticket = ++ticketRef.current;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
     onStart?.();
-    setAskState({ status: "loading" });
-    // A new question invalidates whatever is on the map. Cleared before the
-    // request rather than after it, so a slow run never leaves the previous
-    // scene on screen beside a newer question.
-    reset();
+    // The previous result stays on screen, MARKED as previous, until this run
+    // answers - the map keeps its place and the panels do not blank out. It is
+    // never merged with the new result: on completion every layer is
+    // replaced (to null where the new run has none), and on failure cleared.
+    setAskState((current) => ({
+      status: "loading",
+      previous:
+        current.status === "done"
+          ? current.result
+          : current.status === "loading"
+            ? current.previous
+            : null,
+    }));
 
     // Round-trip time, measured here. The backend reports no timing of its
     // own, so this is labelled as what it is - the request - and never split
@@ -181,7 +220,7 @@ export function useAgentRun({
     // falls through to that default provider, which is what attribution says.
     const explicit = provider !== null || model !== null;
     const submitted: AskedRequest = {
-      question: question.trim(),
+      question: text.trim(),
       provider: explicit ? (provider ?? defaultProvider ?? null) : STANDARD_INTERPRETER,
       model: explicit ? (model ?? defaultModel ?? null) : null,
     };
@@ -228,6 +267,8 @@ export function useAgentRun({
       // outcome, not a fault the reader needs to see.
       if (ticket !== ticketRef.current) return;
       setAskState({ status: "error", message: errorMessage(error) });
+      // The previous result was only held while this run could replace it.
+      reset();
     }
   }
 
@@ -252,9 +293,12 @@ export function useAgentRun({
     setQuestion,
     askState,
     result,
+    displayed,
+    stale: busy && previous !== null,
     busy,
     canAsk,
     handleAsk,
+    ask,
     clear,
   };
 }

@@ -237,6 +237,12 @@ interface MapPanelProps {
   variant?: "imagery" | "locator";
   /** A run is in flight, so the frame is awaiting a scene rather than empty. */
   busy?: boolean;
+  /**
+   * What is drawn belongs to the PREVIOUS question while a new one runs. The
+   * map keeps its place instead of blanking out, and says so; the new result
+   * replaces every layer when it arrives.
+   */
+  stale?: boolean;
   /** Injected in tests; jsdom has no WebGL, so the real map cannot be built. */
   createMap?: MapFactory;
 }
@@ -262,6 +268,7 @@ export function MapPanel({
   change = null,
   variant = "imagery",
   busy = false,
+  stale = false,
   createMap,
 }: MapPanelProps) {
   // The locator never draws a raster: it exists to say where, on a map a
@@ -415,6 +422,11 @@ export function MapPanel({
       />
       {locator && aoi && <LocatorExtent aoi={aoi} />}
       {!locator && <div className="imagery-scrim" aria-hidden="true" />}
+      {!locator && stale && (
+        <div className="map-updating" aria-live="polite">
+          Previous result · updating for the new question
+        </div>
+      )}
       {!locator && (
         <ImageryCaption imagery={imagery} ndwi={ndwi} change={change} />
       )}

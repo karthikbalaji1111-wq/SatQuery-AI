@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 28 (location-outage UX). Section 23 (the scientific core,
+current figures are in section 29 (M6 product completion). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2460,3 +2460,81 @@ attributable without Render logs.
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **379 passed** (372 before) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 29. M6 - Product completion (workspace UX) - IMPLEMENTED (2026-09-24)
+
+Frontend only. No backend file changed: the scientific core (M0-M5), the
+intent model v2 and its thresholds, routing, STAC selection, the geocoder and
+every formula are untouched (backend suite unchanged at 3062).
+
+**Audit (before):** the answer headline was the prose sentence ("The mean NDVI
+was 0.5204 index. Scene S2B_... was selected...") with no operation, place,
+period or quality context; a comparison was not laid out as two periods and a
+change, and the evidence panel set the EARLIER observation's mean alone under
+"NDWI mean"; the pipeline showed internal tool names; the evidence was a flat
+grid plus a long raw citation list, and the pixel-quality (M3), radiometric
+(M4) and grid (M5) validation the API returns was never shown; area-too-large,
+not-found and unsupported all read "the question needs one more detail", and a
+validated refusal (scene found, index withheld by M4) read like a success;
+every new question wiped the map and panels and re-showed the intro; examples
+and clarification choices only filled the box; Enter did not run.
+
+**What changed:**
+- `features/agent/resultModel.ts` (new, pure): `outcomeOf` (success /
+  clarification / location_not_found / location_unavailable / area_too_large /
+  unsupported / insufficient_evidence / analysis_refused / provider_failure),
+  `resultSummary` (index / sar / temporal / imagery / none, read by the
+  backend's own evidence ids), `resultContext`, `formatPeriod` (a whole month
+  as "December 2024"; nothing moved), `runStages` (the stages the RESPONSE
+  shows happened, stopping at the first that did not).
+- Answer panel: an outcome chip, then an operation-specific result card - index
+  (title, signed mean, valid pixels, range), SAR (VV/VH/VV-VH dB), temporal
+  (Earlier -> Later with period, acquisition and mean, then mean difference and
+  paired-pixel change, "no cause is inferred") - then Location / Period /
+  Scene / Scenes matched / Pixel quality, then the grounded sentence as the
+  explanation. Distinct notices per refusal kind; a validated refusal keeps the
+  server's reason under "Why".
+- Pipeline: while running, one honest sentence and a live elapsed counter (one
+  request, no progress events - no stage is claimed early); afterwards the
+  plain-language stages (Understand question, Resolve location, Find satellite
+  scenes, Validate imagery, Run analysis, Check answer) with the technical
+  trace kept as a secondary row.
+- Evidence: source catalog host; scenes matched with the server's selection
+  rule per sensor (S2 lowest cloud cover, S1 earliest); "Quality &
+  validation" (pixel quality per index/observation, radiometric state and
+  baseline, grid verification); "Observations compared" with each
+  observation's own mean; the citation list folded under "Technical evidence ·
+  N items" (still in the DOM, still exported).
+- Query: a capability line under the input; Enter runs (Shift+Enter newline;
+  IME-safe); examples and clarification choices RUN the real question through
+  the same request (`useAgentRun.ask`); refused while a run is in flight.
+- Continuity: a new question no longer wipes the map or panels. The previous
+  result stays, marked "Previous result" (dimmed; map chip "Previous result ·
+  updating"), and is REPLACED, never merged, on completion; cleared on error.
+  Latest-wins tickets and aborts unchanged.
+- Copy fixes: the intro no longer says results arrive "as each stage returns";
+  the visual panel no longer says it is "waiting for the model" in the
+  standard workflow; the idle map note no longer sits under the intro card; a
+  scrolling pipeline strip was squeezed to a sliver by the centre grid at
+  1280x800 (now sizes to content).
+
+**Tests:** `resultModel.test.ts` (29), `AgentPanel.m6.test.tsx` (29: NDVI,
+NDWI, NDBI, SAR, temporal cards; seven distinct states plus a no-two-alike
+check; refusal reason; evidence source/rule/validation/observations/technical;
+Enter; running state; duplicate-submission refusal; AOI handoff; stale then
+replaced; latest-wins via the hook; failure clears the stale result),
+`App.test.tsx` (+1: the map keeps its place, marked previous). Fixtures in
+`m6Fixtures.ts` carry the real production values. Deliberately updated (the
+brief changed the behaviour): examples and clarification choices now run;
+"clears the previous scene" -> "keeps the map until replaced"; temporal
+headline labels; the year-boundary range now appears twice (asserted twice);
+the SAR "never implies a measurement" scan excludes only the static capability
+line.
+
+| Check | Result |
+| --- | --- |
+| `npm run test` | **438 passed** (379 before) |
+| `npm run typecheck` / `lint` / `build` | clean / clean / builds |
+| `pytest -q` / `ruff` / `git diff --check` | 3062 passed / clean / clean |

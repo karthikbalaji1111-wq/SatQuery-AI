@@ -1,9 +1,12 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { SarBackscatterPanel } from "./SarBackscatterPanel";
 import type {
   AgentClarification,
   AgentResult,
+  PixelQuality,
+  RadiometricState,
+  TemporalIndexComparison,
   AgentStatus,
   AgentToolName,
   AgentToolStep,
@@ -27,12 +30,23 @@ import {
   visualStepState,
 } from "./derive";
 import { describeImageryError } from "../query/imageryError";
+import {
+  outcomeOf,
+  resultContext,
+  resultSummary,
+  runStages,
+  type OutcomeKind,
+  type Quality,
+  type ResultBody,
+  type RunStage,
+} from "./resultModel";
 import { STANDARD_INTERPRETER, useAgentRun } from "./agentRun";
 import type { AgentRun, AgentRunHandlers } from "./agentRun";
 
 /**
- * Starting points, one per capability the agent actually has. Clicking fills
- * the box rather than submitting: the question stays the user's to edit.
+ * Starting points, one per capability the agent actually has. Clicking one
+ * RUNS it - through the same request as a typed question; nothing is canned -
+ * and leaves it in the box, where it can be edited and run again.
  */
 const EXAMPLE_QUESTIONS = [
   {
@@ -318,50 +332,6 @@ function indexGroups(measurements: Measurement[]): IndexGroup[] {
   return groups;
 }
 
-/** The comparison-level measurements a temporal run is headlined by. */
-const TEMPORAL_HEADLINE_IDS = [
-  "temporal_ndwi.difference.mean_ndwi_difference",
-  "temporal_ndwi.change.ndwi_change_mean",
-] as const;
-
-/**
- * The two measurements worth setting at headline size.
- *
- * Analytical units only. A discovery count is a fact about the search, not a
- * result of the analysis, and setting one large would give the reader the wrong
- * headline. When nothing analytical was computed the block is absent.
- *
- * The pair is taken from ONE index so the two numbers describe the same thing.
- * Pairing across indices produced a headline reading "ndvi mean" beside an
- * NDWI threshold percentage - two true numbers arranged into a false reading.
- */
-function headlineMeasurements(evidence: Evidence): Measurement[] {
-  // A comparison is headlined by the comparison. Its per-observation means
-  // share one metric name ("ndwi_mean"), so the family grouping below picked
-  // the EARLIER observation's mean and set it large as "ndwi mean" - observed
-  // live on a water-change question, where the headline read the 2024 value
-  // beside an answer about change. Both measurements here name themselves.
-  // If the backend suppressed them, there is no headline rather than an
-  // unlabelled single observation.
-  if (evidence.items.some((item) => item.id.startsWith("temporal_ndwi."))) {
-    return TEMPORAL_HEADLINE_IDS.map(
-      (id) => evidence.items.find((item) => item.id === id)?.measurement ?? null,
-    ).filter((measurement): measurement is Measurement => measurement !== null);
-  }
-  const all = measurementsFrom(evidence);
-  const [group] = indexGroups(all);
-  if (group !== undefined) {
-    return [group.mean, group.percent].filter(
-      (measurement): measurement is Measurement => measurement !== undefined,
-    );
-  }
-  return all
-    .filter(
-      (measurement) => measurement.unit === "index" || measurement.unit === "%",
-    )
-    .slice(0, 2);
-}
-
 /* ======================================================= query card (centre) */
 
 /**
@@ -394,7 +364,19 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
             value={question}
             disabled={busy}
             placeholder="Ask about any place — a city, district, landmark or coordinates…"
+            aria-describedby="agent-capabilities"
             onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter runs the question; Shift+Enter keeps a line break. An
+              // IME composition's Enter confirms the composition, not the run.
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                void run.handleAsk(event);
+              }
+            }}
           />
           <div className="query-actions">
             <button
@@ -421,6 +403,12 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
         </div>
       </form>
 
+      <p id="agent-capabilities" className="query-hint">
+        Ask for vegetation (NDVI), water (NDWI), built-up area (NDBI), radar
+        backscatter, or water change between two periods — for a named place
+        and month. Enter to run.
+      </p>
+
       {step === undefined ? (
         <div className="query-sub">
           <span className="agent-examples-label">Try</span>
@@ -432,7 +420,7 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
                 className="example-link"
                 disabled={busy}
                 title={example.question}
-                onClick={() => setQuestion(example.question)}
+                onClick={() => void run.ask(example.question)}
               >
                 {example.label}
               </button>
@@ -461,7 +449,7 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
         <ClarificationPrompt
           clarification={result.clarification}
           disabled={busy}
-          onChoose={setQuestion}
+          onChoose={(choice) => void run.ask(choice)}
         />
       )}
 
@@ -479,9 +467,10 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
  *
  * Everything shown is the server's: its message, the choices it named as
  * supported, and what it had already understood. Nothing is inferred here and
- * nothing is run - editing the question and asking again is the answer. A
- * choice that the server phrased as a complete question fills the query box
- * with it; the user still reads it, completes it if needed, and runs it.
+ * nothing is guessed. A choice the server phrased as a complete question
+ * CONTINUES the workflow: it is put in the query box and run, exactly as if it
+ * had been typed - and if it still lacks something (a month, say) the server
+ * asks for that next, rather than this panel inventing it.
  */
 function ClarificationPrompt({
   clarification,
@@ -594,16 +583,34 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
     complete: "Complete",
   };
 
+  const liveSeconds = useRunningSeconds(busy);
+
   return (
-    <section className="pipeline-strip" aria-labelledby="pipeline-heading">
+    <section
+      className="pipeline-strip"
+      aria-labelledby="pipeline-heading"
+      data-busy={busy || undefined}
+    >
       <h2 id="pipeline-heading" className="eyebrow">
         Pipeline
       </h2>
 
-      <ol className="stage-flow">
+      {busy ? (
+        // One request, no progress events: what is running is said, and no
+        // stage is claimed to be active before the response says it ran.
+        <p className="run-running" role="status">
+          Understanding the question, resolving the location, finding
+          satellite scenes and measuring — each stage is reported when the run
+          returns.
+        </p>
+      ) : result !== null ? (
+        <RunStages stages={runStages(result)} />
+      ) : null}
+
+      <ol className="stage-flow" aria-label="Technical trace">
         {steps.length === 0 ? (
           <li className="stage-idle">
-            {busy ? "planning…" : "no stages executed yet"}
+            {busy ? "" : "no stages executed yet"}
           </li>
         ) : (
           steps.map((step, index) => (
@@ -617,6 +624,11 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
       </ol>
 
       <div className="pipeline-tail">
+        {busy && (
+          <span className="pipeline-elapsed" title="Time since the question was sent">
+            {liveSeconds} s
+          </span>
+        )}
         {elapsedMs !== null && (
           <span className="pipeline-elapsed" title="Client-measured round trip">
             {(elapsedMs / 1000).toFixed(2)} s
@@ -627,6 +639,50 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
         </span>
       </div>
     </section>
+  );
+}
+
+/** Whole seconds since `active` became true; 0 while inactive. Display only. */
+function useRunningSeconds(active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setSeconds(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = setInterval(
+      () => setSeconds(Math.floor((Date.now() - started) / 1000)),
+      500,
+    );
+    return () => clearInterval(timer);
+  }, [active]);
+  return seconds;
+}
+
+const STAGE_GLYPHS: Record<RunStage["state"], string> = {
+  done: "✓",
+  failed: "✕",
+  attention: "!",
+};
+
+/** The stages the finished run went through, as the response records them. */
+function RunStages({ stages }: { stages: RunStage[] }) {
+  if (stages.length === 0) return null;
+  return (
+    <ol className="run-stages" aria-label="What happened">
+      {stages.map((stage) => (
+        <li key={stage.name} data-state={stage.state}>
+          <span className="run-stage-glyph" aria-hidden="true">
+            {STAGE_GLYPHS[stage.state]}
+          </span>
+          <span className="run-stage-name">{stage.name}</span>
+          {stage.detail && (
+            <span className="run-stage-detail">{stage.detail}</span>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -702,10 +758,13 @@ export function AgentEvidencePanel({
   manual = null,
   bbox: manualBbox = null,
   busy = false,
+  stale = false,
 }: {
   evidence: Evidence | null;
   /** A run is in flight. */
   busy?: boolean;
+  /** `evidence` belongs to the previous question; a new one is running. */
+  stale?: boolean;
   /** What a manual retrieval established, when no agent run produced it. */
   manual?: {
     scene: SatelliteScene | null;
@@ -747,16 +806,24 @@ export function AgentEvidencePanel({
   // One readout per index that reported a mean. Each carries its own
   // threshold percentage and its own valid-pixel count, so no number is ever
   // shown under another index's name.
-  const groups = indexGroups(measurements);
+  // A comparison's two observations share metric names ("ndwi_mean"), so
+  // grouping them would set the EARLIER mean alone under "NDWI mean". They are
+  // shown by role in "Observations compared" instead.
+  const isComparison = (evidence?.items ?? []).some((item) =>
+    item.id.startsWith("temporal_ndwi."),
+  );
+  const groups = isComparison ? [] : indexGroups(measurements);
   // A measurement whose name matches no known index still deserves rendering,
   // but only when grouping found nothing - otherwise it would duplicate a
   // number a group already shows.
   const looseIndex =
-    groups.length === 0
+    groups.length === 0 && !isComparison
       ? measurements.find((m) => m.unit === "index")
       : undefined;
   const loosePercent =
-    groups.length === 0 ? measurements.find((m) => m.unit === "%") : undefined;
+    groups.length === 0 && !isComparison
+      ? measurements.find((m) => m.unit === "%")
+      : undefined;
   // The shared pixel count is a property of the window, so it belongs in the
   // field grid - but only while every index agrees on it. When they differ
   // (NDBI resolves through a 20 m band) each group states its own instead of
@@ -767,7 +834,11 @@ export function AgentEvidencePanel({
     pixelCounts.every((m) => m.value === pixelCounts[0].value)
       ? pixelCounts[0]
       : undefined;
-  const validPixels = groups.length === 0 ? pixelCounts[0] : sharedPixels;
+  const validPixels = isComparison
+    ? undefined
+    : groups.length === 0
+      ? pixelCounts[0]
+      : sharedPixels;
 
   const fields: { label: string; value: string; wide?: boolean }[] = [];
   const sceneId = imagery?.scene_id ?? window?.selected_scene_id ?? null;
@@ -803,6 +874,19 @@ export function AgentEvidencePanel({
       value: `${imagery.resolution} m/px`,
     });
   }
+  const catalog = window?.catalog ?? evidence?.execution?.catalog ?? null;
+  if (catalog) fields.push({ label: "Source catalog", value: catalogName(catalog) });
+  if (window && window.scene_count > 0) {
+    fields.push({
+      label: "Scenes matched",
+      // The server's deterministic selection rule, per sensor.
+      value: `${window.scene_count} · ${
+        window.modality === "sentinel-1-sar"
+          ? "earliest acquisition selected"
+          : "lowest cloud cover selected"
+      }`,
+    });
+  }
   if (scene?.cloud_cover !== null && scene?.cloud_cover !== undefined) {
     fields.push({
       label: "Cloud cover",
@@ -826,8 +910,15 @@ export function AgentEvidencePanel({
     });
   }
 
+  const analysis = evidence?.analysis ?? null;
+  const comparison = analysis?.temporal_comparison ?? null;
+
   return (
-    <section className="panel evidence-panel" aria-labelledby="evidence-heading">
+    <section
+      className="panel evidence-panel"
+      aria-labelledby="evidence-heading"
+      data-stale={stale || undefined}
+    >
       <header className="panel-head">
         <span className="mark mark-blue" aria-hidden="true" />
         <h2 id="evidence-heading" className="eyebrow">
@@ -884,19 +975,146 @@ export function AgentEvidencePanel({
 
       <SarBackscatterPanel result={evidence?.analysis?.sar_backscatter ?? manual?.sar_backscatter ?? null} />
 
+      {comparison && evidence && (
+        <ObservationPair comparison={comparison} items={evidence.items} />
+      )}
+
+      {analysis && <ValidationSummary analysis={analysis} />}
+
       {evidence !== null && evidence.items.length > 0 && (
         // The citation keys the grounding check resolves against. Technical on
         // purpose: a figure quoted in the answer can be traced to the exact
-        // evidence id that produced it.
-        <dl className="citation-list">
-          {evidence.items.map((item) => (
-            <div key={item.id}>
-              <dt>{item.id}</dt>
-              <dd>{evidenceValue(item)}</dd>
-            </div>
-          ))}
-        </dl>
+        // evidence id that produced it. Folded, not removed - every id and raw
+        // value stays in the page for anyone auditing the run.
+        <details className="evidence-technical">
+          <summary>Technical evidence · {evidence.items.length} items</summary>
+          <dl className="citation-list">
+            {evidence.items.map((item) => (
+              <div key={item.id}>
+                <dt>{item.id}</dt>
+                <dd>{evidenceValue(item)}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
       )}
+    </section>
+  );
+}
+
+/** A catalog URL by the service's host name - the URL itself stays in the export. */
+function catalogName(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+const RADIOMETRY_LABELS: Record<RadiometricState["status"], string> = {
+  verified: "verified",
+  verified_with_unknown_metadata: "verified · some metadata not published",
+  incompatible: "refused · incompatible",
+  undetermined: "refused · undetermined",
+};
+
+/**
+ * The checks the scientific core ran before any number existed: how many
+ * pixels were usable, whether the values were on the representation the
+ * formula assumes, and whether the rasters combined share a verified grid.
+ * Stated from the backend's own records, in its own terms.
+ */
+function ValidationSummary({ analysis }: { analysis: NonNullable<Evidence["analysis"]> }) {
+  const comparison = analysis.temporal_comparison ?? null;
+  const quality: PixelQuality[] = [
+    ...(analysis.pixel_quality ?? []),
+    ...[comparison?.first.pixel_quality, comparison?.second.pixel_quality].filter(
+      (entry): entry is PixelQuality => Boolean(entry),
+    ),
+  ];
+  const radiometry = analysis.radiometry ?? [];
+  const grids = (analysis.grids ?? []).filter((grid) => grid.stage === "post_read" || grid.status === "refused");
+  if (quality.length === 0 && radiometry.length === 0 && grids.length === 0) return null;
+
+  return (
+    <section className="validation-summary" aria-label="Quality and validation">
+      <h3 className="field-label">Quality &amp; validation</h3>
+      <ul>
+        {quality.map((entry) => (
+          <li key={`pq:${entry.index}:${entry.window_label}:${entry.scene_id}`}>
+            <span className="check-name">
+              Pixel quality · {entry.index.toUpperCase()}
+              {entry.window_label !== "single" ? ` · ${entry.window_label}` : ""}
+            </span>
+            <span className="check-value">
+              {entry.valid_fraction === null
+                ? `${formatMeasurement(entry.valid_pixels, "pixels")} of ${formatMeasurement(entry.total_pixels, "pixels")} pixels usable`
+                : `${(entry.valid_fraction * 100).toFixed(1)}% usable — ${formatMeasurement(entry.valid_pixels, "pixels")} of ${formatMeasurement(entry.total_pixels, "pixels")} pixels`}
+              {entry.masked_pixels > 0 &&
+                `; ${formatMeasurement(entry.masked_pixels, "pixels")} masked by the Scene Classification Layer (${formatMeasurement(entry.cloud_pixels, "pixels")} cloud, ${formatMeasurement(entry.cloud_shadow_pixels, "pixels")} shadow)`}
+            </span>
+          </li>
+        ))}
+        {radiometry.map((state) => (
+          <li key={`rad:${state.scene_id}:${state.modality}`} data-refused={state.status === "incompatible" || state.status === "undetermined" || undefined}>
+            <span className="check-name">Radiometry · {state.scene_id}</span>
+            <span className="check-value">
+              {RADIOMETRY_LABELS[state.status] ?? state.status}
+              {state.processing_baseline ? ` · baseline ${state.processing_baseline}` : ""}
+            </span>
+          </li>
+        ))}
+        {grids.map((grid, index) => (
+          <li key={`grid:${grid.analysis}:${grid.scene_id}:${index}`} data-refused={grid.status === "refused" || undefined}>
+            <span className="check-name">Geometry · {grid.analysis.replace(/_/g, " ")}</span>
+            <span className="check-value">
+              {grid.status === "valid"
+                ? ["grid verified", grid.crs, grid.resolution_x !== null ? `${grid.resolution_x} m` : null,
+                   grid.width !== null && grid.height !== null ? `${grid.width} × ${grid.height} px` : null]
+                    .filter((part): part is string => Boolean(part))
+                    .join(" · ")
+                : `refused${grid.refusal ? ` — ${grid.refusal}` : ""}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Both observations of a comparison: which scene answered each period. */
+function ObservationPair({
+  comparison,
+  items,
+}: {
+  comparison: TemporalIndexComparison;
+  items: Evidence["items"];
+}) {
+  const value = (id: string) =>
+    items.find((item) => item.id === id)?.measurement ?? null;
+  return (
+    <section className="observation-pair" aria-label="Observations compared">
+      <h3 className="field-label">Observations compared</h3>
+      <dl className="evidence-grid">
+        {([["Earlier", "first", comparison.first], ["Later", "second", comparison.second]] as const).map(
+          ([role, key, observation]) => {
+            const mean = value(`temporal_ndwi.${key}.ndwi_mean`);
+            const valid = value(`temporal_ndwi.${key}.ndwi_valid_pixel_count`);
+            return (
+              <div key={role} className="wide">
+                <dt>{role} · {observation.window_label}</dt>
+                <dd>
+                  {observation.scene_id}
+                  {observation.acquired_at ? ` · ${formatInstant(observation.acquired_at)}` : ""}
+                  {observation.cloud_cover !== null ? ` · ${observation.cloud_cover.toFixed(1)}% cloud` : ""}
+                  {mean !== null && ` · NDWI mean ${formatMeasurement(mean.value, mean.unit)}`}
+                  {valid !== null && ` over ${formatMeasurement(valid.value, valid.unit)} valid pixels`}
+                </dd>
+              </div>
+            );
+          },
+        )}
+      </dl>
     </section>
   );
 }
@@ -976,6 +1194,7 @@ export function AgentAnswerPanel({
   asked = null,
   manualComplete = false,
   busy = false,
+  stale = false,
 }: {
   result: AgentResult | null;
   /**
@@ -996,6 +1215,11 @@ export function AgentAnswerPanel({
   manualComplete?: boolean;
   /** A run is in flight: say so rather than showing the resting invitation. */
   busy?: boolean;
+  /**
+   * `result` belongs to the PREVIOUS question: a new one is running. It stays
+   * readable, marked as previous, until the new result replaces it.
+   */
+  stale?: boolean;
 }) {
   if (result === null) {
     return (
@@ -1014,21 +1238,56 @@ export function AgentAnswerPanel({
     );
   }
 
-  const metrics = headlineMeasurements(result.evidence);
+  const outcome = outcomeOf(result);
+  const body = resultSummary(result);
+  const context = resultContext(result);
 
   return (
-    <section className="panel answer-panel" aria-labelledby="answer-heading">
-      <h2 id="answer-heading" className="eyebrow">
-        Analysis result
-      </h2>
+    <section
+      className="panel answer-panel"
+      aria-labelledby="answer-heading"
+      data-outcome={outcome.kind}
+      data-stale={stale || undefined}
+    >
+      <div className="answer-head">
+        <h2 id="answer-heading" className="eyebrow">
+          Analysis result
+        </h2>
+        <span className="outcome-chip" data-kind={outcome.kind}>
+          {outcome.label}
+        </span>
+      </div>
+
+      {stale && (
+        <p className="stale-note">
+          Previous result — the new question is still running.
+        </p>
+      )}
 
       {result.status === "ok" && result.answer !== null ? (
-        <p className="agent-answer" data-length={answerLength(result.answer)}>
-          {result.answer}
-        </p>
+        <>
+          {outcome.kind === "success" ? (
+            <ResultCard body={body} />
+          ) : (
+            <MeasurementAbsent
+              kind={outcome.kind}
+              reason={outcome.reason}
+              sceneCount={context.sceneCount}
+            />
+          )}
+          <ResultContextList context={context} body={body} />
+          <p
+            className="agent-answer"
+            data-length={answerLength(result.answer)}
+            data-role={outcome.kind === "success" ? "summary" : "verdict"}
+          >
+            {result.answer}
+          </p>
+        </>
       ) : (
         <StatusNoticeBlock
           status={result.status}
+          outcome={outcome.kind}
           measured={measurementsFrom(result.evidence).length}
           failure={result.failure ?? null}
         />
@@ -1038,24 +1297,281 @@ export function AgentAnswerPanel({
 
       <ValidationRow validation={result.trace.answer_validation} />
 
-      {metrics.length > 0 && (
-        <dl className="metric-pair">
-          {metrics.map((measurement) => (
-            <div key={measurement.name}>
-              <dt>{measurement.name.replace(/_/g, " ")}</dt>
-              <dd>
-                {formatMeasurement(measurement.value, measurement.unit)}
-                {measurement.unit === "%" && (
-                  <span className="metric-unit"> %</span>
-                )}
-              </dd>
+      {/* What a provider failure left behind. A question back, a refusal and a
+          location outage ran nothing, so counting their empty evidence would
+          only add zeros. */}
+      {result.answer === null && outcome.kind === "provider_failure" && (
+        <CollectedSummary evidence={result.evidence} />
+      )}
+    </section>
+  );
+}
+
+/* ---------------------------------------------------- the result, by operation */
+
+function signedIndex(value: number): string {
+  return formatMeasurement(value, "index");
+}
+
+function decibels(value: number): string {
+  return `${value.toFixed(2)} dB`;
+}
+
+function pixels(value: number): string {
+  return formatMeasurement(value, "pixels");
+}
+
+/** "sentinel-2b" -> "Sentinel-2B". Display casing of the catalog's own value. */
+function platformLabel(platform: string | null): string | null {
+  if (!platform) return null;
+  return platform.replace(
+    /^sentinel-(\d)([a-z]?)$/i,
+    (_, number: string, unit: string) => `Sentinel-${number}${unit.toUpperCase()}`,
+  );
+}
+
+function qualityText(quality: Quality): string {
+  const share =
+    quality.validFraction === null
+      ? null
+      : `${(quality.validFraction * 100).toFixed(1)}%`;
+  return share === null
+    ? `${pixels(quality.valid)} of ${pixels(quality.total)} pixels usable`
+    : `${share} usable · ${pixels(quality.valid)} of ${pixels(quality.total)} pixels`;
+}
+
+/**
+ * The measured value, set as the headline - by operation, never generically.
+ *
+ * An index is a mean on a -1..+1 scale; backscatter is decibels per
+ * polarization; a comparison is two periods and the change between them. Each
+ * is laid out as what it is, from the backend's own values.
+ */
+function ResultCard({ body }: { body: ResultBody }) {
+  switch (body.kind) {
+    case "index":
+      return (
+        <div className="result-card" data-kind="index" data-count={body.readings.length}>
+          {body.readings.map((reading) => (
+            <div key={reading.key} className="result-reading">
+              <p className="result-op">
+                {reading.title} <span className="result-op-code">· {reading.label}</span>
+              </p>
+              <p className="result-value">{signedIndex(reading.mean)}</p>
+              <p className="result-sub">
+                Mean
+                {reading.validPixels !== null &&
+                  ` over ${pixels(reading.validPixels)} valid pixels`}
+                {reading.min !== null && reading.max !== null &&
+                  ` · range ${signedIndex(reading.min)} to ${signedIndex(reading.max)}`}
+              </p>
             </div>
           ))}
-        </dl>
-      )}
+        </div>
+      );
+    case "sar":
+      return (
+        <div className="result-card" data-kind="sar">
+          <p className="result-op">
+            Radar backscatter <span className="result-op-code">· Sentinel-1 γ⁰</span>
+          </p>
+          <dl className="result-sar">
+            {body.reading.vv !== null && (
+              <div>
+                <dt>VV</dt>
+                <dd>{decibels(body.reading.vv)}</dd>
+              </div>
+            )}
+            {body.reading.vh !== null && (
+              <div>
+                <dt>VH</dt>
+                <dd>{decibels(body.reading.vh)}</dd>
+              </div>
+            )}
+            {body.reading.difference !== null && (
+              <div>
+                <dt>VV − VH</dt>
+                <dd>{decibels(body.reading.difference)}</dd>
+              </div>
+            )}
+          </dl>
+          <p className="result-sub">
+            Mean backscatter
+            {body.reading.validPixels !== null &&
+              ` over ${pixels(body.reading.validPixels)} valid pixels`}
+            , from the provider's terrain-corrected product.
+          </p>
+        </div>
+      );
+    case "temporal": {
+      const { earlier, later, difference, pairedChange, pairedPixels } = body.reading;
+      return (
+        <div className="result-card" data-kind="temporal">
+          <p className="result-op">
+            Water change <span className="result-op-code">· NDWI, two periods</span>
+          </p>
+          <ol className="result-periods">
+            {[earlier, later].map((side) => (
+              <li key={side.role} data-role={side.role.toLowerCase()}>
+                <span className="period-role">{side.role}</span>
+                <span className="period-when">{side.period ?? "—"}</span>
+                <span className="period-value">
+                  {side.mean === null ? "—" : signedIndex(side.mean)}
+                </span>
+                {side.acquired && (
+                  <span className="period-acquired">acquired {side.acquired}</span>
+                )}
+              </li>
+            ))}
+          </ol>
+          {(difference !== null || pairedChange !== null) && (
+            <dl className="metric-pair">
+              {difference !== null && (
+                <div>
+                  <dt>Mean difference</dt>
+                  <dd>{signedIndex(difference)}</dd>
+                </div>
+              )}
+              {pairedChange !== null && (
+                <div>
+                  <dt>Paired-pixel change</dt>
+                  <dd>{signedIndex(pairedChange)}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+          <p className="result-sub">
+            {difference === null && pairedChange === null
+              ? "The difference was withheld by the analysis; see the evidence for why."
+              : `Later minus earlier${
+                  pairedPixels !== null
+                    ? `; the paired change covers ${pixels(pairedPixels)} pixels valid on both dates`
+                    : ""
+                }. A measured difference - no cause is inferred.`}
+          </p>
+        </div>
+      );
+    }
+    case "imagery":
+      return (
+        <div className="result-card" data-kind="imagery">
+          <p className="result-op">True-colour image</p>
+          <p className="result-sub">
+            {body.scene
+              ? `Scene ${body.scene.id}${body.scene.acquired ? `, acquired ${body.scene.acquired}` : ""}.`
+              : "The scene is on the map."}{" "}
+            Imagery only - nothing was measured.
+          </p>
+        </div>
+      );
+    case "none":
+      return null;
+  }
+}
 
-      {result.answer === null && <CollectedSummary evidence={result.evidence} />}
-    </section>
+/** Where and when the result applies - each row only when the run carries it. */
+function ResultContextList({
+  context,
+  body,
+}: {
+  context: ReturnType<typeof resultContext>;
+  body: ResultBody;
+}) {
+  const rows: { label: string; value: string; title?: string }[] = [];
+  if (context.location) rows.push({ label: "Location", value: context.location });
+  if (body.kind !== "temporal" && context.periods.length > 0) {
+    rows.push({ label: "Period", value: context.periods.join(" · ") });
+  }
+  const scene =
+    body.kind === "index" || body.kind === "sar" || body.kind === "imagery"
+      ? body.scene
+      : null;
+  if (scene) {
+    rows.push({
+      label: "Scene",
+      value: [scene.acquired, platformLabel(scene.platform)]
+        .filter((part): part is string => Boolean(part))
+        .join(" · ") || scene.id,
+      title: scene.id,
+    });
+  }
+  if (context.sceneCount !== null && body.kind !== "temporal") {
+    rows.push({
+      label: "Scenes matched",
+      value: String(context.sceneCount),
+    });
+  }
+  if (body.kind === "index") {
+    const quality = body.readings.find((reading) => reading.quality !== null)?.quality;
+    if (quality) rows.push({ label: "Pixel quality", value: qualityText(quality) });
+  } else if (body.kind === "temporal") {
+    // Each observation has its own pixels; neither stands for both.
+    const share = (quality: Quality | null) =>
+      quality?.validFraction === null || quality === null
+        ? null
+        : `${(quality.validFraction * 100).toFixed(1)}%`;
+    const earlier = share(body.reading.earlier.quality);
+    const later = share(body.reading.later.quality);
+    if (earlier !== null && later !== null) {
+      rows.push({ label: "Pixel quality", value: `${earlier} earlier · ${later} later usable` });
+    }
+  }
+
+  if (rows.length === 0) return null;
+  return (
+    <dl className="result-context">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd title={row.title}>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * The run completed and the answer is a verdict, not a measurement: either no
+ * scene matched, or a validation check refused to produce a number. The two
+ * are said differently, and a refusal keeps the server's own reason.
+ */
+function MeasurementAbsent({
+  kind,
+  reason,
+  sceneCount,
+}: {
+  kind: OutcomeKind;
+  reason: string | null;
+  sceneCount: number | null;
+}) {
+  return (
+    <div className="answer-notice" data-kind={kind} role="status">
+      {kind === "analysis_refused" ? (
+        <>
+          <p className="answer-notice-summary">The analysis was not computed.</p>
+          <p className="answer-notice-detail">
+            A validation check refused the data rather than report a number it
+            could not stand behind. The scene and its provenance are in the
+            evidence.
+          </p>
+          {reason && (
+            <details className="answer-notice-reason">
+              <summary>Why</summary>
+              <p>{reason}</p>
+            </details>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="answer-notice-summary">No measurement could be made.</p>
+          <p className="answer-notice-detail">
+            {sceneCount === 0
+              ? "No satellite scene matched this place and period. A different month may have one."
+              : "The run completed, but the evidence did not support a measurement."}
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1097,16 +1613,49 @@ function RunAttribution({
 }
 
 
+/**
+ * A question put back is not always a missing detail. A place that does not
+ * exist, an area too large to measure and a request SatQuery does not do are
+ * refusals, and "the question needs one more detail" would misdescribe them.
+ * The server's own words are under the query box; these say which KIND of
+ * stop it was.
+ */
+const CLARIFICATION_NOTICES: Partial<Record<OutcomeKind, StatusNotice>> = {
+  location_not_found: {
+    summary: "No analysis ran: the place could not be found.",
+    detail:
+      "The location service found no match for it. Check the spelling, or add the city or state.",
+    retryable: false,
+  },
+  area_too_large: {
+    summary: "No analysis ran: the area is too large to measure.",
+    detail:
+      "Measurements are read at the sensor's native resolution, which limits the size of an area. Name a neighbourhood, park or landmark instead - the note under the query box says how.",
+    retryable: false,
+  },
+  unsupported: {
+    summary: "No analysis ran: SatQuery does not do this.",
+    detail:
+      "It measures vegetation (NDVI), water (NDWI), built-up area (NDBI), radar backscatter and water change between two periods, for a named place and period.",
+    retryable: false,
+  },
+};
+
 function StatusNoticeBlock({
   status,
+  outcome,
   measured,
   failure,
 }: {
   status: Exclude<AgentStatus, "ok"> | AgentStatus;
+  /** Which kind of stop, when the status alone does not say. */
+  outcome?: OutcomeKind;
   measured: number;
   failure: AgentResult["failure"];
 }) {
-  const notice = STATUS_NOTICES[status as Exclude<AgentStatus, "ok">];
+  const notice =
+    (outcome !== undefined ? CLARIFICATION_NOTICES[outcome] : undefined) ??
+    STATUS_NOTICES[status as Exclude<AgentStatus, "ok">];
   if (notice === undefined) {
     return (
       <p className="answer-absent" role="status">
@@ -1119,6 +1668,7 @@ function StatusNoticeBlock({
     <div
       className="answer-notice"
       data-kind={status}
+      data-outcome={outcome}
       data-measured={measured > 0}
       role="status"
     >
@@ -1256,6 +1806,7 @@ export function AgentObservationPanel({
   evidence,
   result = null,
   busy = false,
+  stale = false,
   onExport,
 }: {
   evidence: Evidence | null;
@@ -1268,6 +1819,8 @@ export function AgentObservationPanel({
   result?: AgentResult | null;
   /** A run is in flight. */
   busy?: boolean;
+  /** The evidence belongs to the previous question; a new one is running. */
+  stale?: boolean;
   onExport?: () => void;
 }) {
   const observations = (evidence?.items ?? []).filter(
@@ -1279,6 +1832,8 @@ export function AgentObservationPanel({
     <section
       className="panel observation-panel"
       aria-labelledby="observation-heading"
+      data-stale={stale || undefined}
+      data-empty={observations.length === 0 || undefined}
     >
       <header className="panel-head">
         <span className="mark mark-violet" aria-hidden="true" />
@@ -1290,7 +1845,7 @@ export function AgentObservationPanel({
       {observations.length === 0 ? (
         <p className="hint" role="status">
           {busy
-            ? "Waiting for the model's reading of the scene…"
+            ? "A visual reading appears here only if the question asks what the scene looks like."
             : evidence === null
               ? "A vision-language reading of the scene appears here when a question calls for one."
               : // Each of these is a DIFFERENT event, and the panel used to
@@ -1355,12 +1910,16 @@ export function AgentPanel(handlers: AgentRunHandlers = {}) {
     <div className="agent-root" data-has-result={run.result !== null}>
       <AgentQueryCard run={run} />
       <AgentPipeline run={run} />
-      <AgentAnswerPanel result={run.result} />
+      <AgentAnswerPanel result={run.displayed} stale={run.stale} busy={run.busy} />
       <AgentObservationPanel
-        evidence={run.result?.evidence ?? null}
-        result={run.result}
+        evidence={run.displayed?.evidence ?? null}
+        result={run.displayed}
+        stale={run.stale}
       />
-      <AgentEvidencePanel evidence={run.result?.evidence ?? null} />
+      <AgentEvidencePanel
+        evidence={run.displayed?.evidence ?? null}
+        stale={run.stale}
+      />
     </div>
   );
 }

@@ -44,8 +44,8 @@ export function WorkspaceIntro({
           <>
             <p className="intro-lead">Running the analysis…</p>
             <p className="intro-note">
-              The area, scenes and imagery appear on this map as each stage
-              returns.
+              The area, scene and measurements appear on this map when the
+              run returns - it is one request, answered as a whole.
             </p>
           </>
         ) : (
@@ -87,7 +87,7 @@ export function WorkspaceIntro({
         </h2>
         <p className="intro-lead">Running the analysis…</p>
         <p className="intro-note">
-          Imagery and evidence appear here as each stage returns.
+          Imagery and evidence appear here when the run returns.
         </p>
       </section>
     );

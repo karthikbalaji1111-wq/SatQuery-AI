@@ -411,8 +411,16 @@ describe("AgentPanel - successful result", () => {
     const labels = [...answer.querySelectorAll(".metric-pair dt")].map(
       (node) => node.textContent,
     );
-    expect(labels).toEqual(["mean ndwi difference", "ndwi change mean"]);
+    // Headlined by the comparison's own measurements - never by one
+    // observation's mean standing alone as "the" NDWI.
+    expect(labels).toEqual(["Mean difference", "Paired-pixel change"]);
     expect(labels).not.toContain("ndwi mean");
+    // Each observation keeps its role: earlier, then later.
+    expect(
+      [...answer.querySelectorAll(".result-periods .period-role")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["Earlier", "Later"]);
   });
 
   it("shows no headline when a comparison's difference was suppressed", async () => {
@@ -905,16 +913,22 @@ describe("AgentPanel - map handoff", () => {
     );
   });
 
-  it("clears the previous scene before the new question is answered", async () => {
+  it("keeps the map until the new answer replaces it - never a blank jump", async () => {
+    // Before M6 every new question wiped the map first, so the viewport jumped
+    // to the world view and back. The previous layers now stay (marked as
+    // previous elsewhere) and are REPLACED by the new run's - one call, on
+    // completion, never merged.
     const onImagery = vi.fn();
     await askWithHandlers(
       withEvidence(executionWithImagery(AGENT_IMAGERY), null),
       { onImagery },
     );
 
-    // The very first call happens before the response lands.
-    expect(onImagery).toHaveBeenNthCalledWith(1, null);
-    await waitFor(() => expect(onImagery).toHaveBeenCalledTimes(2));
+    expect(onImagery).not.toHaveBeenCalledWith(null);
+    await waitFor(() => expect(onImagery).toHaveBeenCalledTimes(1));
+    expect(onImagery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scene_id: AGENT_IMAGERY.scene_id }),
+    );
   });
 
   it("passes null when the execution retrieved no imagery", async () => {
@@ -1019,7 +1033,13 @@ describe("AgentPanel - window formatting", () => {
         },
       }),
     );
-    expect(screen.getByText("2024-12-01 → 2025-01-31")).toBeInTheDocument();
+    // Both years survive everywhere the window is shown: the resolved-query
+    // line and the result's period row.
+    const shown = screen.getAllByText("2024-12-01 → 2025-01-31");
+    expect(shown.length).toBe(2);
+    expect(document.querySelector(".query-resolved")).toHaveTextContent(
+      "2024-12-01 → 2025-01-31",
+    );
   });
 });
 
@@ -1075,7 +1095,7 @@ describe("AgentPanel - the query hero is a real input", () => {
     ).toBe(typed);
   });
 
-  it("fills the input from an example without submitting it", () => {
+  it("runs an example through the same request as a typed question", async () => {
     const fetchMock = stubAgent({ body: agentResult() });
     render(<AgentPanel />);
 
@@ -1083,8 +1103,13 @@ describe("AgentPanel - the query hero is a real input", () => {
 
     const input = screen.getByLabelText(/question/i) as HTMLTextAreaElement;
     expect(input.value).toMatch(/SAR backscatter around Marina Beach, Chennai/);
-    // Clicking an example is not a submission.
-    expect(fetchMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/query/agent");
+    // The real question, not a canned response.
+    expect(JSON.parse(String((init as RequestInit).body)).question).toMatch(
+      /SAR backscatter around Marina Beach, Chennai/,
+    );
   });
 });
 
@@ -1156,7 +1181,13 @@ describe("AgentPanel - honest imagery degradation", () => {
     render(<AgentPanel />);
     await askAndWait();
 
-    const body = document.body.textContent ?? "";
+    // The capability hint under the input names what SatQuery CAN measure,
+    // radar backscatter included, on every screen; it is product copy, not a
+    // statement about this run. Everything else - result, evidence, map - is
+    // scanned.
+    const page = document.body.cloneNode(true) as HTMLElement;
+    page.querySelector("#agent-capabilities")?.remove();
+    const body = page.textContent ?? "";
     expect(body).not.toMatch(/backscatter/i);
     expect(body).not.toMatch(/calibrat/i);
     expect(body).not.toMatch(/VV\s*(value|measurement|index)/i);
@@ -1607,7 +1638,7 @@ describe("AgentPanel - clarification", () => {
     expect(within(list).queryAllByRole("button")).toEqual([]);
   });
 
-  it("fills the query box with a chosen option's question and runs nothing", async () => {
+  it("continues the workflow with the chosen option's question", async () => {
     const fetchMock = stubAgent({
       body: {
         ...CLARIFICATION,
@@ -1639,8 +1670,12 @@ describe("AgentPanel - clarification", () => {
     expect(screen.getByLabelText(/question/i)).toHaveValue(
       "Compare water (NDWI) around Chennai",
     );
-    // Filling the box is not asking: the user reads it and runs it.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Choosing continues: the server's own suggested question is run - built
+    // only from what the user said, so nothing is guessed on their behalf.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)).question,
+    ).toBe("Compare water (NDWI) around Chennai");
   });
 
   it("does not offer choices whose questions do not line up with them", async () => {
@@ -1752,8 +1787,8 @@ describe("AgentPanel - example questions", () => {
     }
   });
 
-  it("fills the query box without running it", () => {
-    const fetchMock = stubAgent({ body: {} });
+  it("runs the example's real question, once, and leaves it editable", async () => {
+    const fetchMock = stubAgent({ body: agentResult() });
     render(<AgentPanel />);
 
     fireEvent.click(screen.getByRole("button", { name: "Vegetation" }));
@@ -1761,6 +1796,9 @@ describe("AgentPanel - example questions", () => {
     expect(screen.getByLabelText(/question/i)).toHaveValue(
       "Show vegetation around Cubbon Park, Bengaluru in December 2024.",
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).question,
+    ).toBe("Show vegetation around Cubbon Park, Bengaluru in December 2024.");
   });
 });

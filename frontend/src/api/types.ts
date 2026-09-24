@@ -371,6 +371,8 @@ export interface ObservationIndexResult {
   acquired_at: string | null;
   cloud_cover: number | null;
   measurements: Measurement[];
+  /** This observation's own pixel quality (M3). Optional for older servers. */
+  pixel_quality?: PixelQuality | null;
   /**
    * Affine coefficients `[a, b, c, d, e, f]` of the band window this
    * observation was indexed over, carried verbatim from the raster read. Per
@@ -614,6 +616,65 @@ export interface AnalysisResult {
   analysis_outcomes?: AnalysisOutcome[];
   /** Derived server-side from `analysis_outcomes`. */
   completeness?: AnalysisCompleteness;
+  /**
+   * The validation stages the scientific core ran (M3-M5), one entry per
+   * index grid / scene. Displayed verbatim; optional for older servers.
+   */
+  pixel_quality?: PixelQuality[];
+  radiometry?: RadiometricState[];
+  grids?: GridState[];
+}
+
+/**
+ * How many of an index grid's pixels were usable, per the Sentinel-2 Scene
+ * Classification Layer - every pixel counted once. The subset the workspace
+ * shows; the backend carries more (per-class counts, notes).
+ */
+export interface PixelQuality {
+  index: string;
+  scene_id: string;
+  window_label: string;
+  mask_source: string;
+  total_pixels: number;
+  valid_pixels: number;
+  masked_pixels: number;
+  nodata_pixels: number;
+  cloud_pixels: number;
+  cloud_shadow_pixels: number;
+  snow_pixels: number;
+  saturated_or_defective_pixels: number;
+  /** `null` when the grid had no pixels - never a fabricated 0 or 1. */
+  valid_fraction: number | null;
+  contamination_fraction: number | null;
+  quality_notes: string[];
+}
+
+/** Whether the values were on the representation the formula assumes (M4). */
+export interface RadiometricState {
+  status:
+    | "verified"
+    | "verified_with_unknown_metadata"
+    | "incompatible"
+    | "undetermined";
+  modality: string;
+  scene_id: string;
+  collection: string;
+  representation: string | null;
+  processing_baseline: string | null;
+}
+
+/** Whether the rasters an analysis combined share a verified grid (M5). */
+export interface GridState {
+  status: "valid" | "refused";
+  analysis: string;
+  scene_id: string | null;
+  stage: "pre_read" | "post_read";
+  crs: string | null;
+  width: number | null;
+  height: number | null;
+  resolution_x: number | null;
+  resolution_y: number | null;
+  refusal: string | null;
 }
 
 // --------------------------------------------------------------------------- //
