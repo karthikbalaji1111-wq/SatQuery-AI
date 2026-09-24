@@ -2247,6 +2247,32 @@ Beach, S2B_44PMV_20250104), SAR VV -5.444 / VH -17.85 dB, temporal NDWI
 "Analyze Chennai" -> five clickable options, "Count ships in Chennai harbor" ->
 `analysis_unsupported`.
 
+**Verified in production** (`12d24c3` on Render - `/ready` names
+`satquery-intent-v2` at 0.95 - and `4c3a5a1` on Vercel; standard workflow, no AI
+key; real UI in a Playwright browser). Every example chip ran from the UI to a
+grounded answer with evidence: NDWI 0.1466 (Marina Beach, S2B_44PMV_20250104),
+NDVI 0.5204 (Cubbon Park, S2B_43PGQ_20241208), NDBI -0.02482 (Ameerpet,
+S2B_43QHV_20250107), SAR VV -5.444 / VH -17.85 dB (S1A ... 20250111_rtc),
+temporal NDWI 0.02658 -> 0.1466 (difference 0.12, overlay on the basemap). The
+matrix: vegetation / built-up / "how leafy" around Marina Beach -> NDVI
+-0.06131 / NDBI 0.01244 / NDVI -0.06131; "NDVI Chennai January 2025" ->
+`area_too_large` naming Chennai (no placeholder); "Analyze Chennai" -> five
+clickable options, a click fills the box and runs nothing; "Count ships in
+Chennai harbor" -> `analysis_unsupported`; "Show vegetation", "Compare water",
+"Vegetation around Chennai" ask for exactly what is missing. Console: 0 errors,
+0 warnings (the `favicon.ico` 404 is fixed by `4c3a5a1`); every API call 200; no
+CORS error.
+
+**External constraint found in production: the public Nominatim geocoder
+throttles Render's shared outbound IP.** From 19:45 to 20:26 IST most geocodes
+from Render returned HTTP 429 while the same User-Agent from a developer
+machine got 200. SatQuery reported it honestly ("Scene discovery did not
+complete: The geocoding service responded with status 429.", pipeline
+Failed, no number invented), and each place worked once a geocode got through
+(the 15-minute geocode cache then serves repeats). Not fixed here - a different
+geocoder or a self-hosted Nominatim would be a new service, out of scope. For a
+live demo, run each example once beforehand to warm the cache.
+
 **Known limitations.** "NDVI Chennai January 2025" is correctly refused as too
 large: sub-areas are not suggested (option B was not chosen). Scene selection
 still ignores radiometric usability, so some place/month pairs return a scene
