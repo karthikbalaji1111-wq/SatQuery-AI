@@ -496,8 +496,12 @@ def test_retry_exhaustion_reports_the_last_failure_in_its_own_words(
         return raised.value
 
     error = run(scenario())
-    assert error.message == "The geocoding service responded with status 502."
-    assert not isinstance(error, GeocodingUnavailableError)
+    # The location service is unavailable; the last failure's own words are
+    # kept for diagnosis, and no wait is claimed because none is known.
+    assert isinstance(error, GeocodingUnavailableError)
+    assert error.code == "geocoding_unavailable"
+    assert "The geocoding service responded with status 502." in error.message
+    assert error.retry_after_seconds is None and error.headers is None
     assert clock.pauses == [2.0, 4.0]
     assert len(upstream.requests) == 3
 
@@ -525,7 +529,9 @@ def test_a_timeout_is_retried_with_backoff_then_reported(clock: FakeClock) -> No
             await geocode("x", settings=settings(), transport=upstream.transport())
         return raised.value
 
-    assert run(scenario()).message == "The geocoding service timed out."
+    error = run(scenario())
+    assert isinstance(error, GeocodingUnavailableError)
+    assert "The geocoding service timed out." in error.message
     assert len(upstream.requests) == 3
 
 
@@ -545,7 +551,9 @@ def test_an_unreachable_provider_is_reported_as_unavailable() -> None:
             await geocode("x", settings=settings(), transport=upstream.transport())
         return raised.value
 
-    assert run(scenario()).message == "The geocoding service is unavailable."
+    error = run(scenario())
+    assert isinstance(error, GeocodingUnavailableError)
+    assert "The geocoding service is unavailable." in error.message
     assert len(upstream.requests) == 3
 
 

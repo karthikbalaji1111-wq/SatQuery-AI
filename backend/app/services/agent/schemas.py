@@ -73,6 +73,13 @@ ToolStepStatus = Literal["ok", "rejected", "failed", "skipped"]
 #:                              workflow needs (or asks for something it does
 #:                              not do); nothing was measured and
 #:                              ``clarification`` says what to add.
+#: ``location_unavailable``   - the question was usable, but the location
+#:                              service (the geocoder) could not be used right
+#:                              now, so nothing was searched or measured.
+#:                              NOT a clarification - the user has nothing to
+#:                              add - and NOT an evidence verdict: no scene was
+#:                              ever looked at. ``failure`` says why and, when
+#:                              known, how long to wait.
 #: In the middle three the evidence is still returned: the deterministic result
 #: never depends on a language-model provider being reachable.
 AgentStatus = Literal[
@@ -81,6 +88,7 @@ AgentStatus = Literal[
     "synthesis_unavailable",
     "answer_withheld",
     "needs_clarification",
+    "location_unavailable",
 ]
 
 #: Why a question could not be executed as asked. Each names ONE missing or
@@ -557,9 +565,11 @@ class AgentFailure(_StrictModel):
     that may echo the request, and provider payloads do not reach responses.
     """
 
-    #: Which provider stage failed. The executor's own tool failures are
-    #: reported per-step in the trace and never here.
-    stage: Literal["planning", "synthesis"]
+    #: Which stage failed. The executor's own tool failures are reported
+    #: per-step in the trace and never here - with ONE exception, ``location``:
+    #: the geocoder is a dependency every run needs before any tool can do
+    #: anything, and its outage decides the whole result.
+    stage: Literal["planning", "synthesis", "location"]
     #: The originating :class:`~app.core.errors.AppError` code, so a caller can
     #: branch on the KIND of failure without matching on prose.
     code: str = Field(min_length=1, max_length=100)
@@ -568,6 +578,9 @@ class AgentFailure(_StrictModel):
     #: How long the SERVICE asked us to wait, when it said so. Only a rate
     #: limit carries one. ``None`` means the wait is unknown - never zero.
     retry_after_seconds: float | None = Field(default=None, ge=0)
+    #: The external dependency that failed, when the failure is one. Set for
+    #: ``location`` (``"geocoder"``); provider stages leave it unset.
+    dependency: Literal["geocoder"] | None = None
 
 
 class AgentClarification(_StrictModel):
@@ -619,10 +632,11 @@ class AgentResult(_StrictModel):
 
     status: AgentStatus
     answer: str | None = None
-    #: Present exactly when a provider stage failed, i.e. for
-    #: ``planner_unavailable`` and ``synthesis_unavailable``. Optional rather
-    #: than required so an existing caller constructing a bare failure result
-    #: stays valid; the service always supplies it.
+    #: Present exactly when a stage failed, i.e. for ``planner_unavailable``,
+    #: ``synthesis_unavailable`` and ``location_unavailable``. Optional rather
+    #: than required for the first two so an existing caller constructing a
+    #: bare failure result stays valid; the service always supplies it, and
+    #: ``location_unavailable`` requires it.
     failure: AgentFailure | None = None
     #: Present exactly when ``status`` is ``needs_clarification``.
     clarification: AgentClarification | None = None
@@ -653,10 +667,20 @@ class AgentResult(_StrictModel):
         if self.failure is not None and self.status not in (
             "planner_unavailable",
             "synthesis_unavailable",
+            "location_unavailable",
         ):
             raise ValueError(
-                "a 'failure' may only accompany 'planner_unavailable' or "
-                f"'synthesis_unavailable'; got {self.status!r}"
+                "a 'failure' may only accompany 'planner_unavailable', "
+                f"'synthesis_unavailable' or 'location_unavailable'; got {self.status!r}"
+            )
+
+        # A location outage says WHY nothing ran, and says nothing more: no
+        # answer (not even an abstention - no evidence was ever weighed).
+        if self.status == "location_unavailable" and (
+            self.failure is None or self.answer is not None
+        ):
+            raise ValueError(
+                "'location_unavailable' requires a 'failure' and carries no answer"
             )
 
         # The stage and the status must tell the same story. They are derived
@@ -664,6 +688,7 @@ class AgentResult(_StrictModel):
         expected = {
             "planner_unavailable": "planning",
             "synthesis_unavailable": "synthesis",
+            "location_unavailable": "location",
         }.get(self.status)
         if self.failure is not None and self.failure.stage != expected:
             raise ValueError(

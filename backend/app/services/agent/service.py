@@ -20,6 +20,8 @@ Where it broke               Status                      What survives
 ===========================  ==========================  ====================
 planner                      ``planner_unavailable``     nothing ran, so
                                                          nothing is claimed
+geocoder (location service)  ``location_unavailable``    the failed step and
+unavailable                                              its diagnostic note
 synthesizer                  ``synthesis_unavailable``   the evidence
 grounding rejected the       ``answer_withheld``         the evidence, the
 answer                                                   trace, the checks
@@ -122,6 +124,26 @@ def _place(plan: AgentPlan) -> str | None:
         discovery.intent.location_query
         if isinstance(discovery, ExecuteQueryParams)
         else None
+    )
+
+
+def _location_failure(retry_after_seconds: float | None) -> AgentFailure:
+    """The location service could not be used; nothing downstream ran.
+
+    The message is fixed and system-written: the upstream's own words (status
+    codes, timeouts) stay in the failed step and the evidence, for diagnosis,
+    and never become the sentence a user reads.
+    """
+
+    return AgentFailure(
+        stage="location",
+        code="geocoding_unavailable",
+        dependency="geocoder",
+        message=(
+            "Location service temporarily unavailable. The place could not be "
+            "looked up, so no scene was searched and nothing was measured."
+        ),
+        retry_after_seconds=retry_after_seconds,
     )
 
 
@@ -255,6 +277,20 @@ class AgentService(DomainService):
             return AgentResult(
                 status="needs_clarification",
                 clarification=clarification,
+                trace=AgentTrace(plan=plan, steps=outcome.steps),
+                evidence=outcome.evidence,
+            )
+
+        # A location-service outage is neither of those. The question was
+        # usable and the user has nothing to add, so it is not a clarification;
+        # and no scene was ever searched, so it is not an evidence verdict -
+        # sending it on to synthesis is what turned it into "Insufficient
+        # evidence". It ends here, as what it is. The failed step and the
+        # discovery-failure evidence item keep the diagnostic detail.
+        if outcome.discovery_failure_code == "geocoding_unavailable":
+            return AgentResult(
+                status="location_unavailable",
+                failure=_location_failure(outcome.discovery_failure_retry_after_seconds),
                 trace=AgentTrace(plan=plan, steps=outcome.steps),
                 evidence=outcome.evidence,
             )

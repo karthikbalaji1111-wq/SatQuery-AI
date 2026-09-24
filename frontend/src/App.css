@@ -512,6 +512,14 @@ label {
   background: none;
 }
 
+/* The dependency and machine code behind an unavailable-service notice: there
+   for diagnosis, deliberately quieter than the sentence a user acts on. */
+.answer-notice-code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
 .clarification-understood {
   margin: 4px 0 0;
   font-size: 10.5px;
@@ -861,12 +869,14 @@ button:disabled {
 }
 
 .pipeline-state[data-state="partial"],
-.pipeline-state[data-state="not-run"] {
+.pipeline-state[data-state="not-run"],
+.pipeline-state[data-state="unavailable"] {
   color: var(--amber-ink);
 }
 
 .pipeline-state[data-state="partial"]::before,
-.pipeline-state[data-state="not-run"]::before {
+.pipeline-state[data-state="not-run"]::before,
+.pipeline-state[data-state="unavailable"]::before {
   background: var(--amber);
 }
 

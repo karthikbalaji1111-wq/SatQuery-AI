@@ -132,6 +132,29 @@ describe("response validation - an unusable response is refused", () => {
     expect(asAgentResult(body)).toBe(body);
   });
 
+  it("accepts a location outage that carries its failure", () => {
+    const body = {
+      ...AGENT,
+      status: "location_unavailable",
+      answer: null,
+      failure: {
+        stage: "location",
+        code: "geocoding_unavailable",
+        dependency: "geocoder",
+        message: "Location service temporarily unavailable.",
+        retry_after_seconds: 45,
+      },
+    };
+    expect(asAgentResult(body)).toBe(body);
+  });
+
+  it("refuses a location outage with no failure to show", () => {
+    const error = rejects(() =>
+      asAgentResult({ ...AGENT, status: "location_unavailable", answer: null }),
+    );
+    expect(error.code).toBe("invalid_response");
+  });
+
   it("refuses a clarification status with no clarification to show", () => {
     const error = rejects(() =>
       asAgentResult({ ...AGENT, status: "needs_clarification", answer: null }),

@@ -81,8 +81,12 @@ def test_resolve_upstream_timeout() -> None:
 
     response = make_client(handler).post(RESOLVE_URL, json={"place": "Chennai"})
 
-    assert response.status_code == 502
-    assert response.json()["error"]["code"] == "upstream_error"
+    # The location service is unavailable, after bounded retries: 503 with its
+    # own code, distinct from a malformed answer (502, below). No wait is
+    # known, so none is claimed.
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "geocoding_unavailable"
+    assert "retry-after" not in response.headers
 
 
 def test_resolve_upstream_5xx() -> None:
@@ -90,8 +94,10 @@ def test_resolve_upstream_5xx() -> None:
         RESOLVE_URL, json={"place": "Chennai"}
     )
 
-    assert response.status_code == 502
-    assert response.json()["error"]["code"] == "upstream_error"
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "geocoding_unavailable"
+    # The upstream's body is never echoed.
+    assert "down" not in response.json()["error"]["message"]
 
 
 def test_resolve_malformed_payload() -> None:

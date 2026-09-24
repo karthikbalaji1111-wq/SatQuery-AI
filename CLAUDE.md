@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 27 (geocoder reliability). Section 23 (the scientific core,
+current figures are in section 28 (location-outage UX). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2389,4 +2389,64 @@ the throttle path is proven by the tests and mutations above, not observed live.
 | `pytest -q` | **3050 passed** (3000 before) |
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **372 passed** (no frontend change) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 28. Pre-M6 UX hardening: a location outage is not "Insufficient evidence" - IMPLEMENTED (2026-09-24)
+
+**Root cause.** `AgentService.answer()` special-cased only the discovery codes
+`not_found` (-> `location_not_found` clarification) and `aoi_too_large`
+(-> `area_too_large`). Every other discovery failure went on to synthesis,
+where the evidence held no measurement, so `StandardReport` (or an AI
+synthesizer) abstained with `ABSTENTION` - "Insufficient evidence to answer the
+question." - and the run returned `status: "ok"` with that as its answer; the
+frontend rendered it as the headline. No scene had been searched. Underneath,
+geocoder 5xx / timeout / unreachable (after retries) were coded
+`upstream_error`, indistinguishable from a catalog outage.
+
+**Fix (existing error architecture, no new component):**
+- `nominatim.py`: exhausted retries of 5xx / timeout / connection now raise
+  `GeocodingUnavailableError` (503, `geocoding_unavailable`), like a 429 or a
+  cooldown refusal; the retry hint is optional and never invented. A malformed
+  answer or a 4xx stays `upstream_error` (502).
+- Contract: `AgentStatus` + `location_unavailable`; `AgentFailure.stage` +
+  `location`; `AgentFailure.dependency` (`"geocoder"`). Integrity: the status
+  requires a `location` failure and carries no answer and no clarification.
+- `AgentExecutor` keeps the cooldown / Retry-After wait
+  (`discovery_failure_retry_after_seconds`, read by `isinstance` - the
+  executor may not call `getattr`, a test forbids it).
+- `AgentService`: `geocoding_unavailable` -> `location_unavailable` with a
+  fixed, system-written message ("Location service temporarily unavailable.
+  The place could not be looked up, so no scene was searched and nothing was
+  measured."). Synthesis is not called. The failed step and the
+  `execution.discovery_failure` evidence keep the diagnostic detail.
+- Frontend: the status notice "Location service temporarily unavailable." +
+  "Try again in about N seconds." (or "Try again shortly.") + a muted
+  `geocoder · geocoding_unavailable`; pipeline label "Location unavailable"
+  (amber); `validate.ts` accepts the status only with its failure.
+
+**Unchanged:** A clarification (incl. `location_not_found`, `area_too_large`)
+is still a question; a catalog/raster/analysis failure still surfaces through
+the trace and evidence with the existing abstention; a genuine evidence verdict
+still reads "Insufficient evidence to answer the question."; the successful
+workflow is byte-identical. No scientific, routing, intent-model, STAC, raster
+or evidence-calculation change.
+
+**Tests:** `tests/test_geocoder_ux.py` (12, the REAL geocoder behind a scripted
+transport): 429, cooldown refusal, 5xx, not "Insufficient evidence", never a
+clarification, no upstream text in the user sentence, genuine abstention kept,
+catalog outage not a location outage, not-found still a clarification, success
+unchanged, contract integrity, the HTTP route. Updated deliberately: the
+status-vocabulary pin (+`location_unavailable`), the two resolve-route tests
+(503 `geocoding_unavailable` instead of 502 for timeout/5xx), three
+reliability tests (message now wraps the last failure). Frontend: 5 rendering
+tests + 2 validation tests. Mutations: outage falls through to synthesis (6
+fail), outage turned into a clarification (7 fail); both restored.
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3062 passed** (3050 before) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **379 passed** (372 before) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |

@@ -31,7 +31,9 @@ and how it behaves when refused:
   with Retry-After) without contacting the service;
 * **bounded retry** - at most ``geocoder_max_attempts`` requests per geocode,
   with backoff between them, and never more than
-  ``geocoder_retry_budget_seconds`` of waiting.
+  ``geocoder_retry_budget_seconds`` of waiting. When a 5xx, a timeout or an
+  unreachable service outlasts them, that too is ``geocoding_unavailable`` (no
+  wait claimed); a malformed answer or a 4xx stays ``upstream_error``.
 
 Nothing here invents a location: a failure is an error, never a fallback
 coordinate, a nearby city or a stale guess.
@@ -556,9 +558,14 @@ async def _resolve_upstream(
         if delay > 0:
             await _pause(delay)
 
-    # Every attempt was transient. The message is the last failure's own, so
-    # the caller reads the same sentence as before retries.
-    raise UpstreamServiceError(last.message if last else "The geocoding service is unavailable.")
+    # Every attempt failed transiently (5xx, timeout, unreachable): the
+    # location service is unavailable. The last failure's own words are kept
+    # for diagnostics; no wait is claimed, because none is known.
+    raise GeocodingUnavailableError(
+        "Location lookup is temporarily unavailable: "
+        + (last.message if last else "The geocoding service is unavailable.")
+        + " Nothing was searched."
+    )
 
 
 def _retrieve(future: asyncio.Future[NominatimPlace]) -> None:
