@@ -35,6 +35,7 @@ import {
   resultContext,
   resultSummary,
   runStages,
+  validationRecords,
   type OutcomeKind,
   type Quality,
   type ResultBody,
@@ -1025,15 +1026,12 @@ const RADIOMETRY_LABELS: Record<RadiometricState["status"], string> = {
  * Stated from the backend's own records, in its own terms.
  */
 function ValidationSummary({ analysis }: { analysis: NonNullable<Evidence["analysis"]> }) {
-  const comparison = analysis.temporal_comparison ?? null;
-  const quality: PixelQuality[] = [
-    ...(analysis.pixel_quality ?? []),
-    ...[comparison?.first.pixel_quality, comparison?.second.pixel_quality].filter(
-      (entry): entry is PixelQuality => Boolean(entry),
-    ),
-  ];
-  const radiometry = analysis.radiometry ?? [];
-  const grids = (analysis.grids ?? []).filter((grid) => grid.stage === "post_read" || grid.status === "refused");
+  const records = validationRecords(analysis);
+  const quality: PixelQuality[] = records.quality;
+  const radiometry = records.radiometry;
+  const grids = records.grids.filter(
+    (grid) => grid.stage === "post_read" || grid.status === "refused",
+  );
   if (quality.length === 0 && radiometry.length === 0 && grids.length === 0) return null;
 
   return (

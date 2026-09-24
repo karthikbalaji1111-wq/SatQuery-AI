@@ -290,6 +290,23 @@ describe("M6 evidence panel", () => {
     );
   });
 
+  it("reports a comparison's checks for both scenes and for the pair", () => {
+    render(<AgentEvidencePanel evidence={TEMPORAL_MARINA.evidence} />);
+    const checks = within(evidencePanel()).getByRole("region", { name: "Quality and validation" });
+    const names = [...checks.querySelectorAll(".check-name")].map((node) => node.textContent);
+    expect(names).toEqual([
+      "Pixel quality · NDWI · baseline",
+      "Pixel quality · NDWI · target",
+      "Radiometry · S2A_44PMV_20240115_0_L2A",
+      "Radiometry · S2B_44PMV_20250104_0_L2A",
+      "Geometry · ndwi",
+      "Geometry · ndwi",
+      "Geometry · temporal ndwi pair",
+    ]);
+    expect(checks).toHaveTextContent("baseline 05.10");
+    expect(checks).toHaveTextContent("baseline 05.11");
+  });
+
   it("never sets one observation's mean alone as 'the' NDWI of a comparison", () => {
     // Both observations publish "ndwi_mean"; grouping them by name set the
     // EARLIER one under a bare "NDWI mean" heading.

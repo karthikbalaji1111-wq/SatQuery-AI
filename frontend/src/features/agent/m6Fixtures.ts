@@ -198,9 +198,11 @@ export const TEMPORAL_MARINA: AgentResult = (() => {
   const t = (id: string, name: string, value: number, unit = "index") => item(`temporal_ndwi.${id}`, "temporal_ndwi", name, value, unit);
   const first = scene("S2A_44PMV_20240115_0_L2A", "2024-01-15T05:15:05.886000Z", "sentinel-2a", 14.28);
   const second = scene("S2B_44PMV_20250104_0_L2A", "2025-01-04T05:15:13.077000Z", "sentinel-2b", 14.19);
-  const observation = (label: string, s: Json, valid: number) => ({
+  const observation = (label: string, s: Json, valid: number, baseline: string) => ({
     window_label: label, scene_id: s.id, acquired_at: s.datetime, cloud_cover: s.cloud_cover,
     measurements: [], transform: null, pixel_quality: pixelQuality("ndwi", s.id as string, label, valid, 33600),
+    radiometry: radiometry(s.id as string, "sentinel-2-optical", baseline),
+    grid: grid("ndwi", s.id as string, "EPSG:32644", 112, 300),
   });
   return {
     status: "ok",
@@ -229,9 +231,10 @@ export const TEMPORAL_MARINA: AgentResult = (() => {
       analysis: analysisResult({
         analysis_outcomes: [{ name: "temporal_ndwi", status: "completed", reason: null }],
         temporal_comparison: {
-          first: observation("baseline", first, 33496),
-          second: observation("target", second, 33524),
+          first: observation("baseline", first, 33496, "05.10"),
+          second: observation("target", second, 33524, "05.11"),
           compatibility: {}, differences: [], change: null, warnings: [],
+          pair_grid: grid("temporal_ndwi_pair", null as unknown as string, "EPSG:32644", 112, 300),
         },
       }),
     },
