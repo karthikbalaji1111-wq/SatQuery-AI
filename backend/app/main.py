@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +16,33 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.limits import install_request_limits
 from app.core.logging import configure_logging, get_logger
+from app.services.geospatial.nominatim import warm_geocoder_cache, warm_places
+
+
+def _lifespan(
+    settings: Settings,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """Start the optional geocoder warm-up; stop it with the application.
+
+    The warm-up runs in the BACKGROUND: startup never waits on a third-party
+    service, and a warm-up that cannot reach the geocoder only leaves the cache
+    as cold as it would have been anyway.
+    """
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        task: asyncio.Task[list[str]] | None = None
+        if warm_places(settings):
+            task = asyncio.create_task(warm_geocoder_cache(settings))
+        try:
+            yield
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    return lifespan
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -24,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=settings.app_name,
         version=__version__,
         summary="Natural-language satellite query platform - foundation build.",
+        lifespan=_lifespan(settings),
     )
 
     # Order matters, and it is the reverse of the reading order: Starlette runs

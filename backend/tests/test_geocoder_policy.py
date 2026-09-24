@@ -134,7 +134,10 @@ def test_a_cached_answer_from_one_service_never_satisfies_another() -> None:
 def test_a_failure_is_never_cached() -> None:
     """An outage cached for the TTL would outlive the outage itself."""
 
-    recorder = Recorder(httpx.Response(500), httpx.Response(500), ok())
+    # One failure per allowed attempt, then recovery.
+    recorder = Recorder(
+        httpx.Response(500), httpx.Response(500), httpx.Response(500), ok()
+    )
     config = settings()
 
     async def scenario() -> None:
@@ -299,7 +302,7 @@ def test_retries_are_bounded() -> None:
         assert "429" in str(raised.value)
 
     asyncio.run(scenario())
-    assert len(recorder.requests) == 2
+    assert len(recorder.requests) == config.geocoder_max_attempts == 3
 
 
 def test_a_client_error_is_not_retried() -> None:

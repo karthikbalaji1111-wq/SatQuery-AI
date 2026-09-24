@@ -112,10 +112,34 @@ that the running configuration is visible in one place.
 | `SATQUERY_ADMISSION_WAIT_SECONDS` | `2` | How long a request waits for a slot before 503 |
 | `SATQUERY_WORKFLOW_BUDGET_SECONDS` | `900` | Total budget for one workflow |
 | `SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS` | `1` | Minimum spacing between geocoder requests |
-| `SATQUERY_GEOCODER_CACHE_TTL_SECONDS` | `900` | How long a resolved place is reused |
+| `SATQUERY_GEOCODER_CACHE_TTL_SECONDS` | `86400` | How long a resolved place is reused (successes only) |
+| `SATQUERY_GEOCODER_CACHE_ENTRIES` | `256` | Places kept in the geocoder cache (least recently used evicted) |
+| `SATQUERY_GEOCODER_MAX_ATTEMPTS` | `3` | Upstream requests one geocode may make |
+| `SATQUERY_GEOCODER_RETRY_BUDGET_SECONDS` | `15` | Most one geocode waits (backoff, Retry-After, cooldown) before `geocoding_unavailable` |
+| `SATQUERY_GEOCODER_BACKOFF_BASE_SECONDS` | `2` | First backoff; doubles per consecutive failure |
+| `SATQUERY_GEOCODER_MAX_COOLDOWN_SECONDS` | `300` | Cap on the backoff-derived cooldown after HTTP 429 |
+| `SATQUERY_GEOCODER_WARM_PLACES` | *(empty)* | `;`-separated places geocoded in the background at startup |
 | `SATQUERY_TRUSTED_ASSET_HOSTS` | *(empty)* | Hosts whose rasters may be opened |
 | `SATQUERY_IMAGERY_MAX_DIMENSION` | `1024` | Pixels per side of a returned window |
 | `SATQUERY_IMAGERY_MAX_WINDOW_PIXELS` | `50000000` | Total pixels a quantitative read may cover |
+
+### The geocoder on a shared outbound IP
+
+Nominatim limits requests per IP, and a cloud host's outbound IPs are shared
+(Render: "shared across all services in the same region"), so the budget this
+application spends is shared with strangers. A 429 therefore says the SHARED
+budget is spent. `app/services/geospatial/nominatim.py` asks as little as it
+can and backs off when refused: a day-long cache of real answers, one upstream
+sequence per place however many callers ask at once, one request per second,
+and after a 429 no request at all until `Retry-After` (or an exponential
+backoff, when absent) has passed. A caller who would wait longer than the retry
+budget gets **503 `geocoding_unavailable`** with `Retry-After` at once - never a
+guessed location. `/ready` reports the geocoder's counters (upstream requests,
+429s, cache hits, coalesced callers, refusals during a cooldown) without
+contacting it. A free instance loses its cache when it sleeps;
+`SATQUERY_GEOCODER_WARM_PLACES` refills it with real answers in the background
+after startup. None of this can create budget the shared IP does not have: a
+dedicated outbound IP or a keyed/self-hosted geocoder is the durable fix.
 
 Three refusals, deliberately distinguishable:
 

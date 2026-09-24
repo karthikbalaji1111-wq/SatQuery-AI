@@ -77,6 +77,11 @@ def _configuration_is_explicit(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
     # is proven in tests/test_geocoder_policy.py, which configures a real
     # interval and asserts the wait actually happens.
     monkeypatch.setenv("SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS", "0")
+    # The same for the backoff after a failed geocode: a suite that fakes a 503
+    # must not sleep two and four real seconds to prove it retries. The backoff,
+    # the cooldown and Retry-After are proven in tests/test_geocoder_policy.py
+    # against a fake clock that advances instead of sleeping.
+    monkeypatch.setenv("SATQUERY_GEOCODER_BACKOFF_BASE_SECONDS", "0")
 
     get_settings.cache_clear()
     reset_geocoder_state()

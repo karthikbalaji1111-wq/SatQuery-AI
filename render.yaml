@@ -73,6 +73,12 @@ services:
       # OpenStreetMap's usage policy: one geocoder request per second.
       - key: SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS
         value: "1"
+      # A free instance loses its in-memory geocoder cache whenever it sleeps.
+      # Refill it after startup with the example questions' places: REAL
+      # geocodes, in the background, through the same cache, pacing and 429
+      # cooldown as any request.
+      - key: SATQUERY_GEOCODER_WARM_PLACES
+        value: "Marina Beach, Chennai;Cubbon Park, Bengaluru;Ameerpet, Hyderabad"
 
       # The deterministic pipeline needs no AI provider. The natural-language
       # agent does: set the key for the selected provider, or leave all blank.

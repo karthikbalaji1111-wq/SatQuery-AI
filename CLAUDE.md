@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 26 (demo readiness, intent model v2). Section 23 (the scientific core,
+current figures are in section 27 (geocoder reliability). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2288,3 +2288,93 @@ the model's call. English only.
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **372 passed** (368 at M5.6) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds (with `VITE_API_BASE_URL`) |
+
+---
+
+## 27. Geocoder reliability on a shared outbound IP - IMPLEMENTED (2026-09-24)
+
+No scientific change (M0-M5, scene selection, masking, radiometric and
+geometric validation, formulas, limits, intent model untouched) and no new
+provider, dependency or service. Nominatim stays the only geocoder and the
+authority for every coordinate.
+
+**Why production hit 429 - established, not guessed.** Render's outbound IPs
+are "shared across all services in the same region" (Render docs) and Nominatim
+limits per IP. During the 429 window this application sent a few requests a
+MINUTE while the same User-Agent from another network got 200, so the shared
+budget was spent by other tenants. The client then made it worse: it retried 1
+s after a 429 (doubling its ask), had no cooldown (every new question probed
+the limit again), cached for only 15 minutes, and a free instance loses that
+cache whenever it sleeps or redeploys. One geocode per agent run
+(`QueryService.build_plan`); the frontend geocodes only on the manual panel's
+explicit Resolve.
+
+**What changed** (`app/services/geospatial/nominatim.py`, public API unchanged):
+- **Cache**: successes only; LRU-bounded (`geocoder_cache_entries`, 256);
+  TTL 24 h (was 15 min); keyed by normalised query + service; each entry
+  records query, source, monotonic and UTC resolution time.
+- **Coalescing**: concurrent callers for one place await ONE in-flight future
+  and share its answer OR its failure (8 callers during an outage = 1 request,
+  not 8 sequences). A leader's cancellation does not cancel its waiters.
+- **Pacing**: unchanged (1 request/s, one in flight); the lock is now held for
+  one request, never across a backoff.
+- **429**: `Retry-After` honoured (seconds or HTTP-date, capped at 1 h), else
+  backoff 2 s doubling to a 300 s cap; a PROCESS-WIDE cooldown during which no
+  request is sent; a caller whose wait would exceed
+  `geocoder_retry_budget_seconds` (15) gets `GeocodingUnavailableError` at once
+  - HTTP 503, code `geocoding_unavailable`, `Retry-After` header, message
+  "Location lookup is temporarily unavailable ... Try again in about N
+  seconds." A subclass of `UpstreamServiceError`, so every existing handler
+  still applies.
+- **Bounded retry**: at most `geocoder_max_attempts` (3) requests per geocode
+  for 429/5xx/timeout/connection errors, with backoff, charged to the wait
+  budget counted as PLANNED waiting (bounded however the clock behaves). No
+  retry for a 4xx or a malformed answer. Upstream 503/5xx keep their existing
+  502 `upstream_error` after retries.
+- **Observability**: `/ready`'s geocoder detail reports upstream requests,
+  429s, cache hits, coalesced callers, refusals during a cooldown, cache size
+  and any active cooldown - from memory, contacting nothing.
+- **Warm-up (optional)**: `SATQUERY_GEOCODER_WARM_PLACES` (";"-separated) is
+  geocoded in the background after startup through the same path; a refused
+  place is retried after the cooldown for at most 4 rounds; only real answers
+  are cached. `render.yaml` warms the three example-chip places.
+- The agent path is unchanged: an outage is still NOT a clarification (M5.5);
+  the failed step and `execution.discovery_failure` now carry the plain
+  "temporarily unavailable ... try again in N seconds" message; nothing is
+  searched and no number is produced.
+
+**Not added: a secondary geocoder.** `GeospatialService` calls Nominatim
+directly and `ResolveResponse.source` is `Literal["nominatim", "input"]` in
+both contracts; the keyless alternatives (e.g. Photon) would be a provider
+abstraction plus uncertain behaviour from the same shared IP, and different
+bounding boxes would silently change every AOI. The durable fix is a dedicated
+outbound IP or a keyed/self-hosted geocoder.
+
+**Tests** - `tests/test_geocoder_reliability.py` (50, fake clock that advances
+instead of sleeping): success, cache hit, repeats, provenance, expiry, LRU
+bound, concurrent same query (1 request, 7 coalesced), shared failure,
+Retry-After seconds / HTTP-date / beyond budget / absurd / unparseable, backoff
+2-4, growth 2-4-8-16 capped, no request during a cooldown, cooldown expiry,
+attempt cap 1/2/3/5, budget stop, retry exhaustion, timeout, unreachable,
+5 malformed answers, 6 failure kinds never yield a location, route 503 +
+Retry-After, agent run searches nothing, readiness counters, warm-up (parse,
+cache, throttle, bound, not-found, lifespan). Two existing policy tests moved
+with the design (3 attempts, not 2; three failures to exhaust); none weakened.
+
+**Mutation-checked (5/5, restored byte-identical):** retry storm - no cooldown
+(13 fail), cache bypass (8), fabricated fallback coordinates (39), ignoring
+Retry-After (12), unbounded retries (8).
+
+**Verified locally against real Nominatim**: warm-up geocoded Marina Beach,
+Cubbon Park and Ameerpet (3 requests, paced ~1 s, all 200); Cubbon Park NDVI
+0.5204 from the warm cache; Dal Lake NDWI 0.03169 geocoded once, then a cache
+hit on repeat; `/ready`: 4 upstream requests, 2 cache hits.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3050 passed** (3000 before) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **372 passed** (no frontend change) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |

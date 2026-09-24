@@ -38,6 +38,7 @@ from app import __version__
 from app.core.config import AI_PROVIDER_FIELDS, Settings, get_settings
 from app.services.agent.intent_model import load_intent_classifier
 from app.services.agent.providers.local import ProbeFailure, installed_models
+from app.services.geospatial.nominatim import geocoder_status
 
 router = APIRouter()
 
@@ -97,13 +98,29 @@ def _catalogs(settings: Settings) -> Capability:
 
 def _geocoder(settings: Settings) -> Capability:
     configured = bool(settings.nominatim_base_url and settings.nominatim_user_agent)
+    # What this process has actually done - read from memory, nothing contacted.
+    # A throttle is reported, not turned into "not ready": the configuration is
+    # fine and the upstream will answer again; readiness is about the former.
+    state = geocoder_status()
+    cooling = (
+        f" Upstream is limiting requests: none will be sent for "
+        f"{state.cooldown_remaining_seconds:.0f}s."
+        if state.cooldown_remaining_seconds > 0
+        else ""
+    )
     return Capability(
         name="geocoder",
         ready=configured,
         detail=(
             f"{settings.nominatim_base_url}, at most one request every "
             f"{settings.geocoder_min_interval_seconds:.0f}s application-wide, "
-            "with a cache. Configured - not contacted by this probe."
+            "with a cache. Configured - not contacted by this probe. Since "
+            f"start: {state.upstream_requests} upstream requests "
+            f"({state.throttled} refused with HTTP 429), {state.cache_hits} "
+            f"cache hits, {state.coalesced} joined an identical request in "
+            f"flight, {state.refused_during_cooldown} answered during a "
+            f"cooldown without a request; {state.cache_entries} places cached."
+            f"{cooling}"
             if configured
             else "No geocoder base URL or User-Agent is configured."
         ),

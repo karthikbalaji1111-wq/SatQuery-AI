@@ -178,8 +178,27 @@ class Settings(BaseSettings):
     # OpenStreetMap's usage policy: at most one request per second from an
     # application, with caching expected. Application-wide, not per client.
     geocoder_min_interval_seconds: float = 1.0
-    geocoder_cache_ttl_seconds: float = 900.0
-    geocoder_cache_entries: int = 256
+    #: A place's geocoded extent does not change within a day; the policy asks
+    #: for caching, and every avoided request is budget the shared outbound IP
+    #: of a cloud host does not spend. Successes only - a failure is never
+    #: cached.
+    geocoder_cache_ttl_seconds: float = Field(default=86_400.0, ge=0)
+    geocoder_cache_entries: int = Field(default=256, ge=1, le=10_000)
+    #: Upstream requests ONE geocode may make, the first included.
+    geocoder_max_attempts: int = Field(default=3, ge=1, le=5)
+    #: The most one geocode will spend WAITING - on backoff, on Retry-After, on
+    #: a cooldown another caller started. Past it the caller gets
+    #: ``geocoding_unavailable`` at once rather than a longer wait.
+    geocoder_retry_budget_seconds: float = Field(default=15.0, ge=0, le=120)
+    #: First backoff after a failure without Retry-After; doubles per
+    #: consecutive failure, capped by ``geocoder_max_cooldown_seconds``.
+    geocoder_backoff_base_seconds: float = Field(default=2.0, ge=0, le=60)
+    geocoder_max_cooldown_seconds: float = Field(default=300.0, ge=0, le=3_600)
+    #: Optional, ";"-separated place names geocoded once in the background at
+    #: startup, through the same cache, pacing and cooldown as any request. A
+    #: free-tier host loses its in-memory cache whenever it sleeps; this refills
+    #: it with REAL answers before a user asks. Empty: nothing is warmed.
+    geocoder_warm_places: str = Field(default="", max_length=2_000)
 
     # Natural-language intent extraction via the Google Gemini API (google-genai).
     # GEMINI_API_KEY / GEMINI_MODEL use the standard unprefixed names. Never
