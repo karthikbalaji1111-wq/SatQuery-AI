@@ -60,23 +60,25 @@ class UpstreamServiceError(AppError):
 
 
 class GeocodingUnavailableError(UpstreamServiceError):
-    """The geocoder is refusing requests for now (it answered HTTP 429).
+    """The location service cannot be used right now.
 
-    503 rather than the parent's 502: nothing is broken and the same request
-    will very likely succeed later - the upstream service asked this server to
-    slow down. Carries ``Retry-After`` so a caller waits the time the upstream
-    asked for, or the time this process is backing off, instead of retrying
-    straight into the limit. A subclass, so every existing ``except
-    UpstreamServiceError`` still handles it.
+    Raised when the geocoder refuses (HTTP 429, or this process's cooldown
+    after one) or cannot answer (5xx, timeout, unreachable) after the bounded
+    retries. 503 rather than the parent's 502: the request was fine and will
+    very likely succeed later. When the wait is KNOWN - the upstream's
+    Retry-After or this process's cooldown - it is carried, and sent as
+    ``Retry-After``; when it is not, nothing is invented. A subclass, so every
+    existing ``except UpstreamServiceError`` still handles it.
     """
 
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = "geocoding_unavailable"
 
-    def __init__(self, message: str, *, retry_after_seconds: float) -> None:
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
-        self.headers = {"Retry-After": str(max(1, ceil(retry_after_seconds)))}
+        if retry_after_seconds is not None:
+            self.headers = {"Retry-After": str(max(1, ceil(retry_after_seconds)))}
 
 
 class ImageryError(AppError):

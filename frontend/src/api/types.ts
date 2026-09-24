@@ -766,13 +766,18 @@ export interface AgentEvidence {
  * was never produced, and the deterministic evidence is returned instead.
  * `needs_clarification` means nothing was measured: the question did not say
  * something the workflow needs, and `clarification` says what.
+ * `location_unavailable` means the question was fine but the location service
+ * (the geocoder) could not be used, so nothing was searched; `failure` says so
+ * and, when known, how long to wait. It is neither a question back to the user
+ * nor a verdict on the evidence.
  */
 export type AgentStatus =
   | "ok"
   | "planner_unavailable"
   | "synthesis_unavailable"
   | "answer_withheld"
-  | "needs_clarification";
+  | "needs_clarification"
+  | "location_unavailable";
 
 /** Why a question could not be executed as asked - one missing fact each. */
 export type ClarificationReason =
@@ -876,10 +881,12 @@ export interface ModelCatalogResponse {
 }
 
 export interface AgentFailure {
-  stage: "planning" | "synthesis";
+  stage: "planning" | "synthesis" | "location";
   code: string;
   message: string;
   retry_after_seconds: number | null;
+  /** The external dependency that failed, when the failure is one. */
+  dependency?: "geocoder" | null;
 }
 
 export interface AgentResult {

@@ -47,7 +47,7 @@ import binascii
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from app.core.errors import AppError, InvalidInputError
+from app.core.errors import AppError, GeocodingUnavailableError, InvalidInputError
 from app.core.logging import get_logger
 from app.services.agent.registry import AnalysisFlag, resolve_tool
 from app.services.agent.schemas import (
@@ -121,6 +121,9 @@ class ExecutionOutcome:
     #: orchestrator tell "no such place" (a question to put back to the user)
     #: from an outage, without matching on message text.
     discovery_failure_code: str | None = None
+    #: The wait that failure named, when it named one (a geocoder cooldown or
+    #: Retry-After). ``None`` means unknown - never zero.
+    discovery_failure_retry_after_seconds: float | None = None
 
 
 def _execution_request(params: ExecuteQueryParams) -> QueryExecutionRequest:
@@ -481,6 +484,7 @@ class AgentExecutor:
         execution: QueryExecutionResult | None = None
         discovery_failure: str | None = None
         discovery_failure_code: str | None = None
+        discovery_failure_retry_after: float | None = None
 
         if discovery is not None:
             index, params = discovery
@@ -494,6 +498,9 @@ class AgentExecutor:
                 )
                 discovery_failure = exc.message
                 discovery_failure_code = exc.code
+                # Only a location-service outage names a wait worth keeping.
+                if isinstance(exc, GeocodingUnavailableError):
+                    discovery_failure_retry_after = exc.retry_after_seconds
                 steps[index] = AgentToolStep(
                     status="failed", parameters=params, error_message=exc.message
                 )
@@ -557,6 +564,7 @@ class AgentExecutor:
             steps=ordered,
             evidence=evidence,
             discovery_failure_code=discovery_failure_code,
+            discovery_failure_retry_after_seconds=discovery_failure_retry_after,
         )
 
     # -- discovery -------------------------------------------------------- #

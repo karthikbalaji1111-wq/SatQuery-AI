@@ -1188,6 +1188,118 @@ describe("AgentPanel provider failures", () => {
 });
 
 // ===========================================================================
+// A location-service outage reads as one - not as missing evidence
+// ===========================================================================
+
+function locationOutage(retryAfter: number | null) {
+  return agentResult({
+    status: "location_unavailable",
+    answer: null,
+    trace: {
+      plan: { steps: [EXECUTE_STEP, { tool: "ndwi_statistics" }] },
+      steps: [
+        {
+          status: "failed",
+          parameters: EXECUTE_STEP,
+          rejection_reason: null,
+          error_message:
+            "Location lookup is temporarily unavailable: the public OpenStreetMap geocoder is limiting requests from this server (HTTP 429). Nothing was searched. Try again in about 45 seconds.",
+        },
+        {
+          status: "skipped",
+          parameters: { tool: "ndwi_statistics" },
+          rejection_reason: null,
+          error_message: null,
+        },
+      ],
+      evidence_refs: [],
+      answer_validation: null,
+    },
+    evidence: {
+      items: [
+        {
+          id: "execution.discovery_failure",
+          source: "execution",
+          text: "Scene discovery did not complete: Location lookup is temporarily unavailable.",
+          measurement: null,
+          visual: null,
+        },
+      ],
+      execution: null,
+      analysis: null,
+    },
+    failure: {
+      stage: "location",
+      code: "geocoding_unavailable",
+      dependency: "geocoder",
+      message:
+        "Location service temporarily unavailable. The place could not be looked up, so no scene was searched and nothing was measured.",
+      retry_after_seconds: retryAfter,
+    },
+  });
+}
+
+describe("AgentPanel - location service unavailable", () => {
+  it("says the location service is unavailable and when to retry", async () => {
+    await askWith(locationOutage(45));
+
+    const panel = screen
+      .getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
+    const notice = within(panel).getByRole("status");
+    expect(notice).toHaveAttribute("data-kind", "location_unavailable");
+    expect(notice).toHaveTextContent("Location service temporarily unavailable.");
+    expect(notice).toHaveTextContent("Try again in about 45 seconds.");
+    expect(notice).toHaveTextContent("geocoder · geocoding_unavailable");
+  });
+
+  it("is not presented as missing evidence or as a question", async () => {
+    await askWith(locationOutage(45));
+
+    const panel = screen
+      .getByRole("heading", { name: "Analysis result" })
+      .closest("section") as HTMLElement;
+    expect(panel).not.toHaveTextContent(/Insufficient evidence/i);
+    expect(document.querySelector(".clarification")).toBeNull();
+    // The upstream's own status text stays in the diagnostics, not the notice.
+    expect(within(panel).getByRole("status")).not.toHaveTextContent(/HTTP 429/);
+  });
+
+  it("labels the pipeline as a location outage, keeping the failed step", async () => {
+    await askWith(locationOutage(45));
+
+    const pipeline = screen
+      .getByRole("heading", { name: "Pipeline" })
+      .closest("section") as HTMLElement;
+    await waitFor(() =>
+      expect(within(pipeline).getByText("Location unavailable")).toBeInTheDocument(),
+    );
+    expect(pipeline).toHaveTextContent(/HTTP 429/);
+  });
+
+  it("claims no wait when none is known", async () => {
+    await askWith(locationOutage(null));
+
+    const notice = within(
+      screen.getByRole("heading", { name: "Analysis result" }).closest("section") as HTMLElement,
+    ).getByRole("status");
+    expect(notice).toHaveTextContent("Try again shortly.");
+    expect(notice).not.toHaveTextContent(/Try again in about/);
+  });
+
+  it("leaves a genuine evidence verdict worded exactly as before", async () => {
+    await askWith(
+      agentResult({ answer: "Insufficient evidence to answer the question." }),
+    );
+
+    expect(
+      screen.getByText("Insufficient evidence to answer the question."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Location service temporarily unavailable/)).toBeNull();
+  });
+});
+
+// ===========================================================================
 // Deterministic evidence: one index's numbers never stand under another's name
 // ===========================================================================
 

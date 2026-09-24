@@ -70,13 +70,14 @@ function requireNumber(
   if (typeof body[key] !== "number") fail(what, `'${key}' is missing`);
 }
 
-/** The five statuses are exhaustive; anything else means a contract mismatch. */
+/** The six statuses are exhaustive; anything else means a contract mismatch. */
 const AGENT_STATUSES = new Set([
   "ok",
   "planner_unavailable",
   "synthesis_unavailable",
   "answer_withheld",
   "needs_clarification",
+  "location_unavailable",
 ]);
 
 export function asAgentResult(value: unknown): AgentResult {
@@ -95,6 +96,13 @@ export function asAgentResult(value: unknown): AgentResult {
     const clarification = record(body.clarification, "agent");
     requireString(clarification, "message", "agent");
     requireArray(clarification, "options", "agent");
+  }
+  // A location outage is shown from its failure (what, and when to retry), so
+  // a result claiming one must carry it.
+  if (body.status === "location_unavailable") {
+    const failure = record(body.failure, "agent");
+    requireString(failure, "message", "agent");
+    requireString(failure, "code", "agent");
   }
   return value as AgentResult;
 }

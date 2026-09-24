@@ -774,14 +774,19 @@ def test_an_executor_failure_is_not_mislabelled_as_another_status(
     assert synthesizer.calls == []
 
 
-def test_the_status_vocabulary_was_widened_only_for_clarification() -> None:
+def test_the_status_vocabulary_was_widened_only_for_clarification_and_location() -> None:
     """No status papers over executor failure.
 
-    M5.5 added exactly one: ``needs_clarification``, for a question that does
-    not state what to run or names a place the geocoder cannot find. It is a
-    question back to the user, and the contract forbids it beside an answer or
-    a failure (see ``test_standard_workflow``); an executor failure still
-    surfaces through the trace and the evidence, never through this status.
+    M5.5 added ``needs_clarification``, for a question that does not state what
+    to run or names a place the geocoder cannot find. It is a question back to
+    the user, and the contract forbids it beside an answer or a failure (see
+    ``test_standard_workflow``).
+
+    The pre-M6 UX pass added ``location_unavailable``, for ONE dependency
+    outage: the geocoder, which every run needs before any tool can do
+    anything. It carries a failure and no answer. Every other executor failure
+    - catalog, raster, analysis - still surfaces through the trace and the
+    evidence, never through a status (``test_geocoder_ux`` pins that).
     """
 
     from typing import get_args
@@ -794,6 +799,7 @@ def test_the_status_vocabulary_was_widened_only_for_clarification() -> None:
         "synthesis_unavailable",
         "answer_withheld",
         "needs_clarification",
+        "location_unavailable",
     }
 
 

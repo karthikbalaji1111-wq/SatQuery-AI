@@ -146,6 +146,12 @@ const STATUS_NOTICES: Record<Exclude<AgentStatus, "ok">, StatusNotice> = {
       "The measurements are unaffected and remain valid - the withheld text is the model's prose, not the analysis. The failed checks are listed below.",
     retryable: true,
   },
+  location_unavailable: {
+    summary: "Location service temporarily unavailable.",
+    detail:
+      "The place could not be looked up, so no scene was searched and nothing was measured. The question itself is fine - this is the location service, not the satellite data.",
+    retryable: true,
+  },
   needs_clarification: {
     summary: "No analysis ran: the question needs one more detail.",
     detail:
@@ -567,6 +573,8 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
         : "idle"
       : result.status === "needs_clarification"
         ? "clarify"
+        : result.status === "location_unavailable"
+        ? "unavailable"
         : result.trace.plan === null || steps.length === 0
         ? "not-run"
         : failed
@@ -580,6 +588,7 @@ export function AgentPipeline({ run }: { run: AgentRun }) {
     running: "Running",
     "not-run": "Not run",
     clarify: "Needs clarification",
+    unavailable: "Location unavailable",
     failed: "Failed",
     partial: "Partial",
     complete: "Complete",
@@ -1122,12 +1131,24 @@ function StatusNoticeBlock({
           deterministic evidence panel.
         </p>
       )}
-      {failure && (
+      {failure && failure.stage !== "location" && (
         <p className="answer-notice-detail">
           {failure.stage === "planning" ? "Planning" : "Synthesis"} · {failure.code}: {failure.message}
         </p>
       )}
-      {failure?.code === "rate_limited" ? (
+      {failure?.code === "geocoding_unavailable" ? (
+        // The summary already says what failed; this says when to retry, and
+        // names the dependency and code for anyone diagnosing it.
+        <p className="answer-notice-retry" data-dependency={failure.dependency ?? undefined}>
+          {failure.retry_after_seconds !== null &&
+          Math.ceil(failure.retry_after_seconds) >= 1
+            ? `Try again in about ${Math.ceil(failure.retry_after_seconds)} second${Math.ceil(failure.retry_after_seconds) === 1 ? "" : "s"}.`
+            : "Try again shortly."}{" "}
+          <span className="answer-notice-code">
+            ({failure.dependency ?? "geocoder"} · {failure.code})
+          </span>
+        </p>
+      ) : failure?.code === "rate_limited" ? (
         <p className="answer-notice-retry">
           {failure.retry_after_seconds !== null
             ? // A sub-second wait rounds to "0 seconds", which reads as broken;
