@@ -2370,6 +2370,18 @@ Cubbon Park and Ameerpet (3 requests, paced ~1 s, all 200); Cubbon Park NDVI
 0.5204 from the warm cache; Dal Lake NDWI 0.03169 geocoded once, then a cache
 hit on repeat; `/ready`: 4 upstream requests, 2 cache hits.
 
+**Verified in production** (`7a2c978` on Render, real UI on Vercel in a
+Playwright browser, `/ready` counters read after every run). At startup the
+warm-up made 3 real requests (0 refused). Then, once each: Cubbon Park NDVI
+0.5204 (S2B_43PGQ_20241208), Ameerpet NDBI -0.02482 (S2B_43QHV_20250107),
+Marina Beach NDWI 0.1466 (S2B_44PMV_20250104) - all three from the warm cache;
+Dal Lake NDWI 0.03169 (S2B_43SDT_20250109) and Chennai (`area_too_large`,
+20.9 x 42.4 km, M1 unchanged) each geocoded once. Repeats of Dal Lake (twice,
+phrased differently) and Chennai were cache hits: 8 questions + warm-up = 5
+upstream requests, 0 HTTP 429, 6 cache hits. Console 0 errors / 0 warnings;
+every API call 200; no CORS error. No 429 occurred during this verification, so
+the throttle path is proven by the tests and mutations above, not observed live.
+
 ### Baseline - VERIFIED
 
 | Check | Result |
