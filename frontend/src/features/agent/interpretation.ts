@@ -1,18 +1,28 @@
 /**
- * What a measured result means, in plain English - derived, never generated.
+ * What a measured result means - in plain English first, technical terms last.
  *
- * Every sentence here is a fixed template filled ONLY from values the result
- * model already read out of the backend's response: the operation, the place
- * as asked, the requested period, the selected scene's acquisition date, the
- * measurements and the pixel-quality counts. No model, no network, no outside
- * knowledge, and no cause: the sentences say what the numbers are and what
- * their sign means for that index, and stop there.
+ * Three layers, all derived, none generated:
+ *
+ *   1. What this means - one or two sentences a person with no remote-sensing
+ *      background can read in five seconds. No acronyms, no formulas.
+ *   2. How we know     - how the number was obtained, in everyday words.
+ *   3. Technical details - the exact values, index names, formulas, sensor,
+ *      scene, pixel counts and validation records, acronyms included
+ *      (`technicalDetails`).
+ *
+ * Every sentence is a fixed template filled ONLY from values the result model
+ * already read out of the backend's response: the operation, the place as
+ * asked, the requested period, the satellite image's date, the measurements,
+ * the pixel counts and the validation records. No model, no network, no
+ * outside knowledge, and no cause.
  *
  * The only boundary used anywhere is ZERO, the natural midpoint of a
- * normalised difference - no threshold is invented. "Zero" means zero at the
- * precision the card displays (a mean shown as +0.0000 is not called
- * positive), which is a statement about the display, not a significance test;
- * none exists in the backend, so none is claimed.
+ * normalised difference - so the words are "a positive vegetation signal",
+ * never "strong", "healthy" or "dense": no threshold for those exists in the
+ * product, so none is implied. "Zero" means zero at the precision the card
+ * displays (a mean shown as +0.0000 is not called positive), which is a
+ * statement about the display, not a significance test; none exists in the
+ * backend, so none is claimed.
  *
  * Only a successful measured result is interpreted. A clarification, a
  * refusal, a location problem, an analysis that was not computed, a provider
@@ -26,7 +36,9 @@ import {
   outcomeOf,
   resultContext,
   resultSummary,
+  validationRecords,
   type IndexReading,
+  type PeriodReading,
   type ResultBody,
   type ResultContext,
   type SarReading,
@@ -35,17 +47,21 @@ import {
 } from "./resultModel";
 
 export interface Interpretation {
-  /** One line, answering the question the result was asked. */
+  /** Comparisons only: the one-line answer to "what changed?". */
+  change?: string;
+  /** What this means - the one-line answer. */
   headline: string;
-  /** What the measured values say, in full sentences. */
+  /** What this means - the supporting sentence(s), with the number. */
   explanation: string;
-  /** The scientific boundary of the statement, when there is one to state. */
+  /** The limit of the statement, in plain words. */
   caveat?: string;
   /**
    * "Very few pixels contributed" - one per measurement that rests on fewer
    * than `SMALL_SAMPLE_PIXELS`. Present only when there is one to state.
    */
   sampleWarnings?: string[];
+  /** How we know - how the number was obtained, in everyday words. */
+  howWeKnow: string;
 }
 
 /**
@@ -65,28 +81,59 @@ export interface Interpretation {
  */
 export const SMALL_SAMPLE_PIXELS = 100;
 
-/** What each index measures, named as a signal - never as a land-cover class. */
-const SIGNAL: Record<IndexReading["key"], string> = {
-  ndvi: "vegetation-related signal",
-  ndwi: "water-related signal",
-  ndbi: "built-up-related signal",
+/** Each index in everyday words - a signal and an indicator, never a class. */
+const PLAIN: Record<
+  IndexReading["key"],
+  { signal: string; index: string; how: string; caveat: string }
+> = {
+  ndvi: {
+    signal: "vegetation signal",
+    index: "vegetation index",
+    how: "We compared two kinds of light the satellite records - red light and invisible near-infrared light - which plants reflect very differently.",
+    caveat:
+      "The vegetation index is an indicator: it does not tell us what kind of plants are there or what condition they are in.",
+  },
+  ndwi: {
+    signal: "water signal",
+    index: "water index",
+    how: "We compared green light with invisible near-infrared light, which water and land reflect very differently.",
+    caveat: "The water index is an indicator, not a map of where water is.",
+  },
+  ndbi: {
+    signal: "built-up signal",
+    index: "built-up index",
+    how: "We compared two kinds of invisible infrared light that built-up surfaces and plants reflect differently.",
+    caveat: "The built-up index is an indicator, not a building detector.",
+  },
 };
 
-const INDEX_CAVEAT: Record<IndexReading["key"], string> = {
-  ndvi:
-    "NDVI is a spectral index of the measured pixels; on its own it does not describe the condition or type of the vegetation on the ground.",
-  ndwi: "NDWI is a spectral index of the measured pixels, not a validated water classification.",
-  ndbi: "NDBI is a spectral index of the measured pixels, not a land-cover classification.",
+/** The same indices, named as a specialist would: for Technical details only. */
+const TECHNICAL: Record<IndexReading["key"], { name: string; formula: string; grid: string }> = {
+  ndvi: {
+    name: "NDVI - Normalized Difference Vegetation Index",
+    formula: "(NIR − Red) / (NIR + Red) · Sentinel-2 bands B08 and B04",
+    grid: "10 m (native)",
+  },
+  ndwi: {
+    name: "NDWI - Normalized Difference Water Index",
+    formula: "(Green − NIR) / (Green + NIR) · Sentinel-2 bands B03 and B08",
+    grid: "10 m (native)",
+  },
+  ndbi: {
+    name: "NDBI - Normalized Difference Built-up Index",
+    formula: "(SWIR − NIR) / (SWIR + NIR) · Sentinel-2 bands B11 (20 m) and B08 (10 m)",
+    grid: "10 m grid; the 20 m SWIR band limits detail to 20 m",
+  },
 };
 
-const TEMPORAL_CAVEAT =
-  "This measurement indicates a change in the satellite-derived water signal; it does not by itself establish the cause of that change. No statistical test was applied to the difference.";
+const INDEX_INPUTS =
+  "Raw digital numbers: both bands share one scale, which cancels in the ratio; no offset is applied.";
 
-const TEMPORAL_FLAT_CAVEAT =
-  "This compares the satellite-derived water signal of two scenes; no statistical test was applied to the difference.";
+const CHANGE_CAVEAT =
+  "This shows a change in the satellite measurement. It does not tell us what caused the change.";
 
 const SAR_CAVEAT =
-  "These are mean values from the provider's terrain-corrected Sentinel-1 product; SatQuery applies no speckle filtering and no land-cover classification to them.";
+  "These values come from the satellite provider's processed radar product. SatQuery does not use them to decide what is on the ground.";
 
 type Sign = "positive" | "negative" | "zero";
 
@@ -99,76 +146,68 @@ function shownSign(shown: string): Sign {
   return value > 0 ? "positive" : value < 0 ? "negative" : "zero";
 }
 
-/** The area as the question named it; the geocoder's match is shown beside it. */
-function area(context: ResultContext): string {
-  return context.location ? `the analysed area for ${context.location}` : "the analysed area";
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** "2024-12-08" -> "8 December 2024". Anything else is returned unchanged. */
+export function formatDay(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!match) return iso;
+  const month = MONTH_NAMES[Number(match[2]) - 1];
+  return month ? `${Number(match[3])} ${month} ${match[1]}` : iso;
 }
 
-/** When the numbers were measured: the scene's own date, and why that scene. */
-function when(sensor: string, scene: SceneRef | null, period: string | null): string {
-  const acquired = scene?.acquired ?? null;
-  if (acquired && period) return `In the ${sensor} scene of ${acquired}, selected for ${period}`;
-  if (acquired) return `In the ${sensor} scene of ${acquired}`;
-  if (period) return `For ${period}`;
-  return `In the selected ${sensor} scene`;
+function pixels(count: number): string {
+  return `${pixelCount(count)} usable ${count === 1 ? "pixel" : "pixels"}`;
+}
+
+/** "In the satellite image of <place> taken on <day>" - only what is known. */
+function imageOf(context: ResultContext, scene: SceneRef | null, kind = "satellite image"): string {
+  const place = context.location ? ` of ${context.location}` : "";
+  const day = formatDay(scene?.acquired);
+  const period = context.periods[0] ?? null;
+  if (day) return `In the ${kind}${place} taken on ${day}`;
+  if (period) return `In the ${kind}${place} for ${period}`;
+  return `In the ${kind}${place}`;
+}
+
+function excluded(reading: { quality: IndexReading["quality"] }): string | null {
+  const quality = reading.quality;
+  if (quality === null || quality.masked <= 0) return null;
+  return `${pixelCount(quality.masked)} of ${pixelCount(quality.total)} pixels were left out because the satellite data there was not usable - for example because of cloud, shadow or missing data.`;
 }
 
 // --------------------------------------------------------------------------- //
-// Single-scene spectral indices
+// Single-image indices
 // --------------------------------------------------------------------------- //
 
 function indexHeadline(reading: IndexReading): string {
-  const signal = SIGNAL[reading.key];
+  const { signal, index } = PLAIN[reading.key];
   switch (shownSign(signedIndex(reading.mean))) {
     case "positive":
-      return `Positive ${signal}`;
+      return `The selected area shows a positive ${signal}.`;
     case "negative":
-      return `No positive ${signal} on average`;
+      return `The selected area does not show a positive ${signal} on average.`;
     case "zero":
-      return `${reading.label} of zero on average`;
+      return `The ${index} is zero on average.`;
   }
 }
 
-function indexSentences(reading: IndexReading, lead: string | null): string[] {
-  const signal = SIGNAL[reading.key];
-  const across =
-    reading.validPixels !== null
-      ? ` across ${pixelCount(reading.validPixels)} valid pixels`
-      : "";
-  const value = `${signedIndex(reading.mean)}${across}`;
-  const sentences = [
-    lead
-      ? `${lead} had an average ${reading.label} of ${value}.`
-      : `The average ${reading.label} was ${value}.`,
-  ];
-
-  switch (shownSign(signedIndex(reading.mean))) {
+function indexMeaning(reading: IndexReading, lead: string | null): string {
+  const { signal, index } = PLAIN[reading.key];
+  const value = signedIndex(reading.mean);
+  const first = lead ? `${lead}, the ${index} was ${value}.` : `The ${index} was ${value}.`;
+  switch (shownSign(value)) {
     case "positive":
-      sentences.push(`An average above zero indicates a positive ${signal} in the measured pixels.`);
-      break;
+      return `${first} Above zero means a positive ${signal}.`;
     case "negative":
-      sentences.push(
-        `An average below zero means the measured pixels did not show a positive ${signal} on average.`,
-      );
-      break;
+      return `${first} Below zero means no positive ${signal} on average.`;
     case "zero":
-      sentences.push(
-        `An average of zero at the displayed precision shows neither a positive nor a negative ${signal}.`,
-      );
-      break;
+      return `${first} That is zero at the precision shown - neither a positive nor a negative ${signal}.`;
   }
-
-  if (reading.min !== null && reading.max !== null) {
-    sentences.push(
-      `Individual pixel values ranged from ${signedIndex(reading.min)} to ${signedIndex(reading.max)}.`,
-    );
-  }
-  if (reading.quality !== null && reading.quality.masked > 0) {
-    sentences.push(
-      `${pixelCount(reading.quality.masked)} of ${pixelCount(reading.quality.total)} pixels were excluded by pixel-quality masking before the average was computed.`,
-    );
-  }
-  return sentences;
 }
 
 function interpretIndices(
@@ -176,20 +215,28 @@ function interpretIndices(
   scene: SceneRef | null,
   context: ResultContext,
 ): Interpretation {
-  const lead = `${when("Sentinel-2", scene, context.periods[0] ?? null)}, ${area(context)}`;
-  const sentences = readings.flatMap((reading, position) =>
-    indexSentences(reading, position === 0 ? lead : null),
-  );
-  const caveats = [...new Set(readings.map((reading) => INDEX_CAVEAT[reading.key]))];
+  const lead = imageOf(context, scene);
+  const how = readings.flatMap((reading) => {
+    const { index, how: method } = PLAIN[reading.key];
+    const counted =
+      reading.validPixels !== null
+        ? `The ${index} of ${signedIndex(reading.mean)} is the average over ${pixels(reading.validPixels)}.`
+        : null;
+    return [method, counted, excluded(reading)].filter((line): line is string => line !== null);
+  });
+  const caveats = [...new Set(readings.map((reading) => PLAIN[reading.key].caveat))];
   return {
-    headline: readings.map(indexHeadline).join(" · "),
-    explanation: sentences.join(" "),
+    headline: readings.map(indexHeadline).join(" "),
+    explanation: readings
+      .map((reading, position) => indexMeaning(reading, position === 0 ? lead : null))
+      .join(" "),
     caveat: caveats.join(" "),
+    howWeKnow: how.join(" "),
   };
 }
 
 // --------------------------------------------------------------------------- //
-// Sentinel-1 backscatter
+// Radar
 // --------------------------------------------------------------------------- //
 
 function interpretSar(
@@ -197,55 +244,69 @@ function interpretSar(
   scene: SceneRef | null,
   context: ResultContext,
 ): Interpretation {
-  const parts = [
-    reading.vv !== null ? `VV backscatter of ${decibels(reading.vv)}` : null,
-    reading.vh !== null ? `VH backscatter of ${decibels(reading.vh)}` : null,
-  ].filter((part): part is string => part !== null);
-  const across =
-    reading.validPixels !== null
-      ? `, across ${pixelCount(reading.validPixels)} valid pixels`
-      : "";
-  const sentences = [
-    `${when("Sentinel-1", scene, context.periods[0] ?? null)}, ${area(context)} recorded a mean ${parts.join(" and a mean ")}${across}.`,
-  ];
+  const values = [reading.vv, reading.vh].filter((value): value is number => value !== null);
+  const headline =
+    values.length === 2
+      ? `The radar image gave two measurements for the selected area: ${decibels(values[0])} and ${decibels(values[1])}.`
+      : `The radar image gave one measurement for the selected area: ${decibels(values[0])}.`;
 
-  if (reading.difference !== null) {
+  const sentences: string[] = [];
+  if (reading.vv !== null && reading.vh !== null && reading.difference !== null) {
     const shown = decibels(reading.difference);
-    const stronger = {
-      positive: "VV backscatter was stronger than VH on average.",
-      negative: "VH backscatter was stronger than VV on average.",
-      zero: "The two polarizations were equal on average at the displayed precision.",
-    }[shownSign(shown)];
-    sentences.push(`The VV–VH difference was ${shown}: ${stronger}`);
+    sentences.push(
+      {
+        positive: `The difference between the two measurements was ${shown}: the first was the stronger of the two.`,
+        negative: `The difference between the two measurements was ${shown}: the second was the stronger of the two.`,
+        zero: `The difference between the two measurements was ${shown}: they were the same at the precision shown.`,
+      }[shownSign(shown)],
+    );
   }
+  sentences.push(
+    `${imageOf(context, scene, "radar image")}, these values describe how strongly the area reflected the radar signal back to the satellite.`,
+  );
 
-  const headline = [
-    reading.vv !== null ? `VV ${decibels(reading.vv)}` : null,
-    reading.vh !== null ? `VH ${decibels(reading.vh)}` : null,
-  ]
-    .filter((part): part is string => part !== null)
-    .join(", ");
+  const how = [
+    "We used a radar image rather than a normal camera image: the satellite sends out its own radar signal and records how much of it comes back.",
+    values.length === 2 ? "It records this in two ways, which gives the two measurements." : null,
+    reading.validPixels !== null
+      ? `They are averages over ${pixels(reading.validPixels)}.`
+      : null,
+  ].filter((line): line is string => line !== null);
+
   return {
-    headline: `Radar backscatter: ${headline}`,
+    headline,
     explanation: sentences.join(" "),
     caveat: SAR_CAVEAT,
+    howWeKnow: how.join(" "),
   };
 }
 
 // --------------------------------------------------------------------------- //
-// Two-period NDWI: what changed
+// Two dates: what changed
 // --------------------------------------------------------------------------- //
 
 function interpretTemporal(reading: TemporalReading): Interpretation {
   const { earlier, later, difference, pairedChange, pairedPixels } = reading;
-  const from = earlier.period ?? (earlier.acquired ? `the scene of ${earlier.acquired}` : "the earlier observation");
-  const to = later.period ?? (later.acquired ? `the scene of ${later.acquired}` : "the later observation");
+  const from = earlier.period ?? formatDay(earlier.acquired) ?? "the earlier date";
+  const to = later.period ?? formatDay(later.acquired) ?? "the later date";
+  const days = [formatDay(earlier.acquired), formatDay(later.acquired)];
+  const compared =
+    days[0] && days[1]
+      ? `We compared satellite images of the same area taken on ${days[0]} and ${days[1]}, measuring the water index in each.`
+      : "We compared satellite measurements from two different dates, measuring the water index in each.";
+  const paired =
+    pairedChange !== null
+      ? `Looking only at the ${pairedPixels !== null ? `${pixelCount(pairedPixels)} ` : ""}pixels usable in both images, the average change per pixel was ${signedIndex(pairedChange)}.`
+      : null;
+  const howWeKnow = [compared, paired].filter((line): line is string => line !== null).join(" ");
 
   if (difference === null) {
     return {
-      headline: "Change not reported",
-      explanation: `Both periods were analysed, but the analysis withheld the difference between ${from} and ${to}, so no change is stated.`,
-      caveat: "The evidence records why the difference was withheld.",
+      change: "No change is reported.",
+      headline: "The difference between the two images was not reported.",
+      explanation: `Both dates were measured, but the analysis withheld the difference between ${from} and ${to}, so no change is stated.`,
+      caveat: "The technical details record why the difference was withheld.",
+      howWeKnow,
     };
   }
 
@@ -254,38 +315,24 @@ function interpretTemporal(reading: TemporalReading): Interpretation {
     earlier.mean !== null && later.mean !== null
       ? ` from ${signedIndex(earlier.mean)} to ${signedIndex(later.mean)}`
       : "";
-  const earlierScene = earlier.acquired ? ` (${earlier.acquired})` : "";
-  const laterScene = later.acquired ? ` (${later.acquired})` : "";
-  const paired =
-    pairedChange !== null
-      ? `Over the ${pairedPixels !== null ? `${pixelCount(pairedPixels)} ` : ""}pixels usable on both dates, the average per-pixel change was ${signedIndex(pairedChange)}.`
-      : null;
-
   const sign = shownSign(shown);
   if (sign === "zero") {
     return {
-      headline: `Little measured change in the water-related signal from ${from} to ${to}`,
-      explanation: [
-        `Between ${from} and ${to}, the measured water-related signal showed little measured change${means ? `,${means}` : ""}: a difference of ${shown} at the displayed precision.`,
-        paired,
-      ]
-        .filter((sentence): sentence is string => sentence !== null)
-        .join(" "),
-      caveat: TEMPORAL_FLAT_CAVEAT,
+      change: `The water signal was about the same in ${to} as in ${from}.`,
+      headline: "The two satellite images show little measured change in the water signal.",
+      explanation: `Between the two dates, the water index showed little measured change${means ? `, going${means}` : ""}: a difference of ${shown} at the precision shown.`,
+      caveat: CHANGE_CAVEAT,
+      howWeKnow,
     };
   }
 
   const [verb, relative] = sign === "positive" ? ["increased", "stronger"] : ["decreased", "weaker"];
   return {
-    headline: `The water-related signal ${verb} from ${from} to ${to}`,
-    explanation: [
-      `Between ${from} and ${to}, the measured water-related signal ${verb}${means}, a change of ${shown}.`,
-      `Based on the measured NDWI values, the later observation${laterScene} shows a ${relative} water-related signal than the earlier observation${earlierScene}.`,
-      paired,
-    ]
-      .filter((sentence): sentence is string => sentence !== null)
-      .join(" "),
-    caveat: TEMPORAL_CAVEAT,
+    change: `The water signal was ${relative} in ${to} than in ${from}.`,
+    headline: `The later satellite image shows a ${relative} water signal than the earlier image.`,
+    explanation: `Between the two dates, the water index ${verb}${means}, a change of ${shown}.`,
+    caveat: CHANGE_CAVEAT,
+    howWeKnow,
   };
 }
 
@@ -297,8 +344,7 @@ function interpretTemporal(reading: TemporalReading): Interpretation {
 function smallSample(count: number | null, subject: string): string | null {
   // No count, no claim: a missing count is never guessed at.
   if (count === null || count < 1 || count >= SMALL_SAMPLE_PIXELS) return null;
-  const pixels = `${pixelCount(count)} valid ${count === 1 ? "pixel" : "pixels"}`;
-  return `Small sample: only ${pixels} contributed to ${subject}, so interpret it cautiously.`;
+  return `Small sample: only ${pixels(count)} contributed to ${subject}, so interpret it cautiously.`;
 }
 
 function sampleWarnings(
@@ -310,7 +356,7 @@ function sampleWarnings(
         .map((reading) =>
           smallSample(
             reading.validPixels,
-            body.readings.length === 1 ? "this result" : `the ${reading.label} result`,
+            body.readings.length === 1 ? "this result" : `the ${PLAIN[reading.key].index}`,
           ),
         )
         .filter((warning): warning is string => warning !== null);
@@ -321,17 +367,17 @@ function sampleWarnings(
     case "temporal": {
       // Each observation is its own sample, and the paired change a third.
       const { earlier, later, pairedChange, pairedPixels } = body.reading;
-      const side = (reading: typeof earlier, role: string) =>
+      const side = (reading: PeriodReading, role: string) =>
         smallSample(
           reading.validPixels,
-          `the ${role} observation${reading.period ? ` (${reading.period})` : ""}`,
+          `the ${role} image${reading.period ? ` (${reading.period})` : ""}`,
         );
       const paired =
         pairedChange !== null &&
         pairedPixels !== null &&
         pairedPixels >= 1 &&
         pairedPixels < SMALL_SAMPLE_PIXELS
-          ? `Small sample: only ${pixelCount(pairedPixels)} ${pairedPixels === 1 ? "pixel was" : "pixels were"} usable on both dates for the paired-pixel change, so interpret it cautiously.`
+          ? `Small sample: only ${pixelCount(pairedPixels)} ${pairedPixels === 1 ? "pixel was" : "pixels were"} usable in both images for the per-pixel change, so interpret it cautiously.`
           : null;
       return [side(earlier, "earlier"), side(later, "later"), paired].filter(
         (warning): warning is string => warning !== null,
@@ -359,4 +405,194 @@ export function interpretResult(result: AgentResult): Interpretation | null {
         : interpretTemporal(body.reading);
   const warnings = sampleWarnings(body);
   return warnings.length > 0 ? { ...interpretation, sampleWarnings: warnings } : interpretation;
+}
+
+// --------------------------------------------------------------------------- //
+// Layer 3: Technical details - specialist terms, exact values
+// --------------------------------------------------------------------------- //
+
+export interface TechnicalRow {
+  label: string;
+  value: string;
+}
+
+/** Exact as the API returned it, beside the rounded value the card shows. */
+function exact(shown: string, value: number): string {
+  return `${shown} (exact ${value})`;
+}
+
+function platformName(platform: string | null): string | null {
+  if (!platform) return null;
+  return platform.replace(
+    /^sentinel-(\d)([a-z]?)$/i,
+    (_, number: string, unit: string) => `Sentinel-${number}${unit.toUpperCase()}`,
+  );
+}
+
+const RADIOMETRY_WORDS: Record<string, string> = {
+  verified: "verified",
+  verified_with_unknown_metadata: "verified · some metadata not published",
+  incompatible: "refused · incompatible",
+  undetermined: "refused · undetermined",
+};
+
+function checkRows(result: AgentResult): TechnicalRow[] {
+  const records = validationRecords(result.evidence.analysis);
+  const rows: TechnicalRow[] = [];
+  if (records.radiometry.length > 0) {
+    rows.push({
+      label: "Radiometric check",
+      value: records.radiometry
+        .map(
+          (state) =>
+            `${RADIOMETRY_WORDS[state.status] ?? state.status}${state.processing_baseline ? ` (baseline ${state.processing_baseline})` : ""} · ${state.scene_id}`,
+        )
+        .join("; "),
+    });
+  }
+  if (records.grids.length > 0) {
+    rows.push({
+      label: "Geometric check",
+      value: records.grids
+        .map((grid) =>
+          grid.status === "valid"
+            ? [
+                `grid verified (${grid.analysis})`,
+                grid.crs,
+                grid.resolution_x !== null ? `${grid.resolution_x} m` : null,
+                grid.width !== null && grid.height !== null ? `${grid.width} × ${grid.height} px` : null,
+              ]
+                .filter((part): part is string => Boolean(part))
+                .join(" · ")
+            : `refused (${grid.analysis}): ${grid.refusal ?? "no reason recorded"}`,
+        )
+        .join("; "),
+    });
+  }
+  return rows;
+}
+
+function sceneRows(scene: SceneRef | null, product: string): TechnicalRow[] {
+  if (scene === null) return [];
+  return [
+    { label: "Sensor", value: [platformName(scene.platform), product].filter(Boolean).join(" · ") },
+    { label: "Scene ID", value: scene.id },
+    ...(scene.acquired ? [{ label: "Acquired", value: scene.acquired }] : []),
+  ];
+}
+
+function indexRows(readings: IndexReading[], scene: SceneRef | null): TechnicalRow[] {
+  const rows = readings.flatMap((reading) => {
+    const spec = TECHNICAL[reading.key];
+    const own: TechnicalRow[] = [
+      { label: "Index", value: spec.name },
+      { label: `${reading.label} formula`, value: spec.formula },
+      { label: `${reading.label} mean`, value: exact(signedIndex(reading.mean), reading.mean) },
+    ];
+    if (reading.min !== null && reading.max !== null) {
+      own.push({
+        label: `${reading.label} range`,
+        value: `${signedIndex(reading.min)} to ${signedIndex(reading.max)}`,
+      });
+    }
+    if (reading.validPixels !== null) {
+      const quality = reading.quality;
+      own.push({
+        label: `${reading.label} valid pixels`,
+        value:
+          quality !== null
+            ? `${pixelCount(reading.validPixels)} of ${pixelCount(quality.total)} (${pixelCount(quality.masked)} masked · ${quality.source})`
+            : pixelCount(reading.validPixels),
+      });
+    }
+    own.push({ label: `${reading.label} grid`, value: spec.grid });
+    return own;
+  });
+  return [...rows, { label: "Inputs", value: INDEX_INPUTS }, ...sceneRows(scene, "Level-2A")];
+}
+
+function sarRows(reading: SarReading, scene: SceneRef | null): TechnicalRow[] {
+  const rows: TechnicalRow[] = [
+    {
+      label: "Measurement",
+      value: "Sentinel-1 backscatter, γ⁰ (gamma naught), provider radiometrically terrain-corrected (RTC)",
+    },
+  ];
+  if (reading.vv !== null) {
+    rows.push({ label: "VV (first measurement)", value: exact(decibels(reading.vv), reading.vv) });
+  }
+  if (reading.vh !== null) {
+    rows.push({ label: "VH (second measurement)", value: exact(decibels(reading.vh), reading.vh) });
+  }
+  if (reading.difference !== null) {
+    rows.push({ label: "VV − VH", value: exact(decibels(reading.difference), reading.difference) });
+  }
+  rows.push({
+    label: "Formula",
+    value: "dB = 10 · log10(mean linear power) - averaged in linear power, then converted",
+  });
+  if (reading.validPixels !== null) {
+    rows.push({ label: "Valid pixels", value: pixelCount(reading.validPixels) });
+  }
+  return [...rows, ...sceneRows(scene, "RTC")];
+}
+
+function temporalRows(reading: TemporalReading): TechnicalRow[] {
+  const side = (period: PeriodReading): TechnicalRow => ({
+    label: period.role === "Earlier" ? "Earlier observation" : "Later observation",
+    value: [
+      period.period,
+      period.sceneId,
+      period.acquired ? `acquired ${period.acquired}` : null,
+      period.mean !== null ? `NDWI mean ${exact(signedIndex(period.mean), period.mean)}` : null,
+      period.validPixels !== null ? `${pixelCount(period.validPixels)} valid pixels` : null,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(" · "),
+  });
+  const rows: TechnicalRow[] = [
+    { label: "Index", value: TECHNICAL.ndwi.name },
+    { label: "NDWI formula", value: TECHNICAL.ndwi.formula },
+    {
+      label: "Change formulas",
+      value:
+        "Mean difference = later mean − earlier mean; paired-pixel change = mean of (later − earlier) over pixels valid on both dates, on a verified identical grid",
+    },
+    side(reading.earlier),
+    side(reading.later),
+  ];
+  if (reading.difference !== null) {
+    rows.push({
+      label: "Mean difference",
+      value: exact(signedIndex(reading.difference), reading.difference),
+    });
+  }
+  if (reading.pairedChange !== null) {
+    rows.push({
+      label: "Paired-pixel change",
+      value: `${exact(signedIndex(reading.pairedChange), reading.pairedChange)}${reading.pairedPixels !== null ? ` over ${pixelCount(reading.pairedPixels)} pixels` : ""}`,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Layer 3 - the specialist record of a measured result: index names,
+ * formulas, exact values, sensor, scene and validation checks. `null` exactly
+ * when `interpretResult` is `null`.
+ */
+export function technicalDetails(result: AgentResult): TechnicalRow[] | null {
+  if (outcomeOf(result).kind !== "success") return null;
+  const body = resultSummary(result);
+  switch (body.kind) {
+    case "index":
+      return [...indexRows(body.readings, body.scene), ...checkRows(result)];
+    case "sar":
+      return [...sarRows(body.reading, body.scene), ...checkRows(result)];
+    case "temporal":
+      return [...temporalRows(body.reading), ...checkRows(result)];
+    case "imagery":
+    case "none":
+      return null;
+  }
 }

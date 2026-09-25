@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 
 import { SarBackscatterPanel } from "./SarBackscatterPanel";
 import type {
@@ -44,7 +44,13 @@ import {
   type RunStage,
 } from "./resultModel";
 import { decibels, pixelCount as pixels, signedIndex } from "./format";
-import { interpretResult, type Interpretation } from "./interpretation";
+import {
+  formatDay,
+  interpretResult,
+  technicalDetails,
+  type Interpretation,
+  type TechnicalRow,
+} from "./interpretation";
 import { STANDARD_INTERPRETER, useAgentRun } from "./agentRun";
 import type { AgentRun, AgentRunHandlers } from "./agentRun";
 
@@ -1249,6 +1255,10 @@ export function AgentAnswerPanel({
   const outcome = outcomeOf(result);
   const body = resultSummary(result);
   const context = resultContext(result);
+  // A measured result reads plain English first; its specialist record - the
+  // grounded sentence and its checks included - folds into Technical details.
+  const interpretation = outcome.kind === "success" ? interpretResult(result) : null;
+  const technical = outcome.kind === "success" ? technicalDetails(result) : null;
 
   return (
     <section
@@ -1276,8 +1286,8 @@ export function AgentAnswerPanel({
         <>
           {outcome.kind === "success" ? (
             <>
-              <ResultCard body={body} />
-              <InterpretationBlock interpretation={interpretResult(result)} />
+              <ResultCard body={body} change={interpretation?.change} />
+              <InterpretationBlock interpretation={interpretation} />
             </>
           ) : (
             <MeasurementAbsent
@@ -1287,13 +1297,26 @@ export function AgentAnswerPanel({
             />
           )}
           <ResultContextList context={context} body={body} />
-          <p
-            className="agent-answer"
-            data-length={answerLength(result.answer)}
-            data-role={outcome.kind === "success" ? "summary" : "verdict"}
-          >
-            {result.answer}
-          </p>
+          {technical !== null ? (
+            <TechnicalDetails rows={technical}>
+              <p
+                className="agent-answer"
+                data-length={answerLength(result.answer)}
+                data-role="summary"
+              >
+                {result.answer}
+              </p>
+              <ValidationRow validation={result.trace.answer_validation} />
+            </TechnicalDetails>
+          ) : (
+            <p
+              className="agent-answer"
+              data-length={answerLength(result.answer)}
+              data-role={outcome.kind === "success" ? "summary" : "verdict"}
+            >
+              {result.answer}
+            </p>
+          )}
         </>
       ) : (
         <StatusNoticeBlock
@@ -1306,7 +1329,7 @@ export function AgentAnswerPanel({
 
       <RunAttribution asked={asked} />
 
-      <ValidationRow validation={result.trace.answer_validation} />
+      {technical === null && <ValidationRow validation={result.trace.answer_validation} />}
 
       {/* What a provider failure left behind. A question back, a refusal and a
           location outage ran nothing, so counting their empty evidence would
@@ -1335,8 +1358,8 @@ function qualityText(quality: Quality): string {
       ? null
       : `${(quality.validFraction * 100).toFixed(1)}%`;
   return share === null
-    ? `${pixels(quality.valid)} of ${pixels(quality.total)} pixels usable`
-    : `${share} usable · ${pixels(quality.valid)} of ${pixels(quality.total)} pixels`;
+    ? `${pixels(quality.valid)} of ${pixels(quality.total)}`
+    : `${share} · ${pixels(quality.valid)} of ${pixels(quality.total)}`;
 }
 
 /**
@@ -1346,7 +1369,7 @@ function qualityText(quality: Quality): string {
  * polarization; a comparison is two periods and the change between them. Each
  * is laid out as what it is, from the backend's own values.
  */
-function ResultCard({ body }: { body: ResultBody }) {
+function ResultCard({ body, change }: { body: ResultBody; change?: string }) {
   switch (body.kind) {
     case "index":
       return (
@@ -1410,6 +1433,7 @@ function ResultCard({ body }: { body: ResultBody }) {
             Water change <span className="result-op-code">· NDWI, two periods</span>
           </p>
           <p className="result-question">What changed</p>
+          {change && <p className="result-change">{change}</p>}
           <ol className="result-periods" aria-label="What changed">
             {[earlier, later].map((side) => (
               <li key={side.role} data-role={side.role.toLowerCase()}>
@@ -1483,22 +1507,59 @@ function InterpretationBlock({
 }) {
   if (interpretation === null) return null;
   return (
-    <section className="interpretation" aria-labelledby="interpretation-heading">
-      <h3 id="interpretation-heading" className="interpretation-label">
-        What this means
-      </h3>
-      <p className="interpretation-headline">{interpretation.headline}</p>
-      {interpretation.sampleWarnings?.map((warning) => (
-        <p key={warning} className="interpretation-warning" role="note">
-          <span aria-hidden="true">⚠ </span>
-          {warning}
-        </p>
-      ))}
-      <p className="interpretation-text">{interpretation.explanation}</p>
-      {interpretation.caveat && (
-        <p className="interpretation-caveat">{interpretation.caveat}</p>
-      )}
-    </section>
+    <>
+      <section className="interpretation" aria-labelledby="interpretation-heading">
+        <h3 id="interpretation-heading" className="interpretation-label">
+          What this means
+        </h3>
+        <p className="interpretation-headline">{interpretation.headline}</p>
+        {interpretation.sampleWarnings?.map((warning) => (
+          <p key={warning} className="interpretation-warning" role="note">
+            <span aria-hidden="true">⚠ </span>
+            {warning}
+          </p>
+        ))}
+        <p className="interpretation-text">{interpretation.explanation}</p>
+        {interpretation.caveat && (
+          <p className="interpretation-caveat">{interpretation.caveat}</p>
+        )}
+      </section>
+      <section className="how-we-know" aria-labelledby="how-we-know-heading">
+        <h3 id="how-we-know-heading" className="interpretation-label">
+          How we know
+        </h3>
+        <p className="interpretation-text">{interpretation.howWeKnow}</p>
+      </section>
+    </>
+  );
+}
+
+/**
+ * Layer three: the specialist record, folded away until asked for. Index
+ * names, formulas, exact values, sensor, scene and the validation checks -
+ * every term the plain layers above deliberately leave out - plus the grounded
+ * answer sentence and its checks, passed in as children.
+ */
+function TechnicalDetails({
+  rows,
+  children,
+}: {
+  rows: TechnicalRow[];
+  children?: ReactNode;
+}) {
+  return (
+    <details className="technical-details">
+      <summary>Technical details</summary>
+      <dl className="technical-list">
+        {rows.map((row, position) => (
+          <div key={`${row.label}:${position}`}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {children}
+    </details>
   );
 }
 
@@ -1530,23 +1591,26 @@ function ResultContextList({
       ? body.scene
       : null;
   if (scene) {
+    // The satellite that took the image and the day it did - the scene id
+    // itself stays in Technical details and the evidence panel.
+    const platform = platformLabel(scene.platform);
     rows.push({
-      label: "Scene",
-      value: [scene.acquired, platformLabel(scene.platform)]
-        .filter((part): part is string => Boolean(part))
-        .join(" · ") || scene.id,
+      label: "Satellite image",
+      value: platform ? `${platform}${body.kind === "sar" ? " (radar)" : ""}` : scene.id,
       title: scene.id,
     });
+    const day = formatDay(scene.acquired);
+    if (day) rows.push({ label: "Date", value: day, title: scene.acquired ?? undefined });
   }
   if (context.sceneCount !== null && body.kind !== "temporal") {
     rows.push({
-      label: "Scenes matched",
+      label: "Images found",
       value: String(context.sceneCount),
     });
   }
   if (body.kind === "index") {
     const quality = body.readings.find((reading) => reading.quality !== null)?.quality;
-    if (quality) rows.push({ label: "Pixel quality", value: qualityText(quality) });
+    if (quality) rows.push({ label: "Usable pixels", value: qualityText(quality) });
   } else if (body.kind === "temporal") {
     // Each observation has its own pixels; neither stands for both.
     const share = (quality: Quality | null) =>
@@ -1556,7 +1620,7 @@ function ResultContextList({
     const earlier = share(body.reading.earlier.quality);
     const later = share(body.reading.later.quality);
     if (earlier !== null && later !== null) {
-      rows.push({ label: "Pixel quality", value: `${earlier} earlier · ${later} later usable` });
+      rows.push({ label: "Usable pixels", value: `${earlier} earlier · ${later} later` });
     }
   }
 
