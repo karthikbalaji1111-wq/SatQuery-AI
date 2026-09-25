@@ -59,6 +59,19 @@ class UpstreamServiceError(AppError):
     code = "upstream_error"
 
 
+class PointLocationError(InvalidInputError):
+    """The place resolved to a single point, which has no area to measure.
+
+    The geocoder found the place, so it is not "not found"; but what it has is
+    a point - a stop, a shop, or a label placed on a large feature such as a
+    desert - and the box around a point is a display box, not the feature's
+    extent. An analysis area is never drawn around it here: that would invent
+    the area being measured. The remedy is the user's - name an area.
+    """
+
+    code = "location_is_point"
+
+
 class GeocodingUnavailableError(UpstreamServiceError):
     """The location service cannot be used right now.
 

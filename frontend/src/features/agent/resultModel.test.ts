@@ -10,6 +10,7 @@ import {
   NO_SCENES,
   NOT_FOUND,
   REFUSED_BY_RADIOMETRY,
+  SAHARA_POINT,
   SAR_MARINA,
   TEMPORAL_MARINA,
   UNSUPPORTED_SHIPS,
@@ -33,6 +34,7 @@ describe("outcomeOf - every kind of result stays its own kind", () => {
     ["a place not found", NOT_FOUND, "location_not_found"],
     ["a geocoder outage", LOCATION_UNAVAILABLE, "location_unavailable"],
     ["a whole city", AREA_TOO_LARGE_CHENNAI, "area_too_large"],
+    ["a place that is only a point", SAHARA_POINT, "location_is_point"],
     ["counting ships", UNSUPPORTED_SHIPS, "unsupported"],
     ["no matching scene", NO_SCENES, "insufficient_evidence"],
     ["a radiometric refusal", REFUSED_BY_RADIOMETRY, "analysis_refused"],
@@ -154,6 +156,10 @@ describe("runStages - only the stages the response shows happened", () => {
     expect(runStages(AREA_TOO_LARGE_CHENNAI).map((stage) => [stage.name, stage.state])).toEqual([
       ["Understand question", "attention"],
       ["Resolve location", "attention"],
+    ]);
+    expect(runStages(SAHARA_POINT).map((stage) => [stage.name, stage.state, stage.detail])).toEqual([
+      ["Understand question", "attention", runStages(SAHARA_POINT)[0].detail],
+      ["Resolve location", "attention", "a single point, not an area"],
     ]);
     expect(runStages(CLARIFY_CHENNAI).map((stage) => stage.name)).toEqual(["Understand question"]);
     expect(runStages(NO_SCENES).at(-1)).toMatchObject({ name: "Find satellite scenes", state: "attention" });

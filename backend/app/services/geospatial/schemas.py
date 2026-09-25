@@ -72,3 +72,11 @@ class ResolveResponse(BaseModel):
     #: name, which a display name alone does not reveal.
     place_class: str | None = None
     place_type: str | None = None
+    #: OpenStreetMap geometry kind of the match ("node", "way", "relation"),
+    #: verbatim; None for a bbox given as input.
+    osm_type: str | None = None
+    #: True when the geocoder has only a POINT for the place (an OSM node that
+    #: is not a settlement): its box is a display box, not the place's extent.
+    #: The place still resolves; an analysis refuses it rather than measure an
+    #: area nobody has.
+    point_like: bool = False

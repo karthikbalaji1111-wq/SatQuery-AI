@@ -1671,6 +1671,12 @@ const CLARIFICATION_NOTICES: Partial<Record<OutcomeKind, StatusNotice>> = {
       "The location service found no match for it. Check the spelling, or add the city or state.",
     retryable: false,
   },
+  location_is_point: {
+    summary: "No analysis ran: the place is only a point on the map.",
+    detail:
+      "The location service has a single point for it, not an area, and a point has no surrounding area to measure. SatQuery does not draw one around it. Name the area you mean - the note under the query box says what was matched.",
+    retryable: false,
+  },
   area_too_large: {
     summary: "No analysis ran: the area is too large to measure.",
     detail:

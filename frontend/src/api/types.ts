@@ -70,6 +70,17 @@ export interface GeoResolveResponse {
   center: Coordinate;
   bbox: BoundingBox;
   source: "nominatim" | "input";
+  /** The geocoder's own classification of what it matched, verbatim. */
+  place_class?: string | null;
+  place_type?: string | null;
+  /** OpenStreetMap geometry kind of the match: "node", "way" or "relation". */
+  osm_type?: string | null;
+  /**
+   * True when the geocoder has only a POINT for the place: its box is a
+   * display box, not the place's extent. It still resolves; an analysis
+   * refuses it rather than measure an area nobody has.
+   */
+  point_like?: boolean;
 }
 
 export interface SceneAsset {
@@ -862,6 +873,7 @@ export type ClarificationReason =
   | "analysis_ambiguous"
   | "location_missing"
   | "location_not_found"
+  | "location_is_point"
   | "area_too_large"
   | "date_missing"
   | "date_ambiguous"

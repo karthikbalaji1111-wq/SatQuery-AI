@@ -47,7 +47,9 @@ this module alone; see the deployment documentation.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
+import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -81,7 +83,7 @@ _MAX_RETRY_AFTER_SECONDS = 3_600.0
 
 
 class NominatimPlace(BaseModel):
-    """Parsed first result from a Nominatim search.
+    """One parsed Nominatim search result - the one :func:`select_candidate` chose.
 
     ``place_class`` and ``place_type`` are the geocoder's OWN classification
     (e.g. ``natural``/``beach``, ``place``/``city``, ``shop``/``supermarket``).
@@ -97,6 +99,27 @@ class NominatimPlace(BaseModel):
     bbox: BoundingBox
     place_class: str | None = None
     place_type: str | None = None
+    #: OpenStreetMap geometry kind: "node" (a point), "way" or "relation" (a
+    #: real geometry, whose bbox is its envelope). Recorded verbatim; absent
+    #: when the geocoder does not say.
+    osm_type: str | None = None
+    #: The feature's own name, for matching candidates to the query.
+    name: str | None = None
+
+    @property
+    def point_like(self) -> bool:
+        """True when the geocoder has only a POINT for this place.
+
+        An OSM node is a point, and the box Nominatim returns around it is a
+        display box, not the feature's extent - about 10 m for a stop, a shop
+        or the single node that labels the Sahara. The one exception is a
+        ``place=*`` node (suburb, village, town, city): that is how OSM maps a
+        settlement by its centre, and Nominatim answers it with a
+        settlement-scale box. Ways and relations are real geometries. This is a
+        statement about geometry, not a size threshold: no number decides it.
+        """
+
+        return self.osm_type == "node" and self.place_class != "place"
 
 
 @dataclass(frozen=True)
@@ -386,11 +409,16 @@ def _optional_text(value: object) -> str | None:
     return text[:60] or None
 
 
-def _parse_first_result(payload: object) -> NominatimPlace:
-    if not isinstance(payload, list) or not payload:
-        raise NotFoundError("No matching location was found.")
+#: How many candidates one search asks for. Bounded and small: enough for a
+#: point-like first result to be set beside the same place's real geometry
+#: ("Lalbagh" the railway stop, "Lalbagh Botanical Gardens" the park), never
+#: an open-ended search. One request either way.
+CANDIDATE_LIMIT = 5
 
-    item = payload[0]
+
+def _parse_place(item: object) -> NominatimPlace:
+    if not isinstance(item, dict):
+        raise UpstreamServiceError("The geocoding service returned an unexpected payload.")
     try:
         lat = float(item["lat"])
         lon = float(item["lon"])
@@ -415,7 +443,82 @@ def _parse_first_result(payload: object) -> NominatimPlace:
         # Absent on some results; recorded as unknown rather than guessed.
         place_class=_optional_text(item.get("class")),
         place_type=_optional_text(item.get("type")),
+        osm_type=_optional_text(item.get("osm_type")),
+        name=_optional_text(item.get("name")),
     )
+
+
+def _parse_candidates(payload: object) -> list[NominatimPlace]:
+    """The candidates, in the geocoder's own order.
+
+    The first must parse - it is what an answer is built on, so a malformed one
+    is still an upstream error. Later ones are only alternatives: a malformed
+    alternative is dropped, never repaired.
+    """
+
+    if not isinstance(payload, list) or not payload:
+        raise NotFoundError("No matching location was found.")
+    candidates = [_parse_place(payload[0])]
+    for item in payload[1:CANDIDATE_LIMIT]:
+        try:
+            candidates.append(_parse_place(item))
+        except UpstreamServiceError:
+            continue
+    return candidates
+
+
+def _tokens(text: str) -> set[str]:
+    folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return set(re.findall(r"[a-z0-9]+", folded.lower()))
+
+
+def _names_the_query(query: str, candidate: NominatimPlace) -> bool:
+    """Does this candidate carry the name the user asked for?
+
+    Every word of the place's own name (the part before the first comma) must
+    appear in the candidate's name - or be the candidate's own feature kind, so
+    "Lalbagh park" matches "Lalbagh Botanical Gardens" (leisure · park). A
+    candidate that merely has an extent is not thereby the place asked for:
+    "Sahara" also returns New York.
+    """
+
+    wanted = _tokens(query.split(",", 1)[0])
+    if not wanted:
+        return False
+    have = _tokens(candidate.name or candidate.display_name.split(",", 1)[0])
+    have |= _tokens(candidate.place_class or "") | _tokens(
+        (candidate.place_type or "").replace("_", " ")
+    )
+    return wanted <= have
+
+
+def select_candidate(query: str, candidates: list[NominatimPlace]) -> NominatimPlace:
+    """The geocoder's first result - unless it is only a point, and a later
+    result is the same named place with a real extent.
+
+    Deterministic: the geocoder's own order decides between equals, and size
+    never does - a larger box is not a better answer. When no later candidate
+    qualifies, the point is returned as it is, flagged ``point_like``; nothing
+    here widens it, and whoever needs an area refuses it.
+    """
+
+    first = candidates[0]
+    if not first.point_like:
+        return first
+    for candidate in candidates[1:]:
+        if not candidate.point_like and _names_the_query(query, candidate):
+            logger.info(
+                "Geocoder: first result for %r is a point (%s/%s); using %r (%s/%s) "
+                "from the same results",
+                query,
+                first.place_class,
+                first.place_type,
+                candidate.display_name,
+                candidate.place_class,
+                candidate.place_type,
+            )
+            return candidate
+    return first
 
 
 async def _fetch_once(
@@ -430,7 +533,7 @@ async def _fetch_once(
     else worth another attempt.
     """
 
-    params = {"q": query, "format": "json", "limit": 1}
+    params = {"q": query, "format": "json", "limit": CANDIDATE_LIMIT}
     headers = {"User-Agent": settings.nominatim_user_agent}
 
     try:
@@ -540,7 +643,7 @@ async def _resolve_upstream(
                 )
             else:
                 _register_success()
-                place = _parse_first_result(payload)
+                place = select_candidate(query, _parse_candidates(payload))
                 _store(key, query, place, settings)
                 return place
 

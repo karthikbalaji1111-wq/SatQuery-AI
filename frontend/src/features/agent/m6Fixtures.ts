@@ -298,6 +298,15 @@ export const UNSUPPORTED_SHIPS = refusal(
   "Object identification and land-cover classification are not implemented. SatQuery measures spectral indices and SAR backscatter over an area.",
 );
 
+/**
+ * "Show water (NDWI) around sahara desert january 2025" - the geocoder has only
+ * the single node that labels the Sahara; refused before any search, by name.
+ */
+export const SAHARA_POINT = refusal(
+  "location_is_point",
+  "'sahara desert' resolved only to a single point on the map: Sahara, Tazrouk ⵜⴰⵥⵔⵓⴽ تاظروك (natural · desert). A point has no area to measure, and SatQuery does not draw one around it, so nothing was searched. Name an area instead - a park, lake, beach or neighbourhood together with its city.",
+);
+
 /** A place the geocoder could not find. */
 export const NOT_FOUND = refusal("location_not_found", "No place matching 'Qwxzt' was found.");
 
