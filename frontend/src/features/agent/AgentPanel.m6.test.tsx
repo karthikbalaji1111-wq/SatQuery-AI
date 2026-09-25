@@ -100,8 +100,9 @@ describe("M6 result card", () => {
     expect(within(panel).getByText("Result")).toHaveClass("outcome-chip");
     expect(panel.querySelector(".result-op")).toHaveTextContent("Vegetation index · NDVI");
     expect(panel.querySelector(".result-value")).toHaveTextContent("+0.5204");
+    // Updated deliberately: plain words; the range is in Technical details.
     expect(panel.querySelector(".result-sub")).toHaveTextContent(
-      "Mean over 16,988 valid pixels · range -0.0877 to +0.8780",
+      "Average over 16,988 usable pixels",
     );
     // Updated deliberately (layperson first): everyday labels; the scene id is
     // the title of "Satellite image" and stays in Technical details.
@@ -134,21 +135,30 @@ describe("M6 result card", () => {
     const panel = answerPanel();
     expect(panel.querySelector(".result-op")).toHaveTextContent("Built-up index · NDBI");
     expect(panel.querySelector(".result-value")).toHaveTextContent("-0.0248");
-    expect(panel.querySelector(".result-sub")).toHaveTextContent("196,620 valid pixels");
+    expect(panel.querySelector(".result-sub")).toHaveTextContent("196,620 usable pixels");
   });
 
   it("SAR: each polarization in decibels, and the provider's product named", () => {
     render(<AgentAnswerPanel result={SAR_MARINA} />);
     const panel = answerPanel();
-    expect(panel.querySelector(".result-op")).toHaveTextContent("Radar backscatter");
+    expect(panel.querySelector(".result-op")).toHaveTextContent("Radar measurements");
     const values = Object.fromEntries(
       [...panel.querySelectorAll(".result-sar > div")].map((row) => [
         row.querySelector("dt")?.textContent,
         row.querySelector("dd")?.textContent,
       ]),
     );
-    expect(values).toEqual({ VV: "-5.44 dB", VH: "-17.85 dB", "VV − VH": "12.41 dB" });
-    expect(panel.querySelector(".result-sub")).toHaveTextContent(/terrain-corrected/);
+    // Updated deliberately: plain names on the card; VV, VH, γ⁰ and the
+    // provider's terrain correction are named in Technical details.
+    expect(values).toEqual({
+      "First measurement": "-5.44 dB",
+      "Second measurement": "-17.85 dB",
+      Difference: "12.41 dB",
+    });
+    expect(panel.querySelector(".result-sub")).toHaveTextContent("Averages over 33,600 usable pixels");
+    const technical = panel.querySelector("details.technical-details") as HTMLElement;
+    expect(technical).toHaveTextContent("VV (first measurement)");
+    expect(technical).toHaveTextContent("terrain-corrected");
     expect(context(panel)).toMatchObject({
       "Satellite image": "Sentinel-1A (radar)",
       Date: "11 January 2025",
@@ -158,7 +168,7 @@ describe("M6 result card", () => {
   it("temporal NDWI: earlier period → later period → measured change", () => {
     render(<AgentAnswerPanel result={TEMPORAL_MARINA} />);
     const panel = answerPanel();
-    expect(panel.querySelector(".result-op")).toHaveTextContent("Water change · NDWI, two periods");
+    expect(panel.querySelector(".result-op")).toHaveTextContent("Water change · two dates");
     const periods = [...panel.querySelectorAll(".result-periods li")].map((li) => ({
       role: li.querySelector(".period-role")?.textContent,
       when: li.querySelector(".period-when")?.textContent,
@@ -166,13 +176,16 @@ describe("M6 result card", () => {
       acquired: li.querySelector(".period-acquired")?.textContent,
     }));
     expect(periods).toEqual([
-      { role: "Earlier", when: "January 2024", value: "+0.0266", acquired: "acquired 2024-01-15" },
-      { role: "Later", when: "January 2025", value: "+0.1466", acquired: "acquired 2025-01-04" },
+      { role: "Earlier", when: "January 2024", value: "+0.0266", acquired: "image taken 15 January 2024" },
+      { role: "Later", when: "January 2025", value: "+0.1466", acquired: "image taken 4 January 2025" },
     ]);
     const pair = [...panel.querySelectorAll(".metric-pair > div")].map(
       (row) => `${row.querySelector("dt")?.textContent} ${row.querySelector("dd")?.textContent}`,
     );
-    expect(pair).toEqual(["Mean difference +0.1200", "Paired-pixel change +0.1207"]);
+    // Updated deliberately: one change for a reader; the per-pixel change is
+    // stated in How we know and Technical details.
+    expect(pair).toEqual(["Change +0.1200"]);
+    expect(panel).toHaveTextContent("the average change per pixel was +0.1207");
     // A difference is stated, never explained.
     expect(panel).toHaveTextContent("no cause is inferred");
     expect(panel).not.toHaveTextContent(/because|due to|rain|expanded|flood/i);
@@ -379,8 +392,8 @@ describe("M6 query flow", () => {
     expect(stages).toEqual([
       "Understand question",
       "Resolve location",
-      "Find satellite scenes",
-      "Validate imagery",
+      "Find satellite images",
+      "Check the images",
       "Run analysis",
       "Check answer",
     ]);
@@ -534,7 +547,7 @@ describe("audit: the geocoder's match is shown beside the typed place", () => {
       Location: "Lalbagh, Bengaluru",
       Matched: "Lalbagh, Rashtriya Vidyalaya Road (railway · stop)",
     });
-    expect(panel.querySelector(".result-sub")).toHaveTextContent("Mean over 4 valid pixels");
+    expect(panel.querySelector(".result-sub")).toHaveTextContent("Average over 4 usable pixels");
     const matched = [...panel.querySelectorAll(".result-context dd")].find((dd) =>
       dd.textContent?.startsWith("Lalbagh, Rashtriya"),
     );
@@ -681,5 +694,21 @@ describe("Small sample - said under the number, never instead of it", () => {
   it("a large sample shows no warning", () => {
     render(<AgentAnswerPanel result={NDVI_CUBBON} />);
     expect(within(meaning()).queryByRole("note")).toBeNull();
+  });
+});
+
+describe("Layperson first: the big result speaks plainly too", () => {
+  it("the radar card names no polarization or product code - Technical details does", () => {
+    render(<AgentAnswerPanel result={SAR_MARINA} />);
+    const card = answerPanel().querySelector(".result-card") as HTMLElement;
+    expect(card).not.toHaveTextContent(/\bVV\b|\bVH\b|γ⁰|backscatter/i);
+    expect(answerPanel().querySelector("details.technical-details")).toHaveTextContent(/VV .*VH/);
+  });
+
+  it("the comparison card names no index code and no paired-pixel term", () => {
+    render(<AgentAnswerPanel result={TEMPORAL_MARINA} />);
+    const card = answerPanel().querySelector(".result-card") as HTMLElement;
+    expect(card).not.toHaveTextContent(/NDWI|paired|valid pixels/i);
+    expect(card).toHaveTextContent("Change+0.1200");
   });
 });

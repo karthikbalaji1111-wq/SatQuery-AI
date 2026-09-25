@@ -489,6 +489,15 @@ export interface RunStage {
  * while it runs; afterwards each stage appears only if the response carries
  * evidence of it, and stops at the first one that did not complete.
  */
+/** What each analysis is, in everyday words - for the pipeline strip. */
+const PLAIN_OPERATION: Record<string, string> = {
+  ndvi: "vegetation index",
+  ndwi: "water index",
+  ndbi: "built-up index",
+  temporal_ndwi: "water change",
+  sar_backscatter: "radar",
+};
+
 export function runStages(result: AgentResult): RunStage[] {
   const stages: RunStage[] = [];
   const outcome = outcomeOf(result);
@@ -546,12 +555,12 @@ export function runStages(result: AgentResult): RunStage[] {
   const found = windows.reduce((total, window) => total + window.scene_count, 0);
   const selected = windows.filter((window) => window.selected_scene_id).length;
   stages.push({
-    name: "Find satellite scenes",
+    name: "Find satellite images",
     state: selected > 0 ? "done" : "attention",
     detail:
       selected > 0
         ? `${found} found · ${selected} selected`
-        : "no scene matched",
+        : "no satellite image matched",
   });
   if (selected === 0) return stages;
 
@@ -564,9 +573,9 @@ export function runStages(result: AgentResult): RunStage[] {
         (state) => state.status === "incompatible" || state.status === "undetermined",
       ) || grids.some((grid) => grid.status === "refused");
     stages.push({
-      name: "Validate imagery",
+      name: "Check the images",
       state: refused ? "attention" : "done",
-      detail: refused ? "a check refused the data" : "radiometry & geometry checked",
+      detail: refused ? "a check found the data unsuitable" : "data suitable & correctly aligned",
     });
   }
 
@@ -578,7 +587,7 @@ export function runStages(result: AgentResult): RunStage[] {
       name: "Run analysis",
       state: failed.length === 0 ? "done" : failed.length === outcomes.length ? "failed" : "attention",
       detail: outcomes
-        .map((entry) => `${entry.name.replace(/_/g, " ").toUpperCase()} ${entry.status === "completed" ? "✓" : "✕"}`)
+        .map((entry) => `${PLAIN_OPERATION[entry.name] ?? entry.name.replace(/_/g, " ")} ${entry.status === "completed" ? "✓" : "✕"}`)
         .join(" · "),
     });
   }
@@ -594,7 +603,7 @@ export function runStages(result: AgentResult): RunStage[] {
     stages.push({
       name: "Check answer",
       state: checks.every((check) => check === "pass") ? "done" : "failed",
-      detail: checks.every((check) => check === "pass") ? "grounded in the evidence" : "withheld",
+      detail: checks.every((check) => check === "pass") ? "matches the measurements" : "withheld",
     });
   }
   return stages;

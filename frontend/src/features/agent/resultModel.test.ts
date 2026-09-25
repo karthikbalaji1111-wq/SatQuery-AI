@@ -136,16 +136,17 @@ describe("runStages - only the stages the response shows happened", () => {
     expect(runStages(NDVI_CUBBON).map((stage) => [stage.name, stage.state, stage.detail])).toEqual([
       ["Understand question", "done", null],
       ["Resolve location", "done", "Cubbon Park, Bengaluru"],
-      ["Find satellite scenes", "done", "7 found · 1 selected"],
-      ["Validate imagery", "done", "radiometry & geometry checked"],
-      ["Run analysis", "done", "NDVI ✓"],
-      ["Check answer", "done", "grounded in the evidence"],
+      // Updated deliberately (layperson first): plain stage words.
+      ["Find satellite images", "done", "7 found · 1 selected"],
+      ["Check the images", "done", "data suitable & correctly aligned"],
+      ["Run analysis", "done", "vegetation index ✓"],
+      ["Check answer", "done", "matches the measurements"],
     ]);
   });
 
   it("sees a comparison's validation, published per observation", () => {
-    expect(runStages(TEMPORAL_MARINA).map((stage) => stage.name)).toContain("Validate imagery");
-    expect(runStages(TEMPORAL_MARINA).find((stage) => stage.name === "Validate imagery")?.state).toBe("done");
+    expect(runStages(TEMPORAL_MARINA).map((stage) => stage.name)).toContain("Check the images");
+    expect(runStages(TEMPORAL_MARINA).find((stage) => stage.name === "Check the images")?.state).toBe("done");
   });
 
   it("stops at the stage that did not complete", () => {
@@ -162,14 +163,42 @@ describe("runStages - only the stages the response shows happened", () => {
       ["Resolve location", "attention", "a single point, not an area"],
     ]);
     expect(runStages(CLARIFY_CHENNAI).map((stage) => stage.name)).toEqual(["Understand question"]);
-    expect(runStages(NO_SCENES).at(-1)).toMatchObject({ name: "Find satellite scenes", state: "attention" });
+    expect(runStages(NO_SCENES).at(-1)).toMatchObject({ name: "Find satellite images", state: "attention" });
   });
 
   it("reports a refused analysis as refused, not as done", () => {
     const stages = runStages(REFUSED_BY_RADIOMETRY);
     expect(stages.find((stage) => stage.name === "Run analysis")).toMatchObject({
       state: "failed",
-      detail: "NDVI ✕",
+      detail: "vegetation index ✕",
     });
+  });
+});
+
+describe("runStages - the pipeline speaks plainly", () => {
+  const JARGON = /\b(NDVI|NDWI|NDBI|SAR|VV|VH|backscatter|radiometr\w*|geometr\w*|scenes?|grounded|temporal)\b/i;
+
+  it.each([
+    ["vegetation", NDVI_CUBBON],
+    ["water", NDWI_MARINA],
+    ["built-up", NDBI_AMEERPET],
+    ["radar", SAR_MARINA],
+    ["two dates", TEMPORAL_MARINA],
+    ["a refusal", REFUSED_BY_RADIOMETRY],
+    ["no image", NO_SCENES],
+  ])("%s: no stage name or detail needs remote-sensing knowledge", (_, result) => {
+    const words = runStages(result)
+      .map((stage) => `${stage.name} ${stage.detail ?? ""}`)
+      .join(" ");
+    expect(words).not.toMatch(JARGON);
+  });
+
+  it("names each analysis in everyday words", () => {
+    const detail = (result: typeof NDVI_CUBBON) =>
+      runStages(result).find((stage) => stage.name === "Run analysis")?.detail;
+    expect(detail(NDWI_MARINA)).toBe("water index ✓");
+    expect(detail(NDBI_AMEERPET)).toBe("built-up index ✓");
+    expect(detail(SAR_MARINA)).toBe("radar ✓");
+    expect(detail(TEMPORAL_MARINA)).toBe("water change ✓");
   });
 });

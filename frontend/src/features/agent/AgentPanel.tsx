@@ -1380,57 +1380,59 @@ function ResultCard({ body, change }: { body: ResultBody; change?: string }) {
                 {reading.title} <span className="result-op-code">· {reading.label}</span>
               </p>
               <p className="result-value">{signedIndex(reading.mean)}</p>
-              <p className="result-sub">
-                Mean
-                {reading.validPixels !== null &&
-                  ` over ${pixels(reading.validPixels)} valid pixels`}
-                {reading.min !== null && reading.max !== null &&
-                  ` · range ${signedIndex(reading.min)} to ${signedIndex(reading.max)}`}
-              </p>
+              {/* The range and the exact value live in Technical details. */}
+              {reading.validPixels !== null && (
+                <p className="result-sub">
+                  Average over {pixels(reading.validPixels)} usable pixels
+                </p>
+              )}
             </div>
           ))}
         </div>
       );
-    case "sar":
+    case "sar": {
+      // Plain names for the two radar measurements; their technical names
+      // (VV, VH) and the product (γ⁰, RTC) are in Technical details.
+      const both = body.reading.vv !== null && body.reading.vh !== null;
       return (
         <div className="result-card" data-kind="sar">
           <p className="result-op">
-            Radar backscatter <span className="result-op-code">· Sentinel-1 γ⁰</span>
+            Radar measurements <span className="result-op-code">· Sentinel-1 radar</span>
           </p>
           <dl className="result-sar">
             {body.reading.vv !== null && (
               <div>
-                <dt>VV</dt>
+                <dt>{both ? "First measurement" : "Measurement"}</dt>
                 <dd>{decibels(body.reading.vv)}</dd>
               </div>
             )}
             {body.reading.vh !== null && (
               <div>
-                <dt>VH</dt>
+                <dt>{both ? "Second measurement" : "Measurement"}</dt>
                 <dd>{decibels(body.reading.vh)}</dd>
               </div>
             )}
-            {body.reading.difference !== null && (
+            {both && body.reading.difference !== null && (
               <div>
-                <dt>VV − VH</dt>
+                <dt>Difference</dt>
                 <dd>{decibels(body.reading.difference)}</dd>
               </div>
             )}
           </dl>
-          <p className="result-sub">
-            Mean backscatter
-            {body.reading.validPixels !== null &&
-              ` over ${pixels(body.reading.validPixels)} valid pixels`}
-            , from the provider's terrain-corrected product.
-          </p>
+          {body.reading.validPixels !== null && (
+            <p className="result-sub">
+              Averages over {pixels(body.reading.validPixels)} usable pixels
+            </p>
+          )}
         </div>
       );
+    }
     case "temporal": {
-      const { earlier, later, difference, pairedChange, pairedPixels } = body.reading;
+      const { earlier, later, difference, pairedChange } = body.reading;
       return (
         <div className="result-card" data-kind="temporal">
           <p className="result-op">
-            Water change <span className="result-op-code">· NDWI, two periods</span>
+            Water change <span className="result-op-code">· two dates</span>
           </p>
           <p className="result-question">What changed</p>
           {change && <p className="result-change">{change}</p>}
@@ -1443,35 +1445,28 @@ function ResultCard({ body, change }: { body: ResultBody; change?: string }) {
                   {side.mean === null ? "—" : signedIndex(side.mean)}
                 </span>
                 {side.acquired && (
-                  <span className="period-acquired">acquired {side.acquired}</span>
+                  <span className="period-acquired" title={side.acquired}>
+                    image taken {formatDay(side.acquired)}
+                  </span>
                 )}
               </li>
             ))}
           </ol>
+          {/* One change for a reader; the per-pixel change is in How we know
+              and Technical details. It stands in only when the overall
+              difference was withheld. */}
           {(difference !== null || pairedChange !== null) && (
             <dl className="metric-pair">
-              {difference !== null && (
-                <div>
-                  <dt>Mean difference</dt>
-                  <dd>{signedIndex(difference)}</dd>
-                </div>
-              )}
-              {pairedChange !== null && (
-                <div>
-                  <dt>Paired-pixel change</dt>
-                  <dd>{signedIndex(pairedChange)}</dd>
-                </div>
-              )}
+              <div>
+                <dt>{difference !== null ? "Change" : "Change per pixel"}</dt>
+                <dd>{signedIndex(difference ?? (pairedChange as number))}</dd>
+              </div>
             </dl>
           )}
           <p className="result-sub">
             {difference === null && pairedChange === null
               ? "The difference was withheld by the analysis; see the evidence for why."
-              : `Later minus earlier${
-                  pairedPixels !== null
-                    ? `; the paired change covers ${pixels(pairedPixels)} pixels valid on both dates`
-                    : ""
-                }. A measured difference - no cause is inferred.`}
+              : "Later minus earlier. A measured change - no cause is inferred."}
           </p>
         </div>
       );
