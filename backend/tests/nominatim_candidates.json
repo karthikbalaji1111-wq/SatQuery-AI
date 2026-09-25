@@ -1,0 +1,545 @@
+{
+ "_source": "Nominatim /search?format=json&limit=5, captured 2026-09-25 for SatQuery's point-location tests. Trimmed to the fields SatQuery reads; values verbatim.",
+ "sahara desert": [
+  {
+   "lat": "22.2500000",
+   "lon": "9.8000000",
+   "boundingbox": [
+    "22.2499500",
+    "22.2500500",
+    "9.7999500",
+    "9.8000500"
+   ],
+   "display_name": "Sahara, Tazrouk ⵜⴰⵥⵔⵓⴽ تاظروك, دائرة تاظروك ⴰⴷⴷⴰⵢⵔⵜ ⵏ ⵜⴰⵥⵔⵓⴽ, تامنغست ⵜⴰⵎⴰⵏⵖⴰⵙⵜ, ⵍⵣⵣⴰⵢⴻⵔ الجزائر",
+   "class": "natural",
+   "type": "desert",
+   "osm_type": "node",
+   "name": "Sahara",
+   "importance": 0.6588977280015149,
+   "place_rank": 22,
+   "addresstype": "region"
+  }
+ ],
+ "Sahara": [
+  {
+   "lat": "22.2500000",
+   "lon": "9.8000000",
+   "boundingbox": [
+    "22.2499500",
+    "22.2500500",
+    "9.7999500",
+    "9.8000500"
+   ],
+   "display_name": "Sahara, Tazrouk ⵜⴰⵥⵔⵓⴽ تاظروك, دائرة تاظروك ⴰⴷⴷⴰⵢⵔⵜ ⵏ ⵜⴰⵥⵔⵓⴽ, تامنغست ⵜⴰⵎⴰⵏⵖⴰⵙⵜ, ⵍⵣⵣⴰⵢⴻⵔ الجزائر",
+   "class": "natural",
+   "type": "desert",
+   "osm_type": "node",
+   "name": "Sahara",
+   "importance": 0.6588977280015149,
+   "place_rank": 22,
+   "addresstype": "region"
+  },
+  {
+   "lat": "40.7127281",
+   "lon": "-74.0060152",
+   "boundingbox": [
+    "40.4765780",
+    "40.9176300",
+    "-74.2588430",
+    "-73.7002330"
+   ],
+   "display_name": "New York, United States",
+   "class": "boundary",
+   "type": "administrative",
+   "osm_type": "relation",
+   "name": "New York",
+   "importance": 0.8817923363604117,
+   "place_rank": 10,
+   "addresstype": "city"
+  }
+ ],
+ "Lalbagh, Bengaluru": [
+  {
+   "lat": "12.9465265",
+   "lon": "77.5800160",
+   "boundingbox": [
+    "12.9415265",
+    "12.9515265",
+    "77.5750160",
+    "77.5850160"
+   ],
+   "display_name": "Lalbagh, Rashtriya Vidyalaya Road, VV Puram, V.V Puram, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, 560004, India",
+   "class": "railway",
+   "type": "station",
+   "osm_type": "node",
+   "name": "Lalbagh",
+   "importance": 7.094453345536e-05,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "12.9465339",
+   "lon": "77.5799954",
+   "boundingbox": [
+    "12.9464839",
+    "12.9465839",
+    "77.5799454",
+    "77.5800454"
+   ],
+   "display_name": "Lalbagh, Rashtriya Vidyalaya Road, VV Puram, V.V Puram, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, 560004, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Lalbagh",
+   "importance": 7.094453345536e-05,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "12.9465345",
+   "lon": "77.5800377",
+   "boundingbox": [
+    "12.9464845",
+    "12.9465845",
+    "77.5799877",
+    "77.5800877"
+   ],
+   "display_name": "Lalbagh, Rashtriya Vidyalaya Road, Kankanpalya, Ashoka Pillar, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, 560004, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Lalbagh",
+   "importance": 7.094453345536e-05,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "12.9488570",
+   "lon": "77.5869093",
+   "boundingbox": [
+    "12.9438111",
+    "12.9539746",
+    "77.5801308",
+    "77.5932280"
+   ],
+   "display_name": "Lalbagh Botanical Gardens, Siddapura Road, Ashoka Pillar, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, 560027, India",
+   "class": "leisure",
+   "type": "park",
+   "osm_type": "way",
+   "name": "Lalbagh Botanical Gardens",
+   "importance": 0.38382602028473783,
+   "place_rank": 30,
+   "addresstype": "leisure"
+  },
+  {
+   "lat": "12.9487190",
+   "lon": "77.5892076",
+   "boundingbox": [
+    "12.9479700",
+    "12.9495092",
+    "77.5885950",
+    "77.5900641"
+   ],
+   "display_name": "Lalbagh Rock, Ashoka Pillar, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, India",
+   "class": "natural",
+   "type": "bare_rock",
+   "osm_type": "way",
+   "name": "Lalbagh Rock",
+   "importance": 0.10673761120012205,
+   "place_rank": 22,
+   "addresstype": "bare_rock"
+  }
+ ],
+ "Cubbon Park, Bengaluru": [
+  {
+   "lat": "12.9742535",
+   "lon": "77.5921906",
+   "boundingbox": [
+    "12.9679621",
+    "12.9803864",
+    "77.5879274",
+    "77.5989019"
+   ],
+   "display_name": "Cubbon Park, Sampangirama Nagar, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, India",
+   "class": "leisure",
+   "type": "park",
+   "osm_type": "way",
+   "name": "Cubbon Park",
+   "importance": 0.3710973104982575,
+   "place_rank": 24,
+   "addresstype": "park"
+  },
+  {
+   "lat": "12.9809794",
+   "lon": "77.5975758",
+   "boundingbox": [
+    "12.9809294",
+    "12.9810294",
+    "77.5975258",
+    "77.5976258"
+   ],
+   "display_name": "Cubbon Park, Cubbon Road, Vasanth Nagar, Bengaluru Central City Corporation, Bengaluru, Bangalore North, Bengaluru Urban, Karnataka, 560001, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Cubbon Park",
+   "importance": 0.2521482229732802,
+   "place_rank": 30,
+   "addresstype": "railway"
+  }
+ ],
+ "Marina Beach, Chennai": [
+  {
+   "lat": "13.0532752",
+   "lon": "80.2833106",
+   "boundingbox": [
+    "13.0390662",
+    "13.0660981",
+    "80.2797358",
+    "80.2899441"
+   ],
+   "display_name": "Marina Beach, Zone 9 Teynampet, Chennai Corporation, Chennai, Tamil Nadu, India",
+   "class": "natural",
+   "type": "beach",
+   "osm_type": "way",
+   "name": "Marina Beach",
+   "importance": 0.46460522941004834,
+   "place_rank": 22,
+   "addresstype": "beach"
+  }
+ ],
+ "Marina Beach Chennai": [
+  {
+   "lat": "13.0533969",
+   "lon": "80.2833328",
+   "boundingbox": [
+    "13.0533469",
+    "13.0534469",
+    "80.2832828",
+    "80.2833828"
+   ],
+   "display_name": "Marina Beach,Chennai, Chennai, Tamil Nadu, 600005, India",
+   "class": "natural",
+   "type": "beach",
+   "osm_type": "node",
+   "name": "Marina Beach,Chennai",
+   "importance": 0.10673947127489125,
+   "place_rank": 22,
+   "addresstype": "beach"
+  }
+ ],
+ "India Gate": [
+  {
+   "lat": "28.6129332",
+   "lon": "77.2294928",
+   "boundingbox": [
+    "28.6128067",
+    "28.6130578",
+    "77.2293964",
+    "77.2295875"
+   ],
+   "display_name": "India Gate, Shahjahan Road, Pandara Park, Central Vista, New Delhi, Delhi, 020626, India",
+   "class": "tourism",
+   "type": "attraction",
+   "osm_type": "way",
+   "name": "India Gate",
+   "importance": 0.4479209652121003,
+   "place_rank": 30,
+   "addresstype": "tourism"
+  },
+  {
+   "lat": "48.8409097",
+   "lon": "2.3621386",
+   "boundingbox": [
+    "48.8408597",
+    "48.8409597",
+    "2.3620886",
+    "2.3621886"
+   ],
+   "display_name": "India Gate, Boulevard de l'Hôpital, Quartier du Jardin des Plantes, Paris 5e Arrondissement, Paris, Île-de-France, France métropolitaine, 75005, France",
+   "class": "amenity",
+   "type": "restaurant",
+   "osm_type": "node",
+   "name": "India Gate",
+   "importance": 9.317235065227768e-05,
+   "place_rank": 30,
+   "addresstype": "amenity"
+  },
+  {
+   "lat": "48.2155316",
+   "lon": "16.3719643",
+   "boundingbox": [
+    "48.2154816",
+    "48.2155816",
+    "16.3719143",
+    "16.3720143"
+   ],
+   "display_name": "India Gate, 49, Franz-Josefs-Kai, Textilviertel, Katastralgemeinde Innere Stadt, Innere Stadt, Wien, 1010, Österreich",
+   "class": "amenity",
+   "type": "restaurant",
+   "osm_type": "node",
+   "name": "India Gate",
+   "importance": 8.694209201185653e-05,
+   "place_rank": 30,
+   "addresstype": "amenity"
+  },
+  {
+   "lat": "52.2266766",
+   "lon": "20.9998227",
+   "boundingbox": [
+    "52.2266266",
+    "52.2267266",
+    "20.9997727",
+    "20.9998727"
+   ],
+   "display_name": "India Gate, 89, Aleje Jerozolimskie, Filtry, Ochota, Warszawa, województwo mazowieckie, 02-001, Polska",
+   "class": "amenity",
+   "type": "restaurant",
+   "osm_type": "node",
+   "name": "India Gate",
+   "importance": 8.366292820625647e-05,
+   "place_rank": 30,
+   "addresstype": "amenity"
+  },
+  {
+   "lat": "38.7095881",
+   "lon": "-9.1344241",
+   "boundingbox": [
+    "38.7095381",
+    "38.7096381",
+    "-9.1344741",
+    "-9.1343741"
+   ],
+   "display_name": "India Gate, Rua da Padaria, Sé, Alfama, Madalena, Lisboa, 1100-171, Portugal",
+   "class": "amenity",
+   "type": "restaurant",
+   "osm_type": "node",
+   "name": "India Gate",
+   "importance": 8.149767299911524e-05,
+   "place_rank": 30,
+   "addresstype": "amenity"
+  }
+ ],
+ "Ameerpet, Hyderabad": [
+  {
+   "lat": "17.4375012",
+   "lon": "78.4482505",
+   "boundingbox": [
+    "17.4175012",
+    "17.4575012",
+    "78.4282505",
+    "78.4682505"
+   ],
+   "display_name": "Ameerpet, Ward 98 Ameerpet, Greater Hyderabad Municipal Corporation Central Zone, Hyderabad, Ameerpet mandal, Hyderabad, Telangana, 500038, India",
+   "class": "place",
+   "type": "suburb",
+   "osm_type": "node",
+   "name": "Ameerpet",
+   "importance": 0.3699543402288119,
+   "place_rank": 19,
+   "addresstype": "suburb"
+  },
+  {
+   "lat": "17.4355002",
+   "lon": "78.4447343",
+   "boundingbox": [
+    "17.4354502",
+    "17.4355502",
+    "78.4446843",
+    "78.4447843"
+   ],
+   "display_name": "Ameerpet, Ameerpet Road - Panjagutta Main Road, Srinivas Nagar, Ameerpet, Ward 97 Somajiguda, Greater Hyderabad Municipal Corporation Central Zone, Hyderabad, Ameerpet mandal, Hyderabad, Telangana, 500073, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Ameerpet",
+   "importance": 0.2548773901198179,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "17.4354849",
+   "lon": "78.4447024",
+   "boundingbox": [
+    "17.4354349",
+    "17.4355349",
+    "78.4446524",
+    "78.4447524"
+   ],
+   "display_name": "Ameerpet, Ameerpet Road - Panjagutta Main Road, Yellareddyguda, Somajiguda, Ward 97 Somajiguda, Greater Hyderabad Municipal Corporation Central Zone, Hyderabad, Ameerpet mandal, Hyderabad, Telangana, 500073, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Ameerpet",
+   "importance": 0.2548773901198179,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "17.4357214",
+   "lon": "78.4447933",
+   "boundingbox": [
+    "17.4307214",
+    "17.4407214",
+    "78.4397933",
+    "78.4497933"
+   ],
+   "display_name": "Ameerpet (Red Line), Ameerpet Road - Panjagutta Main Road, Srinivas Nagar, Ameerpet, Ward 98 Ameerpet, Greater Hyderabad Municipal Corporation Central Zone, Hyderabad, Ameerpet mandal, Hyderabad, Telangana, 500073, India",
+   "class": "railway",
+   "type": "station",
+   "osm_type": "node",
+   "name": "Ameerpet (Red Line)",
+   "importance": 0.2548773901198179,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "17.4352864",
+   "lon": "78.4447834",
+   "boundingbox": [
+    "17.4302864",
+    "17.4402864",
+    "78.4397834",
+    "78.4497834"
+   ],
+   "display_name": "Ameerpet (Blue Line), Ameerpet Road - Panjagutta Main Road, Yellareddyguda, Somajiguda, Ward 97 Somajiguda, Greater Hyderabad Municipal Corporation Central Zone, Hyderabad, Ameerpet mandal, Hyderabad, Telangana, 500073, India",
+   "class": "railway",
+   "type": "station",
+   "osm_type": "node",
+   "name": "Ameerpet (Blue Line)",
+   "importance": 0.2548773901198179,
+   "place_rank": 30,
+   "addresstype": "railway"
+  }
+ ],
+ "Chennai": [
+  {
+   "lat": "13.0836939",
+   "lon": "80.2701860",
+   "boundingbox": [
+    "12.8519771",
+    "13.2351580",
+    "80.1401875",
+    "80.3328982"
+   ],
+   "display_name": "Chennai Corporation, Chennai, Tamil Nadu, India",
+   "class": "boundary",
+   "type": "administrative",
+   "osm_type": "relation",
+   "name": "Chennai Corporation",
+   "importance": 0.6796065306212251,
+   "place_rank": 16,
+   "addresstype": "city"
+  },
+  {
+   "lat": "13.0008413",
+   "lon": "80.2023035",
+   "boundingbox": [
+    "12.8514482",
+    "13.1502817",
+    "80.1182821",
+    "80.3069299"
+   ],
+   "display_name": "Chennai, Tamil Nadu, India",
+   "class": "boundary",
+   "type": "administrative",
+   "osm_type": "relation",
+   "name": "Chennai",
+   "importance": 0.5143622024538567,
+   "place_rank": 10,
+   "addresstype": "state_district"
+  }
+ ],
+ "Bandra, Mumbai": [
+  {
+   "lat": "19.0549792",
+   "lon": "72.8402203",
+   "boundingbox": [
+    "19.0499792",
+    "19.0599792",
+    "72.8352203",
+    "72.8452203"
+   ],
+   "display_name": "Bandra, Gurunanak Marg (Turner Road), Lal Mati (Lal Mitti), Khar, H/W Ward, Mumbai Zone 3, Mumbai, Mumbai Suburban District, Maharashtra, 400050, India",
+   "class": "railway",
+   "type": "station",
+   "osm_type": "node",
+   "name": "Bandra",
+   "importance": 0.4050032141000227,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "19.0546445",
+   "lon": "72.8404627",
+   "boundingbox": [
+    "19.0545945",
+    "19.0546945",
+    "72.8404127",
+    "72.8405127"
+   ],
+   "display_name": "Bandra, Bandra Skywalk, Qureshi Nagar Hutment Colony, Khar, Bandra West, Mumbai Zone 3, Mumbai, Mumbai Suburban District, Maharashtra, 400050, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Bandra",
+   "importance": 7.599526970316652e-05,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "19.0547291",
+   "lon": "72.8406538",
+   "boundingbox": [
+    "19.0546791",
+    "19.0547791",
+    "72.8406038",
+    "72.8407038"
+   ],
+   "display_name": "Bandra, Bandra Skywalk, Qureshi Nagar Hutment Colony, Khar, H/W Ward, Mumbai Zone 3, Mumbai, Mumbai Suburban District, Maharashtra, 400050, India",
+   "class": "railway",
+   "type": "stop",
+   "osm_type": "node",
+   "name": "Bandra",
+   "importance": 7.599526970316652e-05,
+   "place_rank": 30,
+   "addresstype": "railway"
+  },
+  {
+   "lat": "19.0566052",
+   "lon": "72.8462769",
+   "boundingbox": [
+    "19.0565552",
+    "19.0566552",
+    "72.8462269",
+    "72.8463269"
+   ],
+   "display_name": "Bandra, Sion Bandra Link Road, Gandhi Nagar, Kherwadi, H/E Ward, Mumbai Zone 3, Mumbai, Mumbai Suburban District, Maharashtra, 400017, India",
+   "class": "highway",
+   "type": "bus_stop",
+   "osm_type": "node",
+   "name": "Bandra",
+   "importance": 7.599526970316652e-05,
+   "place_rank": 30,
+   "addresstype": "highway"
+  },
+  {
+   "lat": "19.0583358",
+   "lon": "72.8302669",
+   "boundingbox": [
+    "19.0405971",
+    "19.0816220",
+    "72.8182339",
+    "72.8413455"
+   ],
+   "display_name": "Bandra West, Mumbai Zone 3, Mumbai, Mumbai Suburban District, Maharashtra, India",
+   "class": "place",
+   "type": "suburb",
+   "osm_type": "way",
+   "name": "Bandra West",
+   "importance": 0.4446870948506422,
+   "place_rank": 19,
+   "addresstype": "suburb"
+  }
+ ]
+}

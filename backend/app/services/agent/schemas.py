@@ -99,6 +99,7 @@ ClarificationReason = Literal[
     "analysis_ambiguous",
     "location_missing",
     "location_not_found",
+    "location_is_point",
     "area_too_large",
     "date_missing",
     "date_ambiguous",

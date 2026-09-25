@@ -60,6 +60,8 @@ class GeospatialService(DomainService):
             display_name=place.display_name,
             place_class=place.place_class,
             place_type=place.place_type,
+            osm_type=place.osm_type,
+            point_like=place.point_like,
             center=place.center,
             bbox=place.bbox,
             source="nominatim",

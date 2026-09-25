@@ -172,6 +172,28 @@ def _oversized_place(plan: AgentPlan, steps: list[AgentToolStep]) -> AgentClarif
     )
 
 
+def _point_place(plan: AgentPlan, steps: list[AgentToolStep]) -> AgentClarification:
+    """The clarification for a place the geocoder has only as a single point.
+
+    What was matched is the plan builder's own words, taken from the failed
+    step verbatim; the remedy is an area the user names - none is drawn for
+    them.
+    """
+
+    place = _place(plan)
+    reason = next(
+        (step.error_message for step in steps if step.error_message), None
+    ) or "The place resolved only to a single point, which has no area to measure."
+    return AgentClarification(
+        reason="location_is_point",
+        message=(
+            f"{reason} Name an area instead - a park, lake, beach or "
+            "neighbourhood together with its city."
+        )[:1000],
+        understood_location=place,
+    )
+
+
 def _unresolved_place(plan: AgentPlan) -> AgentClarification:
     """The clarification for a place the geospatial service could not find."""
 
@@ -271,6 +293,9 @@ class AgentService(DomainService):
         clarification = None
         if outcome.discovery_failure_code == "not_found":
             clarification = _unresolved_place(plan)
+        elif outcome.discovery_failure_code == "location_is_point":
+            # Found, but only as a point: an area is needed, not a spelling.
+            clarification = _point_place(plan, outcome.steps)
         elif outcome.discovery_failure_code == "aoi_too_large":
             clarification = _oversized_place(plan, outcome.steps)
         if clarification is not None:

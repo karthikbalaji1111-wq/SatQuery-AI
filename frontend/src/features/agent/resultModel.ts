@@ -41,6 +41,7 @@ export type OutcomeKind =
   | "clarification"
   | "location_not_found"
   | "location_unavailable"
+  | "location_is_point"
   | "area_too_large"
   | "unsupported"
   | "insufficient_evidence"
@@ -60,6 +61,7 @@ export interface Outcome {
 
 const CLARIFICATION_KIND: Partial<Record<ClarificationReason, OutcomeKind>> = {
   location_not_found: "location_not_found",
+  location_is_point: "location_is_point",
   area_too_large: "area_too_large",
   analysis_unsupported: "unsupported",
   requires_ai_model: "unsupported",
@@ -70,6 +72,7 @@ const OUTCOME_LABELS: Record<OutcomeKind, string> = {
   clarification: "One more detail",
   location_not_found: "Location not found",
   location_unavailable: "Location service unavailable",
+  location_is_point: "A point, not an area",
   area_too_large: "Area too large",
   unsupported: "Not supported",
   insufficient_evidence: "No measurement",
@@ -522,6 +525,10 @@ export function runStages(result: AgentResult): RunStage[] {
   }
   if (outcome.kind === "location_not_found") {
     stages.push({ name: "Resolve location", state: "failed", detail: "not found" });
+    return stages;
+  }
+  if (outcome.kind === "location_is_point") {
+    stages.push({ name: "Resolve location", state: "attention", detail: "a single point, not an area" });
     return stages;
   }
   if (outcome.kind === "area_too_large") {
