@@ -257,6 +257,15 @@ class ResolvedQueryPlan(BaseModel):
 
     intent: SatQueryIntent
     bbox: BoundingBox
+    #: WHAT the geocoder matched for ``intent.location_query``, verbatim: its
+    #: own display name and classification. The place name a user typed and the
+    #: feature measured can differ - "Lalbagh, Bengaluru" matched a railway
+    #: stop, "Chennai Pune" a restaurant - and without this the result carried
+    #: only the typed name. Descriptive only: nothing reads it to decide
+    #: anything, and it is absent (None) for a bbox given directly.
+    matched_name: str | None = None
+    matched_class: str | None = None
+    matched_type: str | None = None
 
 
 # --------------------------------------------------------------------------- #

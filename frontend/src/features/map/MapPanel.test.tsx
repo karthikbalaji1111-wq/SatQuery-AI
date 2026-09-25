@@ -12,7 +12,7 @@ import {
 CHANGE_LAYER_ID,
 } from "./footprint";
 import type { MapImagery, MapLike, MapNdwi } from "./footprint";
-import { MapPanel } from "./MapPanel";
+import { BASEMAP_MAX_ZOOM, MAX_FIT_ZOOM, MapPanel } from "./MapPanel";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -416,7 +416,31 @@ describe("MapPanel viewport framing", () => {
       [80.279621036, 13.039005833], // [west, south]
       [80.29002857, 13.066160297], // [east, north]
     ]);
-    expect(call.options).toEqual({ padding: 24, duration: 0 });
+    expect(call.options).toEqual({ padding: 24, duration: 0, maxZoom: MAX_FIT_ZOOM });
+  });
+
+  it("never frames closer than the basemap has tiles for - a point-sized AOI keeps its context", () => {
+    // Live: "India Gate, New Delhi" geocoded to a box a few metres wide, the
+    // camera went to z20, and every z20 OSM tile failed (no CORS on the error
+    // page) - a blank basemap and a console full of errors in a demo.
+    const created: FakeMap[] = [];
+    const createMap = vi.fn(() => {
+      const map = new FakeMap();
+      created.push(map);
+      return map;
+    });
+    render(
+      <MapPanel
+        aoi={{ west: 77.22949, south: 28.61293, east: 77.22951, north: 28.61295, scene_id: null }}
+        createMap={createMap}
+      />,
+    );
+    act(() => created.forEach((map) => map.emit("load")));
+
+    const [call] = created[0].fitBoundsCalls;
+    expect(call.options).toMatchObject({ maxZoom: MAX_FIT_ZOOM });
+    expect(MAX_FIT_ZOOM).toBeLessThanOrEqual(BASEMAP_MAX_ZOOM);
+    expect(BASEMAP_MAX_ZOOM).toBe(19); // OpenStreetMap standard tiles
   });
 
   it("frames from the corners, not from any other extent", () => {

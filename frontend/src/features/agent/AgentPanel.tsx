@@ -34,7 +34,9 @@ import {
   outcomeOf,
   resultContext,
   resultSummary,
+  matchFrom,
   runStages,
+  thresholdNote,
   validationRecords,
   type OutcomeKind,
   type Quality,
@@ -875,6 +877,15 @@ export function AgentEvidencePanel({
       value: `${imagery.resolution} m/px`,
     });
   }
+  const plan = evidence?.execution?.plan ?? null;
+  const match = matchFrom(plan?.matched_name, plan?.matched_class, plan?.matched_type);
+  if (match) {
+    fields.push({
+      label: "Geocoder match",
+      value: match.kind ? `${match.full} · ${match.kind}` : match.full,
+      wide: true,
+    });
+  }
   const catalog = window?.catalog ?? evidence?.execution?.catalog ?? null;
   if (catalog) fields.push({ label: "Source catalog", value: catalogName(catalog) });
   if (window && window.scene_count > 0) {
@@ -1154,10 +1165,7 @@ function IndexReadout({
           {formatMeasurement(index.value, index.unit)}
         </span>
         {aboveThreshold && (
-          <span className="index-note">
-            {formatMeasurement(aboveThreshold.value, aboveThreshold.unit)}% above
-            threshold
-          </span>
+          <span className="index-note">{thresholdNote(aboveThreshold)}</span>
         )}
       </div>
       <div className="index-ramp" />
@@ -1477,6 +1485,16 @@ function ResultContextList({
 }) {
   const rows: { label: string; value: string; title?: string }[] = [];
   if (context.location) rows.push({ label: "Location", value: context.location });
+  if (context.matched) {
+    // What was actually measured: the geocoder's own match, not the typed name.
+    rows.push({
+      label: "Matched",
+      value: context.matched.kind
+        ? `${context.matched.name} (${context.matched.kind})`
+        : context.matched.name,
+      title: context.matched.full,
+    });
+  }
   if (body.kind !== "temporal" && context.periods.length > 0) {
     rows.push({ label: "Period", value: context.periods.join(" · ") });
   }
@@ -1550,7 +1568,8 @@ function MeasurementAbsent({
           <p className="answer-notice-detail">
             A validation check refused the data rather than report a number it
             could not stand behind. The scene and its provenance are in the
-            evidence.
+            evidence. Each period selects its own scene, so another month may
+            be measurable.
           </p>
           {reason && (
             <details className="answer-notice-reason">

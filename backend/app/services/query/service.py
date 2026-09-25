@@ -43,4 +43,10 @@ class QueryService(DomainService):
             intent.temporal_mode,
             intent.modalities,
         )
-        return ResolvedQueryPlan(intent=intent, bbox=resolved.bbox)
+        return ResolvedQueryPlan(
+            intent=intent,
+            bbox=resolved.bbox,
+            matched_name=resolved.display_name,
+            matched_class=resolved.place_class,
+            matched_type=resolved.place_type,
+        )

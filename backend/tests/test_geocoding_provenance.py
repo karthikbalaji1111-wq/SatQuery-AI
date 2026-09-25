@@ -189,3 +189,40 @@ def test_the_legitimate_intent_still_validates() -> None:
     """Counter-case: forbidding everything would pass the test above."""
 
     assert SatQueryIntent(**BASE_INTENT) is not None  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------- #
+# Final demo audit: the plan carries WHAT was matched, not only the typed name
+# --------------------------------------------------------------------------- #
+
+
+def test_the_plan_names_the_feature_the_geocoder_actually_matched() -> None:
+    """Live: "Lalbagh, Bengaluru" matched a railway STOP, not the garden, and
+    the workspace could only show the typed name. The match travels with the
+    plan now, verbatim - the geocoder stays the authority, nothing is judged."""
+
+    import asyncio
+
+    from app.services.geospatial import GeospatialService
+    from app.services.query import QueryService
+
+    reset_geocoder_state()
+    stop = [{
+        "lat": "12.9507", "lon": "77.5848",
+        "boundingbox": ["12.95065", "12.95075", "77.58475", "77.58485"],
+        "display_name": "Lalbagh, Rashtriya Vidyalaya Road, Bengaluru, Karnataka, India",
+        "class": "railway", "type": "stop", "osm_type": "node",
+    }]
+    geo = GeospatialService(
+        settings=Settings(geocoder_min_interval_seconds=0.0),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=stop)),
+    )
+    intent = SatQueryIntent.model_validate({**BASE_INTENT, "location_query": "Lalbagh, Bengaluru"})
+
+    plan = asyncio.run(QueryService(geospatial_service=geo).build_plan(intent))
+
+    assert plan.intent.location_query == "Lalbagh, Bengaluru"  # what was typed
+    assert plan.matched_name == stop[0]["display_name"]         # what was matched
+    assert (plan.matched_class, plan.matched_type) == ("railway", "stop")
+    # The geocoder's box, untouched - no area invented around the point.
+    assert (plan.bbox.south, plan.bbox.north) == (12.95065, 12.95075)

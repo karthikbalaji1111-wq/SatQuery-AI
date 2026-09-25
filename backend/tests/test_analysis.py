@@ -590,7 +590,12 @@ def test_build_plan_endpoint_is_unaffected() -> None:
     response = TestClient(app).post(BUILD_PLAN_URL, json=intent_dict())
 
     assert response.status_code == 200
-    assert set(response.json()) == {"intent", "bbox"}
+    # The plan is intent + bbox, plus - since the final demo audit - the
+    # geocoder's own match, named so a reader sees WHICH place was grounded.
+    # Nothing else may appear.
+    assert set(response.json()) == {
+        "intent", "bbox", "matched_name", "matched_class", "matched_type",
+    }
     assert len(fake_geo.calls) == 1
 
 

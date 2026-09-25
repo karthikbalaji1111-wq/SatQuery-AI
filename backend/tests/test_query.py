@@ -309,7 +309,9 @@ def test_geospatial_upstream_failure_propagates_as_502() -> None:
 def test_response_contains_only_plan_fields() -> None:
     client, _ = make_client()
     body = client.post(BUILD_PLAN_URL, json=intent_body()).json()
-    assert set(body) == {"intent", "bbox"}
+    assert set(body) == {
+        "intent", "bbox", "matched_name", "matched_class", "matched_type",
+    }  # + the geocoder's own match
     assert "scenes" not in body
     assert "image_base64" not in body
 

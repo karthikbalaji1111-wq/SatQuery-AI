@@ -1283,7 +1283,9 @@ def test_build_plan_endpoint_still_returns_only_plan_fields() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"intent", "bbox"}
+    assert set(body) == {
+        "intent", "bbox", "matched_name", "matched_class", "matched_type",
+    }  # + the geocoder's own match
     assert body["intent"]["location_query"] == "Chennai"
     assert len(fake_geo.calls) == 1
 
