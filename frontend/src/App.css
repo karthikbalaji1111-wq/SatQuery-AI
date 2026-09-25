@@ -3747,3 +3747,12 @@ a:focus-visible {
   font-weight: 400;
   color: var(--ink-3);
 }
+
+/* A small sample is said, quietly: amber, smaller than the headline, and never
+   a verdict on the number above it. */
+.interpretation-warning {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--amber-ink);
+}

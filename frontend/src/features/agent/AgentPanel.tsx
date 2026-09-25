@@ -1488,6 +1488,12 @@ function InterpretationBlock({
         What this means
       </h3>
       <p className="interpretation-headline">{interpretation.headline}</p>
+      {interpretation.sampleWarnings?.map((warning) => (
+        <p key={warning} className="interpretation-warning" role="note">
+          <span aria-hidden="true">⚠ </span>
+          {warning}
+        </p>
+      ))}
       <p className="interpretation-text">{interpretation.explanation}</p>
       {interpretation.caveat && (
         <p className="interpretation-caveat">{interpretation.caveat}</p>

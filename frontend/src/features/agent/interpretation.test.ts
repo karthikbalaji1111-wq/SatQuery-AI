@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentResult } from "../../api/types";
-import { interpretResult, type Interpretation } from "./interpretation";
+import { SMALL_SAMPLE_PIXELS, interpretResult, type Interpretation } from "./interpretation";
 import {
   AREA_TOO_LARGE_CHENNAI,
   CLARIFY_CHENNAI,
   LOCATION_UNAVAILABLE,
   NDBI_AMEERPET,
   NDVI_CUBBON,
+  NDVI_LALBAGH_STOP,
   NDWI_MARINA,
   NO_SCENES,
   NOT_FOUND,
@@ -40,7 +41,12 @@ function interpreted(result: AgentResult): Interpretation {
 }
 
 function allText(interpretation: Interpretation): string {
-  return [interpretation.headline, interpretation.explanation, interpretation.caveat ?? ""].join(" ");
+  return [
+    interpretation.headline,
+    ...(interpretation.sampleWarnings ?? []),
+    interpretation.explanation,
+    interpretation.caveat ?? "",
+  ].join(" ");
 }
 
 /** Dal Lake, Srinagar, January 2024 vs January 2025 - live production values. */
@@ -234,6 +240,7 @@ describe("interpretResult - only a measured result is interpreted", () => {
 describe("interpretResult - scientific grounding", () => {
   const MEASURED: [string, AgentResult][] = [
     ["NDVI", NDVI_CUBBON],
+    ["NDVI over 4 pixels", NDVI_LALBAGH_STOP],
     ["NDVI below zero", NDVI_NEGATIVE],
     ["NDVI zero", NDVI_ZERO],
     ["NDWI", NDWI_MARINA],
@@ -278,5 +285,112 @@ describe("interpretResult - scientific grounding", () => {
     for (const number of numbers) {
       expect([...card, ...quality]).toContain(number);
     }
+  });
+});
+
+describe("interpretResult - a small sample is said, never judged", () => {
+  /** A copy with extra evidence items, e.g. a second index in the same run. */
+  function withItems(result: AgentResult, items: Json[]): AgentResult {
+    const copy = structuredClone(result) as unknown as { evidence: { items: Json[] } };
+    copy.evidence.items.push(...items);
+    return copy as unknown as AgentResult;
+  }
+  const measured = (id: string, name: string, value: number, unit: string): Json => ({
+    id, source: id.split(".")[0], measurement: { name, value, unit }, text: null, produced_by: "analysis", visual: null,
+  });
+
+  it("the live railway-stop case: 4 pixels, with the count as returned", () => {
+    const interpretation = interpreted(NDVI_LALBAGH_STOP);
+    expect(interpretation.sampleWarnings).toEqual([
+      "Small sample: only 4 valid pixels contributed to this result, so interpret it cautiously.",
+    ]);
+    // The measurement and its sentence are exactly as before.
+    expect(interpretation.headline).toBe("Positive vegetation-related signal");
+    expect(interpretation.explanation).toContain("average NDVI of +0.3728 across 4 valid pixels");
+  });
+
+  it("a large sample carries no warning", () => {
+    for (const result of [NDVI_CUBBON, NDWI_MARINA, NDBI_AMEERPET, SAR_MARINA, TEMPORAL_MARINA]) {
+      expect(interpreted(result).sampleWarnings).toBeUndefined();
+    }
+  });
+
+  it("the boundary is the documented presentation rule, and it is only that", () => {
+    expect(SMALL_SAMPLE_PIXELS).toBe(100);
+    const at = (count: number) =>
+      interpreted(withEvidence(NDVI_CUBBON, { "ndvi.ndvi_valid_pixel_count": count })).sampleWarnings;
+    expect(at(SMALL_SAMPLE_PIXELS - 1)?.[0]).toContain("only 99 valid pixels");
+    expect(at(SMALL_SAMPLE_PIXELS)).toBeUndefined();
+    expect(at(1)?.[0]).toContain("only 1 valid pixel contributed");
+  });
+
+  it("no count, no warning - a count is never guessed", () => {
+    const uncounted = withEvidence(NDVI_LALBAGH_STOP, { "ndvi.ndvi_valid_pixel_count": null });
+    expect(interpreted(uncounted).sampleWarnings).toBeUndefined();
+  });
+
+  it("names which index, when several were measured", () => {
+    const both = withItems(NDVI_CUBBON, [
+      measured("ndwi.ndwi_mean", "ndwi_mean", -0.2, "index"),
+      measured("ndwi.ndwi_valid_pixel_count", "ndwi_valid_pixel_count", 12, "pixels"),
+    ]);
+    expect(interpreted(both).sampleWarnings).toEqual([
+      "Small sample: only 12 valid pixels contributed to the NDWI result, so interpret it cautiously.",
+    ]);
+  });
+
+  it("SAR: the returned count", () => {
+    const few = withEvidence(SAR_MARINA, {
+      "sar_backscatter.vv_valid_pixel_count": 9,
+      "sar_backscatter.vh_valid_pixel_count": 9,
+    });
+    expect(interpreted(few).sampleWarnings).toEqual([
+      "Small sample: only 9 valid pixels contributed to this result, so interpret it cautiously.",
+    ]);
+  });
+
+  it("temporal: each observation on its own, and the paired change as a third sample", () => {
+    const earlierOnly = withEvidence(TEMPORAL_MARINA, {
+      "temporal_ndwi.first.ndwi_valid_pixel_count": 6,
+    });
+    expect(interpreted(earlierOnly).sampleWarnings).toEqual([
+      "Small sample: only 6 valid pixels contributed to the earlier observation (January 2024), so interpret it cautiously.",
+    ]);
+
+    const all = withEvidence(TEMPORAL_MARINA, {
+      "temporal_ndwi.first.ndwi_valid_pixel_count": 6,
+      "temporal_ndwi.second.ndwi_valid_pixel_count": 8,
+      "temporal_ndwi.change.paired_valid_pixel_count": 5,
+    });
+    expect(interpreted(all).sampleWarnings).toEqual([
+      "Small sample: only 6 valid pixels contributed to the earlier observation (January 2024), so interpret it cautiously.",
+      "Small sample: only 8 valid pixels contributed to the later observation (January 2025), so interpret it cautiously.",
+      "Small sample: only 5 pixels were usable on both dates for the paired-pixel change, so interpret it cautiously.",
+    ]);
+    // The change itself is stated exactly as before.
+    expect(interpreted(all).explanation).toContain("increased from +0.0266 to +0.1466, a change of +0.1200.");
+  });
+
+  it("a withheld difference still says how few pixels each observation had", () => {
+    const withheld = withEvidence(TEMPORAL_MARINA, {
+      "temporal_ndwi.difference.mean_ndwi_difference": null,
+      "temporal_ndwi.second.ndwi_valid_pixel_count": 3,
+    });
+    expect(interpreted(withheld).sampleWarnings).toEqual([
+      "Small sample: only 3 valid pixels contributed to the later observation (January 2025), so interpret it cautiously.",
+    ]);
+  });
+
+  it("never declares invalidity, significance or confidence", () => {
+    const warnings = [
+      ...(interpreted(NDVI_LALBAGH_STOP).sampleWarnings ?? []),
+      ...(interpreted(
+        withEvidence(TEMPORAL_MARINA, {
+          "temporal_ndwi.first.ndwi_valid_pixel_count": 1,
+          "temporal_ndwi.change.paired_valid_pixel_count": 1,
+        }),
+      ).sampleWarnings ?? []),
+    ].join(" ");
+    expect(warnings).not.toMatch(/invalid|unreliable|significan|insignifican|confiden|statistic|meaningless|not meaningful|error bar|uncertain/i);
   });
 });
