@@ -9,6 +9,7 @@ import {
   NDWI_MARINA,
   NDWI_WITH_LOOK_OBSERVED,
   NDWI_WITH_LOOK_UNAVAILABLE,
+  UNSUPPORTED_SHIPS,
   VISUAL_NO_IMAGE,
   VISUAL_OBSERVED,
   VISUAL_UNAVAILABLE,
@@ -208,6 +209,15 @@ describe("visual observation rail", () => {
     expect(observationPanel()).toHaveTextContent(
       "No visual description was requested for this question, so no image was sent to a model.",
     );
+  });
+
+  it("nothing ran: never claims a refused description was not requested", () => {
+    // Found live: "Describe the radar image of ..." is refused before anything
+    // runs, and the rail said "No visual description was requested".
+    render(<AgentObservationPanel evidence={UNSUPPORTED_SHIPS.evidence} result={UNSUPPORTED_SHIPS} />);
+    const panel = observationPanel();
+    expect(panel).toHaveTextContent("Nothing ran for this question, so no image was sent to a model.");
+    expect(panel).not.toHaveTextContent(/requested/);
   });
 });
 
