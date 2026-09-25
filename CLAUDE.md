@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 32 (point-like geocoder matches). Section 23 (the scientific core,
+current figures are in section 33 (layperson-first results). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2856,3 +2856,79 @@ refusal in its recovery plan.
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **518 passed** (515 before) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 33. Layperson first - plain answer, how we know, technical details - IMPLEMENTED (2026-09-25)
+
+Frontend language and hierarchy only (`df44cf5`). No calculation, formula,
+threshold, scene selection, geocoder, validation, backend or evidence change;
+no model or API writes any sentence. Backend suite unchanged at 3096.
+
+**Three layers** (`interpretation.ts`, fixed templates over the values the
+result model already reads):
+
+1. **What this means** - one or two sentences, no acronyms or formulas:
+   "The selected area shows a positive vegetation signal." (NDVI), "... a
+   positive water signal." (NDWI), "... does not show a positive built-up
+   signal on average." (NDBI), "The radar image gave two measurements for the
+   selected area: -5.44 dB and -17.85 dB." (SAR), "The later satellite image
+   shows a stronger water signal than the earlier image." (two dates), each
+   with the number, place and date ("In the satellite image of Cubbon Park,
+   Bengaluru taken on 8 December 2024, the vegetation index was +0.5204.") and
+   a plain limit ("The built-up index is an indicator, not a building
+   detector."; "This shows a change in the satellite measurement. It does not
+   tell us what caused the change.").
+2. **How we know** - the method in everyday words, consistent with the
+   formulas ("We compared two kinds of light the satellite records - red light
+   and invisible near-infrared light - which plants reflect very
+   differently."), the usable pixels, and why any were left out.
+3. **Technical details** (`technicalDetails`, a folded `<details>`) - index
+   names, formulas and bands, exact API values beside the rounded ones, valid
+   pixels and mask source, sensor, scene ID, grid, the radiometric and
+   geometric checks, and the grounded answer sentence with its grounding
+   checks. The evidence panel is untouched.
+
+A comparison card answers "What changed" in words above its numbers ("The water
+signal was stronger in January 2025 than in January 2024."). Context rows use
+everyday labels: Satellite image, Date ("8 December 2024"), Images found,
+Usable pixels. Zero stays the only boundary: "positive", never "strong",
+"healthy" or "dense" (no threshold for those exists). The small-sample rule is
+unchanged (100 pixels); its words say "usable pixels".
+
+**Not changed, deliberately:** the result card's own labels ("Vegetation index
+· NDVI", "VV / VH") - the big number keeps its technical name - and the
+pipeline strip ("Find satellite scenes", "radiometry & geometry checked").
+
+**Tests.** `interpretation.test.ts` rewritten for the new wording (75): every
+operation's plain answer and method, sign and displayed-zero cases,
+increase/decrease/little change/withheld/unpaired, optional fields, status
+safety (and no technical details) for eight non-success states, a jargon
+blacklist over the plain layers (NDVI, NDWI, NDBI, SAR, VV, VH, NIR, SWIR,
+STAC, backscatter, reflectance, radiometric, spectral, scene, normalized
+difference ...) with the same terms REQUIRED in Technical details, exact
+values and formulas in Technical details, a causal/judgement scan over every
+layer (the required cause-denial and pixel-exclusion sentences exempted
+verbatim), every plain-layer number traceable to the result, and the small
+sample. `AgentPanel.m6.test.tsx`: context labels, the grounded sentence inside
+Technical details, the layer order, the fold, "What changed" in words, no
+layers for non-success states. Mutations 8/8 caught: acronym in the plain
+answer (9 fail), "strong" (7), technical details dropped (8), change direction
+swapped (6), cause boundary removed (2), exact value rounded (2), small-sample
+rule changed (2), technical details open by default (1).
+
+**Verified in production** (`app-xGybjSYs.js`; 1 `/query/agent` request each,
+console 0 / 0): Cubbon Park NDVI +0.5204, Marina Beach NDWI +0.1466, Ameerpet
+NDBI -0.0248, Marina Beach two dates +0.0266 -> +0.1466 (change +0.1200), and
+Marina Beach radar -5.44 / -17.85 dB - each with the plain answer, How we
+know, everyday context and 9-12 folded technical rows; no jargon in any plain
+layer. The demo package (docs/SIH_DEMO_PACKAGE.md and the published page) now
+quotes the new wording.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `npm run test` | **541 passed** (518 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+| `pytest -q` / `ruff` / `git diff --check` | 3096 passed (unchanged) / clean / clean |
