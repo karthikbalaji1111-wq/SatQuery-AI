@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 30 (final demo audit). Section 23 (the scientific core,
+current figures are in section 31 (plain-language interpretation). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2679,3 +2679,81 @@ tile errors on the previous build).
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **447 passed** (440 at M6) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+
+---
+
+## 31. "What this means" - deterministic plain-language interpretation - IMPLEMENTED (2026-09-25)
+
+Frontend only (`016c510`). No backend, scientific, routing, intent-model,
+STAC, geocoder or validation change; no model, provider, API call or
+dependency. Backend suite unchanged at 3067.
+
+**Architecture.** backend measurement -> validated result -> `resultModel`
+(unchanged) -> `features/agent/interpretation.ts` `interpretResult(result)`
+-> `{ headline, explanation, caveat? }`. Fixed templates filled only from what
+the result model already reads from the evidence: operation, the place as
+asked, the requested period, the selected scene's acquisition date, the
+measurements and the pixel-quality counts. Numbers go through the SAME
+formatters as the result card (`format.ts`: `signedIndex`, `decibels`,
+`pixelCount`), so a sentence cannot restate a value differently.
+
+**Rules.** Indices are named as signals ("vegetation-related",
+"water-related", "built-up-related"), never as health, water bodies or
+land-cover classes. The only boundary anywhere is ZERO, the natural midpoint
+of a normalised difference; "zero" means zero at the displayed precision (a
+mean or difference shown as +0.0000 / -0.0000 is not called positive or an
+increase) - a display fact, not a significance test, and none is claimed.
+Temporal NDWI answers "what changed": increased / decreased / "little measured
+change", earlier -> later values, the change, the paired-pixel change, then
+"it does not by itself establish the cause of that change. No statistical test
+was applied." A withheld difference states no change. Only a successful
+measured result is interpreted: clarification, not found, location
+unavailable, area too large, unsupported, no measurement, analysis not
+computed, provider failure and imagery-only return `null` and keep their own
+wording.
+
+**UX.** Under the result card, above the context rows: "What this means"
+(13.5 px headline, 12.5 px body, 11 px caveat - the number stays 18-34 px). The
+comparison card is labelled "What changed". The grounded answer sentence below
+the context is quieter (12 px, regular weight), as evidence.
+
+**Tests.** `interpretation.test.ts` (41): NDVI positive / below zero / zero,
+NDWI, NDBI, SAR (both and one polarization), temporal increase / decrease /
+little change (+0.0000 and -0.0000) / withheld / unpaired, missing optional
+fields, seven non-success states and a provider failure -> null, a prohibited
+causal/event/judgement vocabulary scan over every measured case, and a
+provenance test that every number stated is one the result carries.
+`AgentPanel.m6.test.tsx` (+14): the section for each operation, its position
+between the card and the context, "What changed", and no section for any
+non-success state. Mutation-checked 6/6 (verbs swapped 3 fail, raw sign
+without the displayed-zero rule 2, status gate removed 1, causal claim added 1,
+wrong number stated 3, optional range assumed present 1), restored
+byte-identical.
+
+**Verified in production** (Vercel `app-ByxpKNTK.js`, real UI, standard
+workflow, 1 `/query/agent` request each, console 0 errors / 0 warnings):
+Cubbon Park December 2024 -> "Positive vegetation-related signal", NDVI
++0.5204 across 16,988 valid pixels, 92 of 17,080 masked; Marina Beach January
+2025 -> "Positive water-related signal", NDWI +0.1466; Ameerpet January 2025 ->
+"No positive built-up-related signal on average", NDBI -0.0248; Marina Beach
+temporal -> "The water-related signal increased from January 2024 to January
+2025", +0.0266 -> +0.1466, change +0.1200, paired +0.1207, with "What
+changed" on the card. "Analyze SAR backscatter around Marina Beach, Chennai"
+names no date, so it is asked for the period (no default date is invented) and
+shows no interpretation; with "in January 2025": VV -5.44 dB, VH -17.85 dB,
+VV-VH 12.41 dB, "VV backscatter was stronger than VH on average".
+
+**Known limitations.** The interpretation says what the sign of an index
+means and nothing about magnitude: without a defensible threshold in the
+product, +0.52 and +0.02 are both "positive". A tiny sample (e.g. 4 pixels at
+a point-sized geocoder match) is stated as a count, not qualified. English
+only. The manual configuration path is not interpreted; the evidence export
+does not include the interpretation.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `npm run test` | **502 passed** (447 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+| `pytest -q` / `ruff` / `git diff --check` | 3067 passed (unchanged) / clean / clean |
