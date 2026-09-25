@@ -2642,6 +2642,22 @@ run aborted by design (race test). 0 dependency failures observed.
   measurement, coordinate, scene or progress; the temporal card and evidence
   name Earlier / Later; "no cause is inferred" beside every change.
 
+**Verified in production** (`f78a182` + `64f64d7` on Render and Vercel; real
+UI in a Playwright browser; standard workflow, no AI key). The new backend was
+detected by the plan carrying `matched_name`. "Marina Beach Chennai" -> NDWI
+-0.1760, "Matched: Marina Beach, Chennai (natural · beach)"; "Lalbagh,
+Bengaluru" -> NDVI +0.3579, "Matched: Lalbagh, Rashtriya Vidyalaya Road
+(railway · stop)"; Cubbon Park 2 January 2025 -> "The analysis was not
+computed", Why: "NDVI pixel quality: No pixel was usable: all 17080 pixels ...
+masked"; Cubbon Park December 2024 -> NDVI +0.5204. The example chips, cleared
+and clicked: NDWI +0.1466, NDBI -0.0248, SAR VV -5.444 / VH -17.85 / VV-VH
+12.41 dB, temporal +0.0266 -> +0.1466 (difference +0.1200, paired +0.1207) -
+all six stages, one `/query/agent` request each. Basemap tiles stopped at z18
+(the old build requested z20). At 390 px no stage overlaps the status pill and
+all three layer toggles are clear of the note; no horizontal scroll. Landing
+shows the corrected copy. Console 0 errors / 0 warnings on /app and / (195
+tile errors on the previous build).
+
 ### Known limitations (unchanged by this audit)
 
 - A point-sized geocoder match is measured over its own tiny box; the Matched
