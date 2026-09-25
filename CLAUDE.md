@@ -2896,9 +2896,26 @@ Usable pixels. Zero stays the only boundary: "positive", never "strong",
 "healthy" or "dense" (no threshold for those exists). The small-sample rule is
 unchanged (100 pixels); its words say "usable pixels".
 
-**Not changed, deliberately:** the result card's own labels ("Vegetation index
-· NDVI", "VV / VH") - the big number keeps its technical name - and the
-pipeline strip ("Find satellite scenes", "radiometry & geometry checked").
+**Second pass - the cards and the pipeline (`bdddf60`).** The places a reader
+still met specialist terms first were closed: the radar card reads "First
+measurement / Second measurement / Difference" and "Averages over N usable
+pixels" (VV, VH, γ⁰ and the provider's terrain correction are in Technical
+details); the comparison card shows one "Change +0.1200", "image taken 15
+January 2024" and "A measured change - no cause is inferred" (the per-pixel
+change is in How we know and Technical details, and stands in on the card only
+when the overall difference was withheld); index cards say "Average over N
+usable pixels" (the range is in Technical details); the pipeline strip says
+"Find satellite images", "Check the images - data suitable & correctly
+aligned", "Run analysis - vegetation index / water index / built-up index /
+water change / radar", "Check answer - matches the measurements". The index
+card keeps its code beside the plain name ("Vegetation index · NDVI"). Guards:
+a pipeline jargon scan over seven kinds of run, and card scans (no VV/VH/γ⁰ on
+the radar card, no index code or paired-pixel term on the comparison card);
+mutations 4/4 caught. Production (`app-BD2VmMLW.js`): all five queries, no
+jargon in the card, What this means, How we know or the pipeline; console 0 /
+0. During the check the public geocoder refused 44 of 46 requests from
+Render's shared IP (section 27); two queries showed "Location service
+temporarily unavailable" and succeeded on one retry.
 
 **Tests.** `interpretation.test.ts` rewritten for the new wording (75): every
 operation's plain answer and method, sign and displayed-zero cases,
@@ -2929,6 +2946,6 @@ quotes the new wording.
 
 | Check | Result |
 | --- | --- |
-| `npm run test` | **541 passed** (518 before) |
+| `npm run test` | **551 passed** (518 before; 541 after the first pass) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
 | `pytest -q` / `ruff` / `git diff --check` | 3096 passed (unchanged) / clean / clean |
