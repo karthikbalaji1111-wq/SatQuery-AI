@@ -600,3 +600,30 @@ describe("What this means - the result in plain English", () => {
     expect(meaning()).toBeNull();
   });
 });
+
+describe("Small sample - said under the number, never instead of it", () => {
+  function meaning(): HTMLElement {
+    return within(answerPanel())
+      .getByRole("heading", { name: "What this means" })
+      .closest("section") as HTMLElement;
+  }
+
+  it("the 4-pixel railway-stop result keeps its number and says how few pixels", () => {
+    render(<AgentAnswerPanel result={NDVI_LALBAGH_STOP} />);
+    const card = answerPanel().querySelector(".result-card") as HTMLElement;
+    expect(within(card).getByText("+0.3728")).toBeInTheDocument();
+    const note = within(meaning()).getByRole("note");
+    expect(note).toHaveTextContent(
+      "Small sample: only 4 valid pixels contributed to this result, so interpret it cautiously.",
+    );
+    // Inside the interpretation, after its headline - not above the result.
+    const headline = meaning().querySelector(".interpretation-headline") as HTMLElement;
+    expect(headline.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.contains(note)).toBe(false);
+  });
+
+  it("a large sample shows no warning", () => {
+    render(<AgentAnswerPanel result={NDVI_CUBBON} />);
+    expect(within(meaning()).queryByRole("note")).toBeNull();
+  });
+});

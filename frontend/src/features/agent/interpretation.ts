@@ -27,6 +27,7 @@ import {
   resultContext,
   resultSummary,
   type IndexReading,
+  type ResultBody,
   type ResultContext,
   type SarReading,
   type SceneRef,
@@ -40,7 +41,29 @@ export interface Interpretation {
   explanation: string;
   /** The scientific boundary of the statement, when there is one to state. */
   caveat?: string;
+  /**
+   * "Very few pixels contributed" - one per measurement that rests on fewer
+   * than `SMALL_SAMPLE_PIXELS`. Present only when there is one to state.
+   */
+  sampleWarnings?: string[];
 }
+
+/**
+ * A PRESENTATION safeguard, not a scientific validity threshold.
+ *
+ * The backend defines no minimum sample: its only sample rule is the exact
+ * degenerate case of at most one pixel (min == max == mean, temporal
+ * `_sample_warnings`), and a stronger one was deliberately not invented,
+ * because a defensible minimum would depend on spatial autocorrelation and an
+ * effective sample size this system does not estimate. So this number decides
+ * WORDING only: below it, the reader is told how few pixels contributed and
+ * asked to read the value cautiously. It changes no measurement, marks nothing
+ * invalid, and implies no confidence level or significance. 100 pixels of the
+ * 10 m analysis grid - every Sentinel-2 index grid and the Sentinel-1 RTC grid
+ * are 10 m - is about one hectare: a round, conservative size that includes the
+ * backend's one-pixel case.
+ */
+export const SMALL_SAMPLE_PIXELS = 100;
 
 /** What each index measures, named as a signal - never as a land-cover class. */
 const SIGNAL: Record<IndexReading["key"], string> = {
@@ -267,6 +290,57 @@ function interpretTemporal(reading: TemporalReading): Interpretation {
 }
 
 // --------------------------------------------------------------------------- //
+// How few pixels a value rests on
+// --------------------------------------------------------------------------- //
+
+/** The warning for one measurement, from its returned count - or none. */
+function smallSample(count: number | null, subject: string): string | null {
+  // No count, no claim: a missing count is never guessed at.
+  if (count === null || count < 1 || count >= SMALL_SAMPLE_PIXELS) return null;
+  const pixels = `${pixelCount(count)} valid ${count === 1 ? "pixel" : "pixels"}`;
+  return `Small sample: only ${pixels} contributed to ${subject}, so interpret it cautiously.`;
+}
+
+function sampleWarnings(
+  body: Extract<ResultBody, { kind: "index" | "sar" | "temporal" }>,
+): string[] {
+  switch (body.kind) {
+    case "index":
+      return body.readings
+        .map((reading) =>
+          smallSample(
+            reading.validPixels,
+            body.readings.length === 1 ? "this result" : `the ${reading.label} result`,
+          ),
+        )
+        .filter((warning): warning is string => warning !== null);
+    case "sar":
+      return [smallSample(body.reading.validPixels, "this result")].filter(
+        (warning): warning is string => warning !== null,
+      );
+    case "temporal": {
+      // Each observation is its own sample, and the paired change a third.
+      const { earlier, later, pairedChange, pairedPixels } = body.reading;
+      const side = (reading: typeof earlier, role: string) =>
+        smallSample(
+          reading.validPixels,
+          `the ${role} observation${reading.period ? ` (${reading.period})` : ""}`,
+        );
+      const paired =
+        pairedChange !== null &&
+        pairedPixels !== null &&
+        pairedPixels >= 1 &&
+        pairedPixels < SMALL_SAMPLE_PIXELS
+          ? `Small sample: only ${pixelCount(pairedPixels)} ${pairedPixels === 1 ? "pixel was" : "pixels were"} usable on both dates for the paired-pixel change, so interpret it cautiously.`
+          : null;
+      return [side(earlier, "earlier"), side(later, "later"), paired].filter(
+        (warning): warning is string => warning !== null,
+      );
+    }
+  }
+}
+
+// --------------------------------------------------------------------------- //
 
 /**
  * The plain-language reading of a successful measured result, or `null` when
@@ -275,16 +349,14 @@ function interpretTemporal(reading: TemporalReading): Interpretation {
 export function interpretResult(result: AgentResult): Interpretation | null {
   if (outcomeOf(result).kind !== "success") return null;
   const body = resultSummary(result);
+  if (body.kind === "imagery" || body.kind === "none") return null;
   const context = resultContext(result);
-  switch (body.kind) {
-    case "index":
-      return interpretIndices(body.readings, body.scene, context);
-    case "sar":
-      return interpretSar(body.reading, body.scene, context);
-    case "temporal":
-      return interpretTemporal(body.reading);
-    case "imagery":
-    case "none":
-      return null;
-  }
+  const interpretation =
+    body.kind === "index"
+      ? interpretIndices(body.readings, body.scene, context)
+      : body.kind === "sar"
+        ? interpretSar(body.reading, body.scene, context)
+        : interpretTemporal(body.reading);
+  const warnings = sampleWarnings(body);
+  return warnings.length > 0 ? { ...interpretation, sampleWarnings: warnings } : interpretation;
 }
