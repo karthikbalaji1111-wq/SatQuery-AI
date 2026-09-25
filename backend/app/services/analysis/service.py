@@ -230,19 +230,35 @@ def _scene_collection(window: ExecutedWindow) -> str | None:
     return None
 
 
-def _outcome(name: str, *, produced: bool, warnings: list[str]) -> AnalysisOutcome:
+def _outcome(name: str, *, produced: bool, reason: str | None) -> AnalysisOutcome:
     """What became of one requested analysis.
 
-    The reason is the step's OWN first warning, carried verbatim rather than
-    rewritten here: a second explanation could disagree with the one the reader
-    sees beside it, and then neither would be trustworthy.
+    The reason is the step's OWN warning that explains the absence, carried
+    verbatim rather than rewritten here: a second explanation could disagree
+    with the one the reader sees beside it, and then neither would be
+    trustworthy. It is chosen by the step, never as "the first warning": a
+    step's first warnings are records of checks that PASSED (radiometric state,
+    AOI coverage), and a passed check is not why nothing was measured.
     """
 
     return AnalysisOutcome(
         name=name,
         status="completed" if produced else "unavailable",
-        reason=None if produced else (warnings[0] if warnings else None),
+        reason=None if produced else reason,
     )
+
+
+def _quality_cause(label: str, quality: PixelQuality | None) -> str | None:
+    """The pixel-quality note that explains an index with no usable pixel.
+
+    ``_notes`` states the empty-grid or no-usable-pixel fact FIRST whenever no
+    pixel is valid, so it is the first of the index's quality warnings.
+    """
+
+    if quality is None or quality.valid_pixels > 0:
+        return None
+    notes = _quality_warnings(label, quality)
+    return notes[0] if notes else None
 
 
 def _merge_outcomes(outcomes: list[AnalysisOutcome]) -> list[AnalysisOutcome]:
@@ -468,7 +484,7 @@ class AnalysisService(DomainService):
         keys: tuple[str, ...],
         radiometry: list[RadiometricState],
         grids: list[GridState],
-    ) -> tuple[list[Measurement], list[str], list[PixelQuality]]:
+    ) -> tuple[list[Measurement], list[str], list[PixelQuality], dict[str, str]]:
         """Compute several spectral indices over one optical window.
 
         Each distinct band is read ONCE and shared: NIR appears in all three
@@ -477,25 +493,32 @@ class AnalysisService(DomainService):
 
         A per-index failure degrades that index alone - the others still
         report - because a missing SWIR asset is no reason to withhold a
-        perfectly good NDVI.
+        perfectly good NDVI. The fourth element maps each index that was not
+        computed to the warning that says why, so one index's absence is never
+        explained by another's record.
         """
+
+        warnings: list[str] = []
+        absent: dict[str, str] = {}
+
+        def unavailable(text: str, affected: tuple[str, ...]) -> None:
+            warnings.append(text)
+            for affected_key in affected:
+                absent.setdefault(affected_key, text)
 
         candidates = _ndwi_candidates(execution)
         if not candidates:
-            return (
-                [],
-                [
-                    "Spectral indices were requested but no Sentinel-2 optical "
-                    "window with a selected scene was available; nothing was "
-                    "computed."
-                ],
-                [],
+            unavailable(
+                "Spectral indices were requested but no Sentinel-2 optical "
+                "window with a selected scene was available; nothing was "
+                "computed.",
+                keys,
             )
+            return [], warnings, [], absent
 
         window = candidates[0]
         bbox = execution.plan.bbox
         collection = _scene_collection(window)
-        warnings: list[str] = []
         if len(candidates) > 1:
             warnings.append(
                 "Spectral indices are single-scene in this phase: they were "
@@ -517,17 +540,19 @@ class AnalysisService(DomainService):
                 require_all_assets=False,
             )
         except AppError as exc:
-            warnings.append(
+            unavailable(
                 "Spectral indices were not computed for the "
-                f"{window.modality} window {window.label!r}: {exc.message}"
+                f"{window.modality} window {window.label!r}: {exc.message}",
+                keys,
             )
-            return [], warnings, []
-        unavailable = scene.unavailable_assets if scene is not None else {}
-        if _SCL_ASSET in unavailable:
-            warnings.append(
-                _scl_unavailable("Spectral indices", window, unavailable[_SCL_ASSET])
+            return [], warnings, [], absent
+        missing_assets = scene.unavailable_assets if scene is not None else {}
+        if _SCL_ASSET in missing_assets:
+            unavailable(
+                _scl_unavailable("Spectral indices", window, missing_assets[_SCL_ASSET]),
+                keys,
             )
-            return [], warnings, []
+            return [], warnings, [], absent
         warnings.extend(_coverage_warnings(scene, window.label))
 
         # Stage 4, before any read: an index whose bands are not on a
@@ -542,7 +567,9 @@ class AnalysisService(DomainService):
                 try:
                     require_usable(state)
                 except AppError as exc:
-                    warnings.append(f"{index.label} was not computed: {exc.message}")
+                    unavailable(
+                        f"{index.label} was not computed: {exc.message}", (key,)
+                    )
                     continue
                 warnings.append(_radiometry_summary(index.label, state))
             # Stage 5, before any read: the catalog's source grids for this
@@ -555,11 +582,11 @@ class AnalysisService(DomainService):
                     index.key, window.selected_scene_id, problem, "pre_read"
                 )
                 grids.append(refused)
-                warnings.append(f"{index.label} was not computed: {text}")
+                unavailable(f"{index.label} was not computed: {text}", (key,))
                 continue
             runnable.append(key)
         if not runnable:
-            return [], warnings, []
+            return [], warnings, [], absent
         keys = tuple(runnable)
         needed = bands_for(keys)
 
@@ -570,16 +597,26 @@ class AnalysisService(DomainService):
                 scene_id=window.selected_scene_id, bbox=bbox, collection=collection
             )
         except AppError as exc:
-            warnings.append(_scl_unavailable("Spectral indices", window, exc.message))
-            return [], warnings, []
+            unavailable(
+                _scl_unavailable("Spectral indices", window, exc.message), keys
+            )
+            return [], warnings, [], absent
+
+        def needing(asset: str) -> tuple[str, ...]:
+            return tuple(
+                k
+                for k in keys
+                if asset in (resolve_index(k).high_band, resolve_index(k).low_band)
+            )
 
         # One read per distinct band, keyed by asset.
         bands: dict[str, BandWindow] = {}
         for asset in needed:
-            if asset in unavailable:
-                warnings.append(
+            if asset in missing_assets:
+                unavailable(
                     f"The {asset} band could not be read, so any index needing "
-                    f"it was not computed: {unavailable[asset]}"
+                    f"it was not computed: {missing_assets[asset]}",
+                    needing(asset),
                 )
                 continue
             try:
@@ -591,9 +628,10 @@ class AnalysisService(DomainService):
                     collection=collection,
                 )
             except AppError as exc:
-                warnings.append(
+                unavailable(
                     f"The {asset} band could not be read, so any index needing "
-                    f"it was not computed: {exc.message}"
+                    f"it was not computed: {exc.message}",
+                    needing(asset),
                 )
 
         measurements: list[Measurement] = []
@@ -637,6 +675,8 @@ class AnalysisService(DomainService):
                 measurements.extend(quality_measurements(masked.quality))
                 qualities.append(masked.quality)
                 warnings.extend(_quality_warnings(index.label, masked.quality))
+                if (cause := _quality_cause(index.label, masked.quality)) is not None:
+                    absent.setdefault(key, cause)
                 analysis_grid = geometry.Grid.of(high)
                 state = geometry.grid_state(
                     analysis=index.key,
@@ -656,11 +696,11 @@ class AnalysisService(DomainService):
                     "post_read",
                 )
                 grids.append(refused)
-                warnings.append(f"{index.label} could not be computed: {text}")
+                unavailable(f"{index.label} could not be computed: {text}", (key,))
                 continue
             except AppError as exc:
-                warnings.append(
-                    f"{index.label} could not be computed: {exc.message}"
+                unavailable(
+                    f"{index.label} could not be computed: {exc.message}", (key,)
                 )
                 continue
             if index.limiting_resolution_m > 10.0:
@@ -670,7 +710,7 @@ class AnalysisService(DomainService):
                     f"detail no finer than {index.limiting_resolution_m:.0f} m."
                 )
 
-        return measurements, warnings, qualities
+        return measurements, warnings, qualities, absent
 
     async def _ndwi_measurements(
         self,
@@ -1348,6 +1388,7 @@ class AnalysisService(DomainService):
                 index_measurements,
                 index_warnings,
                 index_qualities,
+                index_absent,
             ) = await self._index_measurements(
                 execution, tuple(request.indices), radiometry, grids
             )
@@ -1359,7 +1400,7 @@ class AnalysisService(DomainService):
             names = {m.name for m in index_measurements}
             outcomes.extend(
                 _outcome(
-                    key, produced=f"{key}_mean" in names, warnings=index_warnings
+                    key, produced=f"{key}_mean" in names, reason=index_absent.get(key)
                 )
                 for key in request.indices
             )
@@ -1381,11 +1422,20 @@ class AnalysisService(DomainService):
             ):
                 pixel_quality.append(ndwi_quality)
             warnings.extend(ndwi_warnings)
+            # Pixel counts alone are not an NDWI: a grid masked to the last
+            # pixel produced counts and no statistic, exactly as for any index.
+            ndwi_produced = any(m.name == "ndwi_mean" for m in ndwi_measurements)
             outcomes.append(
                 _outcome(
                     "ndwi",
-                    produced=bool(ndwi_measurements),
-                    warnings=ndwi_warnings,
+                    produced=ndwi_produced,
+                    # A path that gave up said why last; a masked grid says it
+                    # in its quality notes.
+                    reason=(
+                        _quality_cause("NDWI", ndwi_quality)
+                        if ndwi_quality is not None
+                        else (ndwi_warnings[-1] if ndwi_warnings else None)
+                    ),
                 )
             )
             # Names are unique per index, so a combined request reports both
@@ -1415,7 +1465,13 @@ class AnalysisService(DomainService):
                     and any(
                         p.valid_pixel_count for p in sar_backscatter.polarizations
                     ),
-                    warnings=sar_warnings,
+                    # No result: the path said why last. A result with no
+                    # sample: its engine said why first.
+                    reason=(
+                        (sar_warnings[-1] if sar_warnings else None)
+                        if sar_backscatter is None
+                        else next(iter(sar_backscatter.warnings), None)
+                    ),
                 )
             )
             if sar_backscatter is not None:
@@ -1445,7 +1501,8 @@ class AnalysisService(DomainService):
                 _outcome(
                     "temporal_ndwi",
                     produced=temporal_comparison is not None,
-                    warnings=temporal_warnings,
+                    # Every path that returns no comparison says why last.
+                    reason=temporal_warnings[-1] if temporal_warnings else None,
                 )
             )
             if temporal_comparison is not None:

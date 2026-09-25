@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from rasterio.transform import from_origin
 
 from tests import test_temporal_ndwi as temporal
-from tests.test_analysis import FakeImageryService, make_execution, make_intent
+from tests.test_analysis import FakeImageryService, band, make_execution, make_intent
 from tests.test_scene_validation import (
     SCENE_ID,
     Catalog,
@@ -683,3 +683,82 @@ def test_the_masked_bands_are_views_of_one_mask_not_copies_of_the_data() -> None
     result = masked(high, ones(3, 50.0), scl([[4, 9, 4]]))
     assert result.high.values is high.values
     assert dataclasses.is_dataclass(result.high)
+
+
+# =========================================================================== #
+# Why an index is absent: the cause, never a check that passed
+# =========================================================================== #
+#
+# Found live (2026-09-24): Cubbon Park, Bengaluru on 2 January 2025 selected
+# S2A_43PGQ_20250102, whose AOI was cloud in all 17,080 pixels. NDVI, NDWI and
+# NDBI each reported the outcome reason
+#     "NDVI radiometric state: verified_with_unknown_metadata - ... read as-is"
+# - the record of a check that PASSED - because the reason was the step's first
+# warning. The UI put it under "Why" the analysis was not computed. The cause
+# was the cloud; the reason must say so.
+
+
+class _CloudedCatalog(Catalog):
+    """A real catalog item whose scene classification is cloud everywhere."""
+
+    def read(self, href: str, *args: Any, **kwargs: Any) -> Any:
+        if href.endswith("/SCL.tif"):
+            self.events.append("read:SCL.tif")
+            return band([9, 9, 9], dtype="uint8")  # cloud, high probability
+        return super().read(href, *args, **kwargs)
+
+
+class _SwirFailsCatalog(Catalog):
+    def read(self, href: str, *args: Any, **kwargs: Any) -> Any:
+        if href.endswith("/B11.tif"):
+            raise ImageryError("SWIR read failed")
+        return super().read(href, *args, **kwargs)
+
+
+def _analyze(catalog: Catalog, **request: Any):
+    return asyncio.run(
+        catalog.service().analyze(
+            AnalysisRequest(execution=execution([window(client_scene(SCENE_ID))]), **request)
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_fields", "label"),
+    [({"indices": ["ndvi"]}, "NDVI"), ({"include_ndwi": True}, "NDWI")],
+)
+def test_a_fully_clouded_index_gives_the_cloud_as_its_reason(
+    request_fields: dict[str, Any], label: str
+) -> None:
+    result = _analyze(_CloudedCatalog({SCENE_ID: s2_item()}), **request_fields)
+    (outcome,) = result.analysis_outcomes
+    assert outcome.status == "unavailable"
+    assert (outcome.reason or "").startswith(f"{label} pixel quality: No pixel was usable")
+    assert "radiometric state" not in (outcome.reason or "")
+
+
+def test_each_index_is_absent_for_its_own_reason_not_another_index_s() -> None:
+    result = _analyze(_SwirFailsCatalog({SCENE_ID: s2_item()}), indices=["ndvi", "ndbi"])
+    outcomes = {o.name: o for o in result.analysis_outcomes}
+    assert outcomes["ndvi"].status == "completed"
+    assert outcomes["ndvi"].reason is None
+    assert outcomes["ndbi"].status == "unavailable"
+    reason = outcomes["ndbi"].reason or ""
+    assert reason.startswith("The swir16 band could not be read")
+    assert "NDVI" not in reason
+
+
+def test_a_band_failure_is_blamed_only_on_the_indices_that_need_that_band() -> None:
+    class SwirFailsUnderCloud(_CloudedCatalog, _SwirFailsCatalog):
+        pass
+
+    result = _analyze(
+        SwirFailsUnderCloud({SCENE_ID: s2_item()}), indices=["ndvi", "ndbi"]
+    )
+    outcomes = {o.name: o for o in result.analysis_outcomes}
+    assert outcomes["ndbi"].reason is not None
+    assert outcomes["ndbi"].reason.startswith("The swir16 band could not be read")
+    # NDVI never needed SWIR: it is absent because of the cloud, and says so.
+    assert (outcomes["ndvi"].reason or "").startswith(
+        "NDVI pixel quality: No pixel was usable"
+    )
