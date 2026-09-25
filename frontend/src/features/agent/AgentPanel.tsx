@@ -2052,8 +2052,10 @@ export function AgentObservationPanel({
                   ? // The server says which: no model here, no image, or no answer.
                     (result?.visual?.message ??
                     "A visual description was requested, but no model described the image.")
-                  : // no-plan: nothing was planned, so nothing was asked.
-                    "No visual description was requested."}
+                  : // no-plan: nothing ran. The question may well have asked
+                    // for a description ("describe the radar image") that was
+                    // refused, so this must not say none was requested.
+                    "Nothing ran for this question, so no image was sent to a model."}
         </p>
       ) : (
         observations.map((item) => (
