@@ -145,10 +145,11 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 33 (layperson-first results). Section 23 (the scientific core,
+current figures are in section 34 (visual questions). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
-cloud-masked, and section 24 supersedes any statement that the typed query box
-or `/query/parse` needs an AI provider.
+cloud-masked, section 24 supersedes any statement that the typed query box
+or `/query/parse` needs an AI provider, and section 34 supersedes section 24's
+statement that visual questions are refused as `requires_ai_model`.
 
 ## Architecture Rules
 
@@ -2949,3 +2950,118 @@ quotes the new wording.
 | `npm run test` | **551 passed** (518 before; 541 after the first pass) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
 | `pytest -q` / `ruff` / `git diff --check` | 3096 passed (unchanged) / clean / clean |
+
+---
+
+## 34. "What do you see" - visual questions in the standard workflow - IMPLEMENTED (2026-09-25)
+
+`805ab28` (feature), `874223b` and `47a324e` (fixes found checking it in
+production). No formula, validation stage, STAC selection, geocoder or
+intent-model threshold changed. Supersedes section 24's refusal of visual
+questions as `requires_ai_model`.
+
+**What changed.** A visual question ("What do you see in the satellite image
+around X in <month>?", "Is there visible water ...", "What does the image of X
+show ...") is planned DETERMINISTICALLY: discovery with the normal-colour
+image, plus one `rs_model_analysis` step. Interpretation, measurement and every
+sentence stay model-free; the only model a standard run can reach is the
+deployment's configured visual analyst (`configured_visual_analyst()` in
+`api/routes/query.py`), for that one step, and a run never requires it.
+
+- **The image comes first.** The executor chooses the Sentinel-2 `visual`
+  asset (RGB only) from the execution before asking anything, so "no model
+  here" is only ever said about an image that was actually retrieved - and the
+  reader is shown it.
+- **`AgentResult.visual`** (`AgentVisual`: `status`, system-written `message`,
+  `scene_id`, `acquired`) states what became of the look: `observed`,
+  `unavailable` (no model configured), `no_image`, `failed` (the model did not
+  answer). Present only when a look was planned. The observation itself stays
+  an attributed `source="model"` evidence item and authorises no number.
+- **The place's name is removed** from the question the model is asked
+  (`_without_place`: "around Marina Beach, Chennai" -> "around this area"), and
+  the instruction asks for plain words and forbids naming or guessing the place.
+- **Look vs measure.** A measurement joins the look only when the question asks
+  for a number (`asks_to_measure`: "NDWI", "index", "measure", "value" ...). A
+  confident intent label cannot add a measurement to a look
+  (`intent_router`: `visual_question`). Two dates, or radar, are refused plainly
+  (`analysis_unsupported`).
+- **Frontend.** "What I see" (observed, attributed); "Visual description
+  unavailable" (image retrieved, not described - shown on the map, never
+  "insufficient evidence"); a "Describe the image" pipeline stage; the visual
+  state in the evidence export.
+
+### Found in production and fixed
+
+1. **A radar image was answered with the optical one** (`874223b`). "Describe
+   the radar image of X", "What does the radar image ... look like", "visible
+   water in the radar image" and "the Sentinel-1 image of X" retrieved the
+   Sentinel-2 normal-colour image (live: S2B_44PMV_20250104 for "the radar
+   image of Marina Beach"). The refusal fired only when the question also asked
+   to MEASURE radar. It now fires whenever radar is asked for at all; refused
+   radar ("..., not the radar?") still looks.
+2. **"What does the satellite image of X show" was not a look** and "show" was
+   geocoded as part of the place ("Marina Beach, Chennai show"). `_VISUAL` now
+   reads "image/picture/photo/scene ... shows/contains" however far the verb
+   comes after the image, but not across "and"/"then"/"also" ("Show the scene
+   of X and show the NDWI" stays a measurement); "show(s)/showed/contain(s)"
+   ends a place phrase in `_LOCATION_END` (a name that STARTS with it, "Show
+   Low", is kept - an end needs a space before it). The two-date form now gets
+   the one-image refusal instead of "What should be compared at Marina Beach,
+   Chennai show?".
+3. **The visual rail said "No visual description was requested"** for a
+   question refused before anything ran - untrue when a description WAS asked
+   for (`47a324e`). With no plan it now says "Nothing ran for this question, so
+   no image was sent to a model."
+
+Mutation-checked 5/5 for fix 2 and 1 (radar keyed on the measure request only
+4 fail; show not a place end 5; lowercase-only end 1; adjacent-only verb 5;
+span crossing "and" 1), restored byte-identical. A first version kept "show"
+case-sensitive as a place end; its mutant survived (no test could tell), and
+Title Case typing ("... Chennai Show In January") would have kept "Show" in the
+place, so the guard was removed, matching the neighbouring end words.
+
+### Verified in production (standard workflow, no AI key on Render)
+
+API (`/query/agent`, after `874223b` was live): "Describe the radar image of
+Marina Beach, Chennai in January 2025" -> `analysis_unsupported`, 0.6 s,
+nothing searched; "What does the satellite image of Marina Beach, Chennai show
+in January 2025?" -> place "Marina Beach, Chennai", S2B_44PMV_20250104,
+`visual.status = unavailable`; the January 2024 vs January 2025 form -> "A
+description is given for one satellite image at a time"; Cubbon Park December
+2024 look -> S2B_43PGQ_20241208, unavailable; Marina Beach look + "what is its
+NDWI?" -> NDWI 0.1466 (33,524 px, 76 SCL-masked) AND the look; regressions
+unchanged: NDVI 0.5204 (Cubbon Park), SAR VV -5.444 / VH -17.85 / VV-VH 12.41
+dB. Real UI (Playwright, 1440x900, one `/query/agent` request per question):
+the "show" question displays the 112 x 300 px image on the map, "Visual
+description unavailable", pipeline "Describe the image - no AI visual model
+available here"; the radar question shows "Not supported" with the reason and
+"Understood so far: SAR backscatter (Sentinel-1 VV/VH) · Marina Beach,
+Chennai". After `47a324e` (`app-t90fZ1p2.js`): the refused radar question's
+rail reads "Nothing ran for this question, so no image was sent to a model.";
+Cubbon Park NDVI +0.5204 keeps "No visual description was requested for this
+question ..."; two questions, two `/query/agent` requests; console 0 errors /
+0 warnings.
+
+**Not verified live: the `observed` path with a real model.** Render has no
+provider key. Locally (`AI_PROVIDER=local`, standard request) the look reached
+Ollama, but the drive holding the models (`/Volumes/Expansion`) was detached:
+`/api/chat` answered 500 "model failed to load" and SatQuery reported
+`visual.status = failed` with its fixed message, `provider=standard
+model=none`, no cloud call. Note that this time Ollama 0.20.2 still LISTED the
+models with the drive missing (`/api/tags` 200), so the local provider's
+drive hint (section 21) did not appear. `observed` is covered by tests with a
+recording analyst only.
+
+**Known limitations.** Descriptions are of the Sentinel-2 normal-colour image
+only - no radar picture, no two-date description. A model's description is
+never checked against the pixels; it is attributed and quarantined from
+numbers. "What does NDVI show at X" is not a look (no image word).
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3143 passed** (3096 before `805ab28`; 3130 at it) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **571 passed** (551 before `805ab28`; 570 at it) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds (with `VITE_API_BASE_URL`) |
