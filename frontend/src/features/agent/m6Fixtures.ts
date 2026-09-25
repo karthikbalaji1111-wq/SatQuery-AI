@@ -360,3 +360,126 @@ export const NO_SCENES: AgentResult = (() => {
     },
   } as unknown as AgentResult;
 })();
+
+// --------------------------------------------------------------------------- //
+// Visual questions - "What do you see ...". Shaped like the live standard
+// workflow's response; the observed case stands in a model's words for a run
+// with a visual model configured (none is configured in production).
+// --------------------------------------------------------------------------- //
+
+const MARINA_SCENE = "S2B_44PMV_20250104_0_L2A";
+const VISUAL_QUESTION = "What do you see in the satellite image around Marina Beach, Chennai in January 2025?";
+
+function marinaImagery(): Json {
+  return {
+    scene_id: MARINA_SCENE, bbox: { west: 80.279, south: 13.043, east: 80.289, north: 13.07 },
+    asset: "visual", asset_href: "https://example.invalid/TCI.tif", width: 112, height: 300,
+    format: "png", media_type: "image/png", bands: ["red", "green", "blue"], crs: "EPSG:32644",
+    resolution: 10, normalization: "none", window: { col_off: 0, row_off: 0, width: 112, height: 300 },
+    source_shape: [3, 10980, 10980], transform: null, corners_wgs84: null, image_base64: "",
+  };
+}
+
+function visualRun(opts: {
+  visual: Json | null; observation: Json | null; imagery: boolean; answer: string;
+  extraTool?: Json; extraItems?: Json[]; analysis?: Json | null;
+}): AgentResult {
+  const intent = { location_query: "Marina Beach, Chennai", time_windows: [{ start_date: "2025-01-01", end_date: "2025-01-31" }], modalities: ["sentinel-2-optical"], task: "visualize", temporal_mode: "single" };
+  const look = { tool: "rs_model_analysis", question: VISUAL_QUESTION };
+  const p = {
+    steps: [
+      { tool: "execute_query", intent, include_imagery: true, sar_polarization: "vv", max_cloud_cover: null },
+      ...(opts.extraTool ? [opts.extraTool] : []),
+      look,
+    ],
+  };
+  const observed = opts.observation !== null;
+  const selected = scene(MARINA_SCENE, "2025-01-04T05:04:50.000000Z", "sentinel-2b", 1.3);
+  const win = { ...window("single", "2025-01-01", "2025-01-31", 5, selected), imagery: opts.imagery ? marinaImagery() : null };
+  return {
+    status: "ok",
+    answer: opts.answer,
+    failure: null,
+    clarification: null,
+    visual: opts.visual,
+    trace: {
+      plan: p,
+      steps: (p.steps as Json[]).map((parameters) => ({
+        status: parameters.tool === "rs_model_analysis" && !observed ? "rejected" : "ok",
+        parameters,
+        rejection_reason: parameters.tool === "rs_model_analysis" && !observed ? "No visual analyst is configured." : null,
+        error_message: null,
+      })),
+      evidence_refs: [],
+      answer_validation: { ...PASS, visual_claims: observed ? "attributed" : "not_run" },
+    },
+    evidence: {
+      items: [
+        item("execution.sentinel-2-optical.single.scene_count", "execution", "sentinel-2-optical_single_scene_count", 5, "count"),
+        ...(opts.extraItems ?? []),
+        ...(opts.observation ? [opts.observation] : []),
+      ],
+      execution: {
+        plan: { intent, bbox: { west: 80.279, south: 13.043, east: 80.289, north: 13.07 } },
+        executed_modalities: ["sentinel-2-optical"], skipped_modalities: [],
+        windows: [win], catalog: EARTH_SEARCH, catalogs: [EARTH_SEARCH], status: "completed", observations: null,
+      },
+      analysis: opts.analysis ?? null,
+    },
+  } as unknown as AgentResult;
+}
+
+const OBSERVATION: Json = {
+  id: `model.visual.${MARINA_SCENE}`, source: "model", measurement: null, text: null,
+  visual: {
+    statement: "A long sandy beach runs beside dark sea water, with buildings and trees inland.",
+    provider: "local", model: "qwen3-vl:4b-instruct", scene_id: MARINA_SCENE,
+  },
+  produced_by: "qwen3-vl:4b-instruct",
+};
+
+const SCENE_SENTENCE = `Scene ${MARINA_SCENE} was selected. The scene was acquired on 2025-01-04.`;
+
+/** A visual model is configured and described the retrieved image. */
+export const VISUAL_OBSERVED = visualRun({
+  visual: { status: "observed", message: "Described by an AI visual model (qwen3-vl:4b-instruct).", scene_id: MARINA_SCENE, acquired: "2025-01-04" },
+  observation: OBSERVATION, imagery: true, answer: SCENE_SENTENCE,
+});
+
+/** Production today: the image was retrieved and no visual model is available. */
+export const VISUAL_UNAVAILABLE = visualRun({
+  visual: { status: "unavailable", message: "The satellite image was retrieved, but describing it needs an AI visual model, which is not available here.", scene_id: MARINA_SCENE, acquired: "2025-01-04" },
+  observation: null, imagery: true, answer: SCENE_SENTENCE,
+});
+
+/** A scene was found but no normal-colour image came back to describe. */
+export const VISUAL_NO_IMAGE = visualRun({
+  visual: { status: "no_image", message: "No normal-colour satellite image was available to describe.", scene_id: null, acquired: null },
+  observation: null, imagery: false, answer: SCENE_SENTENCE,
+});
+
+/** "Is there water ... and what is its NDWI?" - measured, and not described. */
+export const NDWI_WITH_LOOK_UNAVAILABLE = visualRun({
+  visual: { status: "unavailable", message: "The satellite image was retrieved, but describing it needs an AI visual model, which is not available here.", scene_id: MARINA_SCENE, acquired: "2025-01-04" },
+  observation: null, imagery: true,
+  answer: "The mean NDWI was 0.1466 index.",
+  extraTool: { tool: "spectral_indices", indices: ["ndwi"] },
+  extraItems: [
+    item("ndwi.ndwi_valid_pixel_count", "ndwi", "ndwi_valid_pixel_count", 33524, "pixels"),
+    item("ndwi.ndwi_mean", "ndwi", "ndwi_mean", 0.14659, "index"),
+  ],
+  analysis: analysisResult({ analysis_outcomes: [{ name: "ndwi", status: "completed", reason: null }] }),
+});
+
+/** The same question with a visual model: measured AND described. */
+export const NDWI_WITH_LOOK_OBSERVED = visualRun({
+  visual: { status: "observed", message: "Described by an AI visual model (qwen3-vl:4b-instruct).", scene_id: MARINA_SCENE, acquired: "2025-01-04" },
+  observation: OBSERVATION, imagery: true,
+  answer: "The mean NDWI was 0.1466 index.",
+  extraTool: { tool: "spectral_indices", indices: ["ndwi"] },
+  extraItems: [
+    item("ndwi.ndwi_valid_pixel_count", "ndwi", "ndwi_valid_pixel_count", 33524, "pixels"),
+    item("ndwi.ndwi_mean", "ndwi", "ndwi_mean", 0.14659, "index"),
+  ],
+  analysis: analysisResult({ analysis_outcomes: [{ name: "ndwi", status: "completed", reason: null }] }),
+});

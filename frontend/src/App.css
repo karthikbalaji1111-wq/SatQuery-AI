@@ -3828,3 +3828,58 @@ a:focus-visible {
 .technical-details .agent-answer {
   margin-top: 10px;
 }
+
+/* -- what I see ----------------------------------------------------------- */
+
+/* A model's description of the picture: violet, the colour every model
+   observation carries, so it never reads as one of the measurements. */
+.what-i-see {
+  margin: 10px 0 0;
+  padding: 8px 12px 10px;
+  border-left: 2px solid var(--violet);
+  background: var(--violet-soft);
+  border-radius: var(--radius-sm);
+}
+
+.what-i-see-statement {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.what-i-see-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 4px 12px;
+  margin: 8px 0 0;
+}
+
+.what-i-see-meta dt {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.what-i-see-meta dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.what-i-see .how-we-know {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.observation-label {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--violet);
+}

@@ -148,6 +148,13 @@ _DEFINITION_LEAD = re.compile(
 _IS_DEFINED = re.compile(
     r"^\s*(?:is|are|stands\s+for|means|refers\s+to|measures)\b", re.IGNORECASE
 )
+#: "What is visible around Hussain Sagar?" asks about a PLACE, not what
+#: "visible" means: a term followed by where is being asked about, not defined.
+#: "What is NDWI?" and "What is NDWI and how is it computed" stay definitions.
+_ABOUT_A_PLACE = re.compile(
+    r"^\s*(?:around|in|at|near|on|over|within|across|here|there)\b", re.IGNORECASE
+)
+
 #: "How leafy is Chennai?" asks HOW MUCH, not what "leafy" means: a lowercase
 #: word straight after "how" is a degree, so "<word> is" does not define it.
 #: An acronym ("How NDVI is computed") keeps the definition reading.
@@ -208,7 +215,7 @@ def requested_matches(
                     and _DEGREE_QUESTION.search(sentence[: offset + match.start()])
                 ):
                     continue
-                if _DEFINITION_LEAD.search(sentence[:at]):
+                if _DEFINITION_LEAD.search(sentence[:at]) and not _ABOUT_A_PLACE.match(tail):
                     continue
                 kept.append(match)
 

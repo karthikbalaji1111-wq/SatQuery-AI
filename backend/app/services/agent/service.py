@@ -338,6 +338,7 @@ class AgentService(DomainService):
                 failure=_failure("synthesis", exc),
                 trace=AgentTrace(plan=plan, steps=outcome.steps),
                 evidence=outcome.evidence,
+                visual=outcome.visual,
             )
 
         # --- 4. Validate, using the Commit 3 validator unchanged. This service
@@ -373,4 +374,5 @@ class AgentService(DomainService):
                 answer_validation=validation,
             ),
             evidence=outcome.evidence,
+            visual=outcome.visual,
         )

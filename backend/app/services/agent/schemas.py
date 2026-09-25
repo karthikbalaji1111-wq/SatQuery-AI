@@ -617,6 +617,28 @@ class AgentClarification(_StrictModel):
         return self
 
 
+#: What became of a requested visual description. Each is a different event:
+#: a model described the image; no model is available here; there was no
+#: normal-colour image to describe; or the model was asked and did not answer.
+VisualStatus = Literal["observed", "unavailable", "no_image", "failed"]
+
+
+class AgentVisual(_StrictModel):
+    """The state of a visual description the question asked for - stated.
+
+    Present only when the plan asked for one. ``message`` is written by the
+    system in plain words, never by a model; the observation itself, when
+    there is one, stays an attributed evidence item. ``scene_id`` and
+    ``acquired`` name the image that was (or would have been) described.
+    """
+
+    status: VisualStatus
+    message: str = Field(min_length=1, max_length=400)
+    scene_id: str | None = Field(default=None, max_length=200)
+    #: The image's acquisition date, YYYY-MM-DD, from the catalog.
+    acquired: str | None = Field(default=None, max_length=32)
+
+
 class AgentResult(_StrictModel):
     """The agent's response: what ran, what was found, and - maybe - an answer.
 
@@ -643,6 +665,8 @@ class AgentResult(_StrictModel):
     clarification: AgentClarification | None = None
     trace: AgentTrace
     evidence: AgentEvidence
+    #: Present when the question asked what the image shows.
+    visual: AgentVisual | None = None
 
     @model_validator(mode="after")
     def _check_integrity(self) -> Self:

@@ -46,6 +46,7 @@ export type OutcomeKind =
   | "unsupported"
   | "insufficient_evidence"
   | "analysis_refused"
+  | "visual_unavailable"
   | "provider_failure";
 
 export interface Outcome {
@@ -77,6 +78,7 @@ const OUTCOME_LABELS: Record<OutcomeKind, string> = {
   unsupported: "Not supported",
   insufficient_evidence: "No measurement",
   analysis_refused: "Analysis not computed",
+  visual_unavailable: "Visual description unavailable",
   provider_failure: "Incomplete",
 };
 
@@ -109,6 +111,10 @@ export function outcomeOf(result: AgentResult): Outcome {
   }
 
   if (result.evidence.items.some(isAnalytical)) return make("success");
+  // A description of the picture is a result in its own right.
+  if (result.visual?.status === "observed" && observationOf(result) !== null) {
+    return make("success");
+  }
 
   // Nothing was measured. A validation stage that REFUSED an analysis is a
   // different event from a search that found nothing to measure.
@@ -117,6 +123,12 @@ export function outcomeOf(result: AgentResult): Outcome {
   );
   if (refused) return make("analysis_refused", refused.reason ?? null);
 
+  // The image was retrieved and a description was asked for, but no model
+  // described it. Its own state - not "no measurement", which it is not.
+  if (result.visual?.status === "unavailable" || result.visual?.status === "failed") {
+    return make("visual_unavailable", result.visual.message);
+  }
+
   // Imagery alone was asked for and delivered: that IS the result.
   const step = executeStep(result);
   const onlyDiscovery =
@@ -124,6 +136,11 @@ export function outcomeOf(result: AgentResult): Outcome {
     result.trace.plan.steps.every((candidate) => candidate.tool === "execute_query");
   if (step?.include_imagery && onlyDiscovery && shownWindow(result.evidence.execution)?.imagery) {
     return make("success");
+  }
+  // A description was asked for and no image came back: say that, not a
+  // generic "no measurement" - nothing was to be measured.
+  if (result.visual?.status === "no_image") {
+    return make("insufficient_evidence", result.visual.message);
   }
   return make("insufficient_evidence");
 }
@@ -291,8 +308,34 @@ export interface TemporalReading {
   pairedPixels: number | null;
 }
 
+/** What a vision model said about the retrieved image - attributed, never a number. */
+export interface Observation {
+  statement: string;
+  provider: string;
+  model: string;
+  sceneId: string;
+  /** The image's acquisition date, YYYY-MM-DD, when known. */
+  acquired: string | null;
+}
+
+export function observationOf(result: AgentResult): Observation | null {
+  const item = result.evidence.items.find(
+    (candidate) => candidate.source === "model" && candidate.visual != null,
+  );
+  if (!item?.visual) return null;
+  return {
+    statement: item.visual.statement,
+    provider: item.visual.provider,
+    model: item.visual.model,
+    sceneId: item.visual.scene_id,
+    acquired:
+      result.visual?.scene_id === item.visual.scene_id ? (result.visual.acquired ?? null) : null,
+  };
+}
+
 export type ResultBody =
   | { kind: "index"; readings: IndexReading[]; scene: SceneRef | null }
+  | { kind: "visual"; observation: Observation; scene: SceneRef | null }
   | { kind: "sar"; reading: SarReading; scene: SceneRef | null }
   | { kind: "temporal"; reading: TemporalReading }
   | { kind: "imagery"; scene: SceneRef | null }
@@ -427,7 +470,14 @@ export function resultSummary(result: AgentResult): ResultBody {
     };
   }
 
-  if (outcomeOf(result).kind === "success") return { kind: "imagery", scene };
+  // Asked what the image shows, and a model described it.
+  const observation = observationOf(result);
+  if (observation !== null) return { kind: "visual", observation, scene };
+
+  // Imagery alone, or an image retrieved for a description no model gave:
+  // either way the image is what this run has to show.
+  const outcome = outcomeOf(result).kind;
+  if (outcome === "success" || outcome === "visual_unavailable") return { kind: "imagery", scene };
   return { kind: "none" };
 }
 
@@ -592,7 +642,24 @@ export function runStages(result: AgentResult): RunStage[] {
     });
   }
 
-  // 6. The answer, checked against the evidence.
+  // 6. Describing the image - only when the question asked for it.
+  const visualAsked = result.trace.plan?.steps.some((step) => step.tool === "rs_model_analysis");
+  if (visualAsked && result.visual) {
+    const visual = result.visual;
+    stages.push({
+      name: "Describe the image",
+      state:
+        visual.status === "observed" ? "done" : visual.status === "failed" ? "failed" : "attention",
+      detail: {
+        observed: "described by an AI visual model",
+        unavailable: "no AI visual model available here",
+        failed: "the AI visual model did not answer",
+        no_image: "no normal-colour image to describe",
+      }[visual.status],
+    });
+  }
+
+  // 7. The answer, checked against the evidence.
   const validation = result.trace.answer_validation;
   if (validation !== null) {
     const checks = [

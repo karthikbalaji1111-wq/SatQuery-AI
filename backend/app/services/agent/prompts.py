@@ -295,5 +295,9 @@ _VISUAL_INSTRUCTION = (
     "- Do NOT claim to have run any index, classifier or detector. You are "
     "looking at a picture.\n"
     "- Do not describe the image as evidence of flooding, disaster or damage "
-    "unless that is plainly visible."
+    "unless that is plainly visible.\n"
+    "- Write for someone with no remote-sensing background: plain everyday "
+    "words, no technical terms.\n"
+    "- You are not told where or when the image was taken. Do not name or "
+    "guess the place; describe only what the picture shows."
 )

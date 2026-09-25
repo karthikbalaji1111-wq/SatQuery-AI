@@ -52,6 +52,11 @@ export interface EvidenceReport {
   status: string | null;
   failure: AgentResult["failure"] | null;
   /**
+   * What became of a requested description of the image - observed, or why
+   * not - with the scene it concerns. Null when none was asked for.
+   */
+  visual: AgentResult["visual"] | null;
+  /**
    * The mechanical checks the answer was put through, verbatim. Present even
    * when they failed - especially when they failed.
    */
@@ -156,6 +161,7 @@ export function buildEvidenceReport(
     answer: result?.answer ?? null,
     status: result?.status ?? null,
     failure: result?.failure ?? null,
+    visual: result?.visual ?? null,
     answer_validation: result?.trace?.answer_validation ?? null,
     trace: result?.trace ?? null,
     evidence: result?.evidence ?? null,

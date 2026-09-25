@@ -38,6 +38,7 @@ import {
   resultSummary,
   validationRecords,
   type IndexReading,
+  type Observation,
   type PeriodReading,
   type ResultBody,
   type ResultContext,
@@ -395,7 +396,8 @@ function sampleWarnings(
 export function interpretResult(result: AgentResult): Interpretation | null {
   if (outcomeOf(result).kind !== "success") return null;
   const body = resultSummary(result);
-  if (body.kind === "imagery" || body.kind === "none") return null;
+  // A described image is not a measurement; `describeObservation` words it.
+  if (body.kind === "imagery" || body.kind === "none" || body.kind === "visual") return null;
   const context = resultContext(result);
   const interpretation =
     body.kind === "index"
@@ -405,6 +407,30 @@ export function interpretResult(result: AgentResult): Interpretation | null {
         : interpretTemporal(body.reading);
   const warnings = sampleWarnings(body);
   return warnings.length > 0 ? { ...interpretation, sampleWarnings: warnings } : interpretation;
+}
+
+// --------------------------------------------------------------------------- //
+// What a vision model saw - its words, attributed, never a measurement
+// --------------------------------------------------------------------------- //
+
+export interface ObservationWording {
+  /** The model's own words, verbatim. */
+  statement: string;
+  /** "Sentinel-2 satellite image · 8 December 2024". */
+  source: string;
+  /** How the description was obtained, in everyday words. */
+  howWeKnow: string;
+}
+
+export function describeObservation(observation: Observation): ObservationWording {
+  const day = formatDay(observation.acquired);
+  return {
+    statement: observation.statement,
+    source: day ? `Sentinel-2 satellite image · ${day}` : "Sentinel-2 satellite image",
+    howWeKnow: `An AI visual model looked at the normal-colour satellite image${
+      day ? ` taken on ${day}` : ""
+    } and described it in its own words. The place's name was taken out of the question it was asked, so it describes only what the picture shows. It does not measure anything: measurements come only from the satellite data itself.`,
+  };
 }
 
 // --------------------------------------------------------------------------- //
@@ -582,7 +608,8 @@ function temporalRows(reading: TemporalReading): TechnicalRow[] {
  * when `interpretResult` is `null`.
  */
 export function technicalDetails(result: AgentResult): TechnicalRow[] | null {
-  if (outcomeOf(result).kind !== "success") return null;
+  const outcome = outcomeOf(result).kind;
+  if (outcome !== "success" && outcome !== "visual_unavailable") return null;
   const body = resultSummary(result);
   switch (body.kind) {
     case "index":
@@ -591,8 +618,46 @@ export function technicalDetails(result: AgentResult): TechnicalRow[] | null {
       return [...sarRows(body.reading, body.scene), ...checkRows(result)];
     case "temporal":
       return [...temporalRows(body.reading), ...checkRows(result)];
+    case "visual":
+      return visualRows(result, body.observation, body.scene);
     case "imagery":
+      // Retrieved for a description that was not given: the image's record.
+      return outcome === "visual_unavailable" ? undescribedRows(result, body.scene) : null;
     case "none":
       return null;
   }
+}
+
+function undescribedRows(result: AgentResult, scene: SceneRef | null): TechnicalRow[] {
+  const image = (result.evidence.execution?.windows ?? [])
+    .map((window) => window.imagery)
+    .find((candidate) => candidate != null && (scene === null || candidate.scene_id === scene.id));
+  return [
+    { label: "Image", value: "Sentinel-2 true colour (visual asset, red · green · blue), PNG" },
+    ...(image ? [{ label: "Image size", value: `${image.width} × ${image.height} px` }] : []),
+    ...(scene ? sceneRows(scene, "Level-2A") : []),
+    {
+      label: "Visual description",
+      value:
+        result.visual?.status === "failed"
+          ? "not produced - the visual model did not answer"
+          : "not produced - no visual model is configured",
+    },
+  ];
+}
+
+function visualRows(result: AgentResult, observation: Observation, scene: SceneRef | null): TechnicalRow[] {
+  const image = (result.evidence.execution?.windows ?? [])
+    .map((window) => window.imagery)
+    .find((candidate) => candidate?.scene_id === observation.sceneId);
+  return [
+    { label: "Observation by", value: `${observation.provider} · ${observation.model}` },
+    {
+      label: "Image",
+      value: "Sentinel-2 true colour (visual asset, red · green · blue), PNG sent to the model as retrieved",
+    },
+    ...(image ? [{ label: "Image size", value: `${image.width} × ${image.height} px` }] : []),
+    ...sceneRows(scene ?? { id: observation.sceneId, acquired: observation.acquired, platform: null }, "Level-2A"),
+    { label: "Nature", value: "A model's description of the picture - never a measurement" },
+  ];
 }
