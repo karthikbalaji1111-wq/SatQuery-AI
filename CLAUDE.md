@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 31 (plain-language interpretation). Section 23 (the scientific core,
+current figures are in section 32 (point-like geocoder matches). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2776,3 +2776,83 @@ not; console 0 / 0.
 | `npm run test` | **515 passed** (447 before this section) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
 | `pytest -q` / `ruff` / `git diff --check` | 3067 passed (unchanged) / clean / clean |
+
+---
+
+## 32. A point is not an area - point-like geocoder matches - IMPLEMENTED (2026-09-25)
+
+**Root cause (production).** "Show water (NDWI) around sahara desert january
+2025" geocoded to the single OSM NODE that labels the Sahara ("Sahara, Tazrouk
+... (natural · desert)" - the only candidate Nominatim has for it). For a node,
+Nominatim returns a display box around the point (~10 x 11 m); SatQuery used it
+as the analysis area and measured and showed a 2 x 2 pixel raster. The same
+mechanism measured "Lalbagh, Bengaluru" over a railway-stop node and "Marina
+Beach Chennai" (no comma) over a beach node. Not a frontend or image bug.
+
+**Rule (geometry, not a size threshold).** `NominatimPlace.point_like` = OSM
+`node` whose class is not `place`. A `place=*` node (suburb, village, town,
+city) is how OSM maps a settlement, and Nominatim answers it with a
+settlement-scale box - accepted as before (Ameerpet, Koramangala, Hampi,
+Mumbai). Ways and relations are real geometries, however small (India Gate's
+19 x 28 m footprint is measured, with the small-sample note).
+
+**Candidates.** One request now asks for `CANDIDATE_LIMIT = 5`
+(`nominatim.py`). `select_candidate` keeps the geocoder's first result unless
+it is point-like; then it takes the first LATER candidate that is not
+point-like AND carries every word of the queried name (the part before the
+first comma), a word also matching the candidate's own class/type ("Lalbagh
+park"). Order decides, never box size; "Sahara" is never replaced by the New
+York it also returns. Checked live: asking for 5 does not change the first
+result for Cubbon Park, Marina Beach, Hussain Sagar, Dal Lake, Juhu Beach,
+Ameerpet, Koramangala, Hampi, Chennai or Mumbai.
+
+**Refusal.** A point that remains is refused in `QueryService.build_plan`,
+before any catalog search: `PointLocationError` (422, `location_is_point`),
+naming the match verbatim, surfaced by `AgentService` as a `location_is_point`
+clarification and in the UI as its own state ("A point, not an area"; pipeline
+"Resolve location - a single point, not an area"). The point still resolves
+through `/geospatial/resolve` (`ResolveResponse.osm_type`, `.point_like`). No
+box is ever widened and no coordinate is produced that the geocoder did not
+return. No AOI radius exists or was added.
+
+**Tests.** `tests/test_point_locations.py` (29) replays real Nominatim answers
+captured 2026-09-25 (`tests/nominatim_candidates.json`): the Sahara resolves as
+a point and is refused by name; end to end through the real query execution
+the agent returns the clarification with NO catalog search and NO imagery read;
+"Sahara" never becomes New York; Lalbagh -> the gardens, Bandra -> Bandra West;
+India Gate and a settlement node are still measured; a lone stop resolves and
+is refused by name; Cubbon Park and Marina Beach unchanged; Chennai still
+`aoi_too_large`; every chosen box and centre is one the geocoder returned; the
+chosen object is a candidate, never a new one; order not size decides; one
+request asks for 5; a malformed alternative is dropped. One provenance test
+updated deliberately (it modelled Lalbagh as a lone stop, now refused; it pins
+provenance on the gardens' way). Frontend +3 (outcome kind, distinct state,
+stages; no interpretation). Mutations 9/9 caught: no point is point-like (10
+fail), relevance dropped (2), largest box preferred (1), settlements treated as
+points (1), point silently widened (11), single candidate requested (1), plan
+guard removed (5), agent mapping removed (1), UI state collapsed (4).
+
+**Verified in production** (`d9cd325`; real UI, 1 `/query/agent` request each,
+console 0 / 0): both Sahara phrasings -> "A point, not an area", nothing
+searched, no image; Cubbon Park NDVI +0.5204 (122 x 140 px), Marina Beach NDWI
++0.1466 (112 x 300 px), Hussain Sagar NDWI -0.1955 (265 x 323 px) unchanged;
+Lalbagh -> Lalbagh Botanical Gardens (leisure · park) NDVI +0.4624 (144 x 115
+px); Bandra -> Bandra West NDBI -0.0932 (255 x 461 px); "Marina Beach Chennai"
+-> refused as a point; India Gate, New Delhi -> its own footprint, NDVI
++0.1341 over 9 pixels (3 x 3 px) with the small-sample note.
+
+**Known limitations.** A real but tiny footprint (India Gate) is still
+measured - by design, since size alone is not a validity rule - and flagged
+by the small-sample note. Relevance is word containment over Latin-script
+names; a name only in another script never replaces a point (it is refused
+instead). The demo package (docs/SIH_DEMO_PACKAGE.md) now describes the point
+refusal in its recovery plan.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3096 passed** (3067 before) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **518 passed** (515 before) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
