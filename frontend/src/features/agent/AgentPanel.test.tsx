@@ -413,7 +413,8 @@ describe("AgentPanel - successful result", () => {
     );
     // Headlined by the comparison's own measurements - never by one
     // observation's mean standing alone as "the" NDWI.
-    expect(labels).toEqual(["Mean difference", "Paired-pixel change"]);
+    // Updated deliberately (layperson first): the card shows one "Change".
+    expect(labels).toEqual(["Change"]);
     expect(labels).not.toContain("ndwi mean");
     // Each observation keeps its role: earlier, then later.
     expect(
