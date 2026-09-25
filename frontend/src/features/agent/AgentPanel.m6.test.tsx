@@ -103,16 +103,21 @@ describe("M6 result card", () => {
     expect(panel.querySelector(".result-sub")).toHaveTextContent(
       "Mean over 16,988 valid pixels · range -0.0877 to +0.8780",
     );
+    // Updated deliberately (layperson first): everyday labels; the scene id is
+    // the title of "Satellite image" and stays in Technical details.
     expect(context(panel)).toEqual({
       Location: "Cubbon Park, Bengaluru",
       Matched: "Cubbon Park, Sampangirama Nagar (leisure · park)",
       Period: "December 2024",
-      Scene: "2024-12-08 · Sentinel-2B",
-      "Scenes matched": "7",
-      "Pixel quality": "99.5% usable · 16,988 of 17,080 pixels",
+      "Satellite image": "Sentinel-2B",
+      Date: "8 December 2024",
+      "Images found": "7",
+      "Usable pixels": "99.5% · 16,988 of 17,080",
     });
-    // The grounded sentence stays - as the explanation under the result.
-    expect(within(panel).getByText(NDVI_CUBBON.answer!)).toHaveAttribute("data-role", "summary");
+    // The grounded sentence stays - in Technical details, with its checks.
+    const sentence = within(panel).getByText(NDVI_CUBBON.answer!);
+    expect(sentence).toHaveAttribute("data-role", "summary");
+    expect(sentence.closest("details.technical-details")).not.toBeNull();
   });
 
   it("NDWI: the water index, not a water classification", () => {
@@ -144,7 +149,10 @@ describe("M6 result card", () => {
     );
     expect(values).toEqual({ VV: "-5.44 dB", VH: "-17.85 dB", "VV − VH": "12.41 dB" });
     expect(panel.querySelector(".result-sub")).toHaveTextContent(/terrain-corrected/);
-    expect(context(panel)).toMatchObject({ Scene: "2025-01-11 · Sentinel-1A" });
+    expect(context(panel)).toMatchObject({
+      "Satellite image": "Sentinel-1A (radar)",
+      Date: "11 January 2025",
+    });
   });
 
   it("temporal NDWI: earlier period → later period → measured change", () => {
@@ -171,7 +179,11 @@ describe("M6 result card", () => {
     // The periods are in the card; the single-period row would repeat them.
     expect(context(panel)).not.toHaveProperty("Period");
     // Each observation has its own pixels; neither stands for both.
-    expect(context(panel)["Pixel quality"]).toBe("99.7% earlier · 99.8% later usable");
+    expect(context(panel)["Usable pixels"]).toBe("99.7% earlier · 99.8% later");
+    // What changed, in words, above the numbers.
+    expect(panel.querySelector(".result-change")).toHaveTextContent(
+      "The water signal was stronger in January 2025 than in January 2024.",
+    );
   });
 });
 
@@ -545,48 +557,88 @@ describe("audit: the geocoder's match is shown beside the typed place", () => {
   });
 });
 
-describe("What this means - the result in plain English", () => {
-  function meaning(): HTMLElement | null {
-    const heading = within(answerPanel()).queryByRole("heading", { name: "What this means" });
+describe("Layperson first: What this means, How we know, Technical details", () => {
+  function section(name: string): HTMLElement | null {
+    const heading = within(answerPanel()).queryByRole("heading", { name });
     return heading ? (heading.closest("section") as HTMLElement) : null;
+  }
+  function technical(): HTMLDetailsElement | null {
+    return answerPanel().querySelector("details.technical-details");
   }
 
   it.each([
-    ["NDVI", NDVI_CUBBON, "Positive vegetation-related signal", "average NDVI of +0.5204"],
-    ["NDWI", NDWI_MARINA, "Positive water-related signal", "average NDWI of +0.1466"],
-    ["NDBI", NDBI_AMEERPET, "No positive built-up-related signal on average", "average NDBI of -0.0248"],
-    ["SAR", SAR_MARINA, "Radar backscatter: VV -5.44 dB, VH -17.85 dB", "The VV–VH difference was 12.41 dB"],
+    ["NDVI", NDVI_CUBBON, "The selected area shows a positive vegetation signal.", "the vegetation index was +0.5204", "red light and invisible near-infrared light"],
+    ["NDWI", NDWI_MARINA, "The selected area shows a positive water signal.", "the water index was +0.1466", "green light with invisible near-infrared light"],
+    ["NDBI", NDBI_AMEERPET, "The selected area does not show a positive built-up signal on average.", "the built-up index was -0.0248", "two kinds of invisible infrared light"],
+    ["SAR", SAR_MARINA, "The radar image gave two measurements for the selected area: -5.44 dB and -17.85 dB.", "The difference between the two measurements was 12.41 dB", "a radar image rather than a normal camera image"],
     [
       "temporal",
       TEMPORAL_MARINA,
-      "The water-related signal increased from January 2024 to January 2025",
-      "increased from +0.0266 to +0.1466, a change of +0.1200",
+      "The later satellite image shows a stronger water signal than the earlier image.",
+      "the water index increased from +0.0266 to +0.1466, a change of +0.1200",
+      "We compared satellite images of the same area taken on 15 January 2024 and 4 January 2025",
     ],
-  ])("%s: headline, explanation and caveat under the number", (_, result, headline, sentence) => {
+  ])("%s: the plain answer, then how we know", (_, result, headline, meaning, how) => {
     render(<AgentAnswerPanel result={result} />);
-    const section = meaning();
-    expect(section).not.toBeNull();
-    expect(within(section as HTMLElement).getByText(headline)).toBeInTheDocument();
-    expect(section).toHaveTextContent(sentence);
-    expect(section?.querySelector(".interpretation-caveat")).not.toBeNull();
+    const means = section("What this means") as HTMLElement;
+    expect(within(means).getByText(headline)).toHaveClass("interpretation-headline");
+    expect(means).toHaveTextContent(meaning);
+    expect(means.querySelector(".interpretation-caveat")).not.toBeNull();
+    expect(section("How we know")).toHaveTextContent(how);
   });
 
-  it("sits below the measured value and above the context rows", () => {
+  it("orders the layers: number, meaning, method, context, technical details", () => {
     render(<AgentAnswerPanel result={NDVI_CUBBON} />);
-    const card = answerPanel().querySelector(".result-card") as HTMLElement;
-    const section = meaning() as HTMLElement;
-    const context = answerPanel().querySelector(".result-context") as HTMLElement;
-    const follows = Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(card.compareDocumentPosition(section) & follows).toBeTruthy();
-    expect(section.compareDocumentPosition(context) & follows).toBeTruthy();
+    const panel = answerPanel();
+    const order = [
+      panel.querySelector(".result-card"),
+      section("What this means"),
+      section("How we know"),
+      panel.querySelector(".result-context"),
+      technical(),
+    ] as HTMLElement[];
+    for (const element of order) expect(element).not.toBeNull();
+    for (let i = 1; i < order.length; i += 1) {
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
   });
 
-  it("a comparison card names the question it answers: what changed", () => {
+  it("keeps the specialist record - folded, not removed", () => {
+    render(<AgentAnswerPanel result={NDVI_CUBBON} />);
+    const details = technical() as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")).toHaveTextContent("Technical details");
+    const rows = Object.fromEntries(
+      [...details.querySelectorAll(".technical-list > div")].map((row) => [
+        row.querySelector("dt")?.textContent,
+        row.querySelector("dd")?.textContent,
+      ]),
+    );
+    expect(rows).toMatchObject({
+      Index: "NDVI - Normalized Difference Vegetation Index",
+      "NDVI formula": "(NIR − Red) / (NIR + Red) · Sentinel-2 bands B08 and B04",
+      "NDVI mean": "+0.5204 (exact 0.5204459203473597)",
+      "NDVI valid pixels": "16,988 of 17,080 (92 masked · sentinel-2-scl)",
+      "Scene ID": "S2B_43PGQ_20241208_0_L2A",
+    });
+    expect(rows["Radiometric check"]).toMatch(/^verified/);
+    expect(rows["Geometric check"]).toMatch(/^grid verified/);
+    // The grounding checks moved with the sentence they checked.
+    expect(details.querySelector(".validation-box")).not.toBeNull();
+  });
+
+  it("a comparison card names the question it answers, and answers it in words", () => {
     render(<AgentAnswerPanel result={TEMPORAL_MARINA} />);
     const card = answerPanel().querySelector(".result-card") as HTMLElement;
     expect(within(card).getByText("What changed")).toBeInTheDocument();
+    expect(card.querySelector(".result-change")).toHaveTextContent(
+      "The water signal was stronger in January 2025 than in January 2024.",
+    );
     const periods = within(card).getByRole("list", { name: "What changed" });
     expect(periods).toHaveTextContent(/Earlier.*January 2024.*Later.*January 2025/);
+    expect(section("What this means")).toHaveTextContent(
+      "This shows a change in the satellite measurement. It does not tell us what caused the change.",
+    );
   });
 
   it.each([
@@ -597,9 +649,11 @@ describe("What this means - the result in plain English", () => {
     ["an unsupported request", UNSUPPORTED_SHIPS],
     ["no measurement", NO_SCENES],
     ["an analysis not computed", REFUSED_BY_RADIOMETRY],
-  ])("%s keeps its own wording - no interpretation", (_, result) => {
+  ])("%s keeps its own wording - no plain-English layers, no technical fold", (_, result) => {
     render(<AgentAnswerPanel result={result} />);
-    expect(meaning()).toBeNull();
+    expect(section("What this means")).toBeNull();
+    expect(section("How we know")).toBeNull();
+    expect(technical()).toBeNull();
   });
 });
 
@@ -616,7 +670,7 @@ describe("Small sample - said under the number, never instead of it", () => {
     expect(within(card).getByText("+0.3728")).toBeInTheDocument();
     const note = within(meaning()).getByRole("note");
     expect(note).toHaveTextContent(
-      "Small sample: only 4 valid pixels contributed to this result, so interpret it cautiously.",
+      "Small sample: only 4 usable pixels contributed to this result, so interpret it cautiously.",
     );
     // Inside the interpretation, after its headline - not above the result.
     const headline = meaning().querySelector(".interpretation-headline") as HTMLElement;
