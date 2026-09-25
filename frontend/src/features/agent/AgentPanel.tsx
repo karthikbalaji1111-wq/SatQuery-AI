@@ -43,6 +43,8 @@ import {
   type ResultBody,
   type RunStage,
 } from "./resultModel";
+import { decibels, pixelCount as pixels, signedIndex } from "./format";
+import { interpretResult, type Interpretation } from "./interpretation";
 import { STANDARD_INTERPRETER, useAgentRun } from "./agentRun";
 import type { AgentRun, AgentRunHandlers } from "./agentRun";
 
@@ -201,12 +203,12 @@ function formatMeasurement(value: number, unit: string): string {
   if (!Number.isFinite(value)) return String(value);
   switch (unit) {
     case "index":
-      return `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
+      return signedIndex(value);
     case "%":
       return value.toFixed(1);
     case "pixels":
     case "count":
-      return Math.round(value).toLocaleString("en-US");
+      return pixels(value);
     default:
       return String(value);
   }
@@ -1273,7 +1275,10 @@ export function AgentAnswerPanel({
       {result.status === "ok" && result.answer !== null ? (
         <>
           {outcome.kind === "success" ? (
-            <ResultCard body={body} />
+            <>
+              <ResultCard body={body} />
+              <InterpretationBlock interpretation={interpretResult(result)} />
+            </>
           ) : (
             <MeasurementAbsent
               kind={outcome.kind}
@@ -1314,18 +1319,6 @@ export function AgentAnswerPanel({
 }
 
 /* ---------------------------------------------------- the result, by operation */
-
-function signedIndex(value: number): string {
-  return formatMeasurement(value, "index");
-}
-
-function decibels(value: number): string {
-  return `${value.toFixed(2)} dB`;
-}
-
-function pixels(value: number): string {
-  return formatMeasurement(value, "pixels");
-}
 
 /** "sentinel-2b" -> "Sentinel-2B". Display casing of the catalog's own value. */
 function platformLabel(platform: string | null): string | null {
@@ -1416,7 +1409,8 @@ function ResultCard({ body }: { body: ResultBody }) {
           <p className="result-op">
             Water change <span className="result-op-code">· NDWI, two periods</span>
           </p>
-          <ol className="result-periods">
+          <p className="result-question">What changed</p>
+          <ol className="result-periods" aria-label="What changed">
             {[earlier, later].map((side) => (
               <li key={side.role} data-role={side.role.toLowerCase()}>
                 <span className="period-role">{side.role}</span>
@@ -1473,6 +1467,33 @@ function ResultCard({ body }: { body: ResultBody }) {
     case "none":
       return null;
   }
+}
+
+/**
+ * "What this means": the measured result in plain English.
+ *
+ * Built by `interpretResult` from the same values the card shows - no model
+ * writes it - and set BELOW the number, smaller than it: the measurement is
+ * the result, this is how to read it.
+ */
+function InterpretationBlock({
+  interpretation,
+}: {
+  interpretation: Interpretation | null;
+}) {
+  if (interpretation === null) return null;
+  return (
+    <section className="interpretation" aria-labelledby="interpretation-heading">
+      <h3 id="interpretation-heading" className="interpretation-label">
+        What this means
+      </h3>
+      <p className="interpretation-headline">{interpretation.headline}</p>
+      <p className="interpretation-text">{interpretation.explanation}</p>
+      {interpretation.caveat && (
+        <p className="interpretation-caveat">{interpretation.caveat}</p>
+      )}
+    </section>
+  );
 }
 
 /** Where and when the result applies - each row only when the run carries it. */
