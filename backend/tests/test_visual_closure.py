@@ -138,9 +138,63 @@ def test_a_confident_label_cannot_add_a_measurement_to_a_look() -> None:
 @pytest.mark.parametrize(
     "question",
     [
+        "What does the satellite image of Marina Beach, Chennai show in January 2025?",
+        "What does the image of Marina Beach, Chennai contain in January 2025?",
+        "What do the pictures around Marina Beach, Chennai show in January 2025?",
+    ],
+)
+def test_what_an_image_of_a_place_shows_is_a_look_and_the_verb_is_not_the_place(
+    question: str,
+) -> None:
+    # Found live: "the satellite image of Marina Beach, Chennai show" was not
+    # read as a look, and "show" was geocoded as part of the place.
+    interpretation = interpret(question, today=TODAY)
+    assert interpretation.location_query == "Marina Beach, Chennai"
+    assert tools(question) == ["execute_query", "rs_model_analysis"]
+
+
+@pytest.mark.parametrize(
+    ("question", "place", "tool_list"),
+    [
+        # Showing an image is retrieving it, not describing it.
+        ("Show the image of Marina Beach, Chennai in January 2025",
+         "Marina Beach, Chennai", ["execute_query"]),
+        # A second command after "and" is not what the image shows.
+        ("Show the scene of Marina Beach, Chennai in January 2025 and show the NDWI",
+         "Marina Beach, Chennai", ["execute_query", "spectral_indices"]),
+        # A name that starts with "Show" keeps it.
+        ("NDVI around Show Low, Arizona in December 2024",
+         "Show Low, Arizona", ["execute_query", "spectral_indices"]),
+        # Title Case typing ends the place at the verb too.
+        ("What Does The Satellite Image Of Marina Beach, Chennai Show In January 2025?",
+         "Marina Beach, Chennai", ["execute_query", "rs_model_analysis"]),
+        # Refused radar is not a request for radar.
+        ("What do you see around Dal Lake, Srinagar in January 2025, not the radar?",
+         "Dal Lake, Srinagar", ["execute_query", "rs_model_analysis"]),
+    ],
+)
+def test_show_ends_a_place_only_as_a_verb_after_it(
+    question: str, place: str, tool_list: list[str]
+) -> None:
+    assert interpret(question, today=TODAY).location_query == place
+    assert tools(question) == tool_list
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
         "Describe the radar backscatter around Marina Beach, Chennai in January 2025",
+        # Found live: naming the radar IMAGE (without "SAR" or "backscatter")
+        # retrieved and offered the normal-colour image in its place.
+        "Describe the radar image of Marina Beach, Chennai in January 2025",
+        "What does the radar image of Marina Beach, Chennai look like in January 2025?",
+        "Is there visible water in the radar image around Dal Lake, Srinagar in "
+        "January 2025?",
+        "What do you see in the Sentinel-1 image of Marina Beach, Chennai in January 2025?",
         "Compare water around Marina Beach, Chennai between January 2024 and January "
         "2025 and describe what you see",
+        "What does the image of Marina Beach, Chennai show in January 2024 compared "
+        "with January 2025?",
     ],
 )
 def test_a_description_of_radar_or_of_two_dates_is_refused_plainly(question: str) -> None:

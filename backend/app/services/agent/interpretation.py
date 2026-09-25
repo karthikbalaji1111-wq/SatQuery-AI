@@ -210,7 +210,11 @@ _VISUAL = _terms(
     r"visible|visibly|visually|looks?\s+like|can\s+(?:you\s+)?see|can\s+be\s+seen|"
     r"describe|description|appear(?:s|ance)?|"
     r"(?:do|does|could|would)\s+you\s+see|"
-    r"(?:image|picture|photo|photograph|scene)\s+(?:shows?|contains?)|"
+    # "the image of <place> shows ...": the image is what shows, however far
+    # the verb comes after it - but not across "and"/"then", where a second
+    # command starts ("Show the scene of X and show the NDWI").
+    r"(?:image|imagery|picture|photo|photograph|scene)s?"
+    r"(?:(?!\b(?:and|then|also)\b)[^?.!;\n])*?\b(?:shows?|contains?)|"
     r"what(?:'s|\s+is)\s+(?:happening|going\s+on)"
 )
 
@@ -461,7 +465,10 @@ _LOCATION_END = re.compile(
     # "at Ukai dam differed between ..." names Ukai dam, and compares.
     r"changed|changes?|changing|differ(?:s|ed)?|compared|shr[ai]nk|shrunk|grew|"
     r"grown|rose|risen|fell|fallen|increased|decreased|declined|evolved|shifted|"
-    r"varied|vary|lost|gained|dropped|dried)\b",
+    r"varied|vary|lost|gained|dropped|dried|"
+    # "What does the image of <place> show": the verb ends the place. (A name
+    # that STARTS with it, "Show Low", is kept: an end needs a space before it.)
+    r"shows?|showed|contains?|contained)\b",
     re.IGNORECASE,
 )
 
@@ -1196,14 +1203,16 @@ def resolve_operation(
                 location=place.text,
             )
         explicit = measured if reading.asks_to_measure else []
-        if "sar_backscatter" in explicit:
+        if "sar_backscatter" in measured:
+            # Radar named at all - "the radar image", "the Sentinel-1 image" -
+            # is refused, not answered with the normal-colour image instead.
             raise _clarify(
                 "analysis_unsupported",
                 "Descriptions are given for the normal-colour satellite image, "
                 "not the radar image. Ask what the image shows, or ask for the "
                 "radar measurement on its own.",
                 options=SUPPORTED_OPTIONS,
-                analyses=explicit,
+                analyses=measured,
                 location=place.text,
             )
         return (explicit or ["imagery"]), False
