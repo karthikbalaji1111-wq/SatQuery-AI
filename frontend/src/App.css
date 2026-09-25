@@ -3689,3 +3689,61 @@ a:focus-visible {
     max-width: calc(100% - 24px);
   }
 }
+
+/* -- what the result means ------------------------------------------------ */
+
+/* "What changed" on a comparison card: the question the periods answer. */
+.result-question {
+  margin: 4px 0 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Subordinate to the number above it: smaller type, no accent colour. */
+.interpretation {
+  margin: 10px 0 0;
+  padding: 8px 12px 10px;
+  border-left: 2px solid var(--line);
+}
+
+.interpretation-label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.interpretation-headline {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.interpretation-text {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.interpretation-caveat {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* Under "What this means", the grounded sentence is the record the checks
+   below it validated - evidence, level four - not a second headline. */
+.agent-answer[data-role="summary"] {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-3);
+}

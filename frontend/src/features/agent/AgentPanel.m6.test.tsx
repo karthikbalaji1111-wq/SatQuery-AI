@@ -542,3 +542,61 @@ describe("audit: the geocoder's match is shown beside the typed place", () => {
     expect(context(answerPanel())).not.toHaveProperty("Matched");
   });
 });
+
+describe("What this means - the result in plain English", () => {
+  function meaning(): HTMLElement | null {
+    const heading = within(answerPanel()).queryByRole("heading", { name: "What this means" });
+    return heading ? (heading.closest("section") as HTMLElement) : null;
+  }
+
+  it.each([
+    ["NDVI", NDVI_CUBBON, "Positive vegetation-related signal", "average NDVI of +0.5204"],
+    ["NDWI", NDWI_MARINA, "Positive water-related signal", "average NDWI of +0.1466"],
+    ["NDBI", NDBI_AMEERPET, "No positive built-up-related signal on average", "average NDBI of -0.0248"],
+    ["SAR", SAR_MARINA, "Radar backscatter: VV -5.44 dB, VH -17.85 dB", "The VV–VH difference was 12.41 dB"],
+    [
+      "temporal",
+      TEMPORAL_MARINA,
+      "The water-related signal increased from January 2024 to January 2025",
+      "increased from +0.0266 to +0.1466, a change of +0.1200",
+    ],
+  ])("%s: headline, explanation and caveat under the number", (_, result, headline, sentence) => {
+    render(<AgentAnswerPanel result={result} />);
+    const section = meaning();
+    expect(section).not.toBeNull();
+    expect(within(section as HTMLElement).getByText(headline)).toBeInTheDocument();
+    expect(section).toHaveTextContent(sentence);
+    expect(section?.querySelector(".interpretation-caveat")).not.toBeNull();
+  });
+
+  it("sits below the measured value and above the context rows", () => {
+    render(<AgentAnswerPanel result={NDVI_CUBBON} />);
+    const card = answerPanel().querySelector(".result-card") as HTMLElement;
+    const section = meaning() as HTMLElement;
+    const context = answerPanel().querySelector(".result-context") as HTMLElement;
+    const follows = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(card.compareDocumentPosition(section) & follows).toBeTruthy();
+    expect(section.compareDocumentPosition(context) & follows).toBeTruthy();
+  });
+
+  it("a comparison card names the question it answers: what changed", () => {
+    render(<AgentAnswerPanel result={TEMPORAL_MARINA} />);
+    const card = answerPanel().querySelector(".result-card") as HTMLElement;
+    expect(within(card).getByText("What changed")).toBeInTheDocument();
+    const periods = within(card).getByRole("list", { name: "What changed" });
+    expect(periods).toHaveTextContent(/Earlier.*January 2024.*Later.*January 2025/);
+  });
+
+  it.each([
+    ["a clarification", CLARIFY_CHENNAI],
+    ["a place not found", NOT_FOUND],
+    ["a location outage", LOCATION_UNAVAILABLE],
+    ["an area too large", AREA_TOO_LARGE_CHENNAI],
+    ["an unsupported request", UNSUPPORTED_SHIPS],
+    ["no measurement", NO_SCENES],
+    ["an analysis not computed", REFUSED_BY_RADIOMETRY],
+  ])("%s keeps its own wording - no interpretation", (_, result) => {
+    render(<AgentAnswerPanel result={result} />);
+    expect(meaning()).toBeNull();
+  });
+});
