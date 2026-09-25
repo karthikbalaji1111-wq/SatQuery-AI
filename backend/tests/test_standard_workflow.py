@@ -367,11 +367,21 @@ def test_detect_beside_a_supported_analysis_is_a_measurement() -> None:
     assert read("Detect water around Chennai in January 2025").analyses == ("ndwi",)
 
 
-def test_a_visual_question_needs_an_ai_model() -> None:
-    clarification = ask_for("Is there visible water at Marina Beach, Chennai in January 2025?")
+def test_a_visual_question_retrieves_the_image_and_asks_to_look() -> None:
+    """Updated deliberately (final product closure): a question about what an
+    image shows is no longer refused. It retrieves the normal-colour image and
+    plans one visual step; "water" is what to look FOR, not a measurement."""
 
-    assert clarification.reason == "requires_ai_model"
-    assert "AI model" in clarification.message
+    interpretation = interpret(
+        "Is there visible water at Marina Beach, Chennai in January 2025?", today=TODAY
+    )
+
+    assert interpretation.analyses == ("imagery",)
+    assert interpretation.visual_question is not None
+    assert [step.tool for step in interpretation.plan().steps] == [
+        "execute_query",
+        "rs_model_analysis",
+    ]
 
 
 @pytest.mark.parametrize(

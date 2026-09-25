@@ -35,9 +35,11 @@ import {
   resultContext,
   resultSummary,
   matchFrom,
+  observationOf,
   runStages,
   thresholdNote,
   validationRecords,
+  type Observation,
   type OutcomeKind,
   type Quality,
   type ResultBody,
@@ -45,6 +47,7 @@ import {
 } from "./resultModel";
 import { decibels, pixelCount as pixels, signedIndex } from "./format";
 import {
+  describeObservation,
   formatDay,
   interpretResult,
   technicalDetails,
@@ -1258,7 +1261,10 @@ export function AgentAnswerPanel({
   // A measured result reads plain English first; its specialist record - the
   // grounded sentence and its checks included - folds into Technical details.
   const interpretation = outcome.kind === "success" ? interpretResult(result) : null;
-  const technical = outcome.kind === "success" ? technicalDetails(result) : null;
+  const technical =
+    outcome.kind === "success" || outcome.kind === "visual_unavailable"
+      ? technicalDetails(result)
+      : null;
 
   return (
     <section
@@ -1285,10 +1291,16 @@ export function AgentAnswerPanel({
       {result.status === "ok" && result.answer !== null ? (
         <>
           {outcome.kind === "success" ? (
-            <>
-              <ResultCard body={body} change={interpretation?.change} />
-              <InterpretationBlock interpretation={interpretation} />
-            </>
+            body.kind === "visual" ? (
+              // Asked what the image shows: the description IS the result.
+              <WhatISee observation={body.observation} />
+            ) : (
+              <>
+                <ResultCard body={body} change={interpretation?.change} />
+                <InterpretationBlock interpretation={interpretation} />
+                <VisualAlongside result={result} />
+              </>
+            )
           ) : (
             <MeasurementAbsent
               kind={outcome.kind}
@@ -1530,6 +1542,64 @@ function InterpretationBlock({
 }
 
 /**
+ * "What I see": what an AI visual model said about the retrieved image, in its
+ * own words, with the image it looked at and who said it. Never a number: the
+ * measurements, when the question asked for any, stand apart from it.
+ */
+function WhatISee({ observation }: { observation: Observation }) {
+  const wording = describeObservation(observation);
+  return (
+    <section className="what-i-see" aria-labelledby="what-i-see-heading">
+      <h3 id="what-i-see-heading" className="interpretation-label">
+        What I see
+      </h3>
+      <p className="what-i-see-statement">{wording.statement}</p>
+      <dl className="what-i-see-meta">
+        <div>
+          <dt>Source</dt>
+          <dd title={observation.sceneId}>{wording.source}</dd>
+        </div>
+        <div>
+          <dt>Described by</dt>
+          <dd>
+            {providerLabel(observation.provider)} · {observation.model}
+          </dd>
+        </div>
+      </dl>
+      <p className="interpretation-caveat">
+        A description of the picture in the model's own words - not a
+        measurement.
+      </p>
+      <section className="how-we-know" aria-labelledby="visual-how-heading">
+        <h3 id="visual-how-heading" className="interpretation-label">
+          How we know
+        </h3>
+        <p className="interpretation-text">{wording.howWeKnow}</p>
+      </section>
+    </section>
+  );
+}
+
+/**
+ * A question that asked to look AND to measure: the measurement is the result
+ * above; this is what became of the look - a description, or why there is
+ * none. Nothing when no look was asked for.
+ */
+function VisualAlongside({ result }: { result: AgentResult }) {
+  const observation = observationOf(result);
+  if (observation !== null) return <WhatISee observation={observation} />;
+  if (!result.visual) return null;
+  return (
+    <section className="what-i-see" data-state={result.visual.status} aria-labelledby="what-i-see-heading">
+      <h3 id="what-i-see-heading" className="interpretation-label">
+        What I see
+      </h3>
+      <p className="interpretation-text">{result.visual.message}</p>
+    </section>
+  );
+}
+
+/**
  * Layer three: the specialist record, folded away until asked for. Index
  * names, formulas, exact values, sensor, scene and the validation checks -
  * every term the plain layers above deliberately leave out - plus the grounded
@@ -1582,7 +1652,7 @@ function ResultContextList({
     rows.push({ label: "Period", value: context.periods.join(" · ") });
   }
   const scene =
-    body.kind === "index" || body.kind === "sar" || body.kind === "imagery"
+    body.kind === "index" || body.kind === "sar" || body.kind === "imagery" || body.kind === "visual"
       ? body.scene
       : null;
   if (scene) {
@@ -1646,6 +1716,21 @@ function MeasurementAbsent({
   reason: string | null;
   sceneCount: number | null;
 }) {
+  if (kind === "visual_unavailable") {
+    return (
+      <div className="answer-notice" data-kind={kind} role="status">
+        <p className="answer-notice-summary">
+          The satellite image was retrieved, but it was not described.
+        </p>
+        <p className="answer-notice-detail">
+          {reason ?? "Describing an image needs an AI visual model."} The image
+          itself is shown on the map, and its date and source are in the
+          evidence.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="answer-notice" data-kind={kind} role="status">
       {kind === "analysis_refused" ? (
@@ -1670,7 +1755,7 @@ function MeasurementAbsent({
           <p className="answer-notice-detail">
             {sceneCount === 0
               ? "No satellite scene matched this place and period. A different month may have one."
-              : "The run completed, but the evidence did not support a measurement."}
+              : (reason ?? "The run completed, but the evidence did not support a measurement.")}
           </p>
         </>
       )}
@@ -1962,32 +2047,30 @@ export function AgentObservationPanel({
                 // produced" - which reads as a model that looked and saw
                 // nothing, or as a failure. Usually neither happened.
                 state.kind === "not-requested"
-                ? "The planner did not request a visual observation for this query, so no image was sent to a model. Deterministic results, when produced, appear in the evidence panel."
+                ? "No visual description was requested for this question, so no image was sent to a model."
                 : state.kind === "failed"
-                  ? `A visual observation was requested but the model step did not complete${
-                      state.step.error_message ??
-                      state.step.rejection_reason
-                        ? `: ${state.step.error_message ?? state.step.rejection_reason}`
-                        : "."
-                    }`
+                  ? // The server says which: no model here, no image, or no answer.
+                    (result?.visual?.message ??
+                    "A visual description was requested, but no model described the image.")
                   : // no-plan: nothing was planned, so nothing was asked.
-                    "No plan was produced for this run, so no visual observation was requested."}
+                    "No visual description was requested."}
         </p>
       ) : (
         observations.map((item) => (
           <div key={item.id} className="observation-body">
+            <p className="observation-label">What I see</p>
             <p className="agent-visual-statement">{item.visual!.statement}</p>
             <p className="model-line">
               <span className="model-name">
-                Model observation · {providerLabel(item.visual!.provider)} ·{" "}
+                Described by {providerLabel(item.visual!.provider)} ·{" "}
                 {item.visual!.model}
               </span>
               <span className="model-meta">scene {item.visual!.scene_id}</span>
             </p>
             <p className="qualitative-note">
               <span className="mark mark-amber" aria-hidden="true" />
-              Qualitative interpretation of pixels, not a measurement. Use the
-              deterministic evidence panel for reportable values.
+              A description of the picture in the model's own words, not a
+              measurement. Measurements are in the evidence panel.
             </p>
           </div>
         ))

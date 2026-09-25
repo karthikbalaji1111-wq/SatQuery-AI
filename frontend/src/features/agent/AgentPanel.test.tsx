@@ -728,7 +728,8 @@ describe("AgentPanel - visual observation", () => {
 
   it("attributes the observation to the named model", async () => {
     await askWith(visualResult());
-    expect(screen.getByText(/^Model observation · /)).toBeInTheDocument();
+    // Updated deliberately: plain words - "Described by", not "Model observation".
+    expect(screen.getByText(/^Described by /)).toBeInTheDocument();
     expect(screen.getByText(/gemini-3\.6-flash/)).toBeInTheDocument();
   });
 

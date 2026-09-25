@@ -977,7 +977,22 @@ export interface AgentFailure {
   dependency?: "geocoder" | null;
 }
 
+/**
+ * What became of a visual description the question asked for. `message` is
+ * written by the server in plain words; the observation itself, when there is
+ * one, is an attributed evidence item.
+ */
+export interface AgentVisual {
+  status: "observed" | "unavailable" | "no_image" | "failed";
+  message: string;
+  scene_id: string | null;
+  /** The image's acquisition date, YYYY-MM-DD. */
+  acquired: string | null;
+}
+
 export interface AgentResult {
+  /** Present when the question asked what the image shows. */
+  visual?: AgentVisual | null;
   failure?: AgentFailure | null;
   /** Present exactly when `status` is `needs_clarification`. */
   clarification?: AgentClarification | null;

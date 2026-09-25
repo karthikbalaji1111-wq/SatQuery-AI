@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -54,6 +55,7 @@ from app.services.agent.schemas import (
     AgentEvidence,
     AgentPlan,
     AgentToolStep,
+    AgentVisual,
     EvidenceItem,
     ExecuteQueryParams,
     RsModelParams,
@@ -124,6 +126,8 @@ class ExecutionOutcome:
     #: The wait that failure named, when it named one (a geocoder cooldown or
     #: Retry-After). ``None`` means unknown - never zero.
     discovery_failure_retry_after_seconds: float | None = None
+    #: What became of a requested visual description; ``None`` when none was.
+    visual: AgentVisual | None = None
 
 
 def _execution_request(params: ExecuteQueryParams) -> QueryExecutionRequest:
@@ -427,6 +431,50 @@ def _visual_image(
     )
 
 
+_THIS_AREA = "this area"
+
+
+def _without_place(question: str, place: str | None) -> str:
+    """The question as the model sees it: the place's name replaced by "this area".
+
+    A model told "Cubbon Park" can describe a park it has read about instead of
+    the picture it was handed. The image is the only evidence it may use, so
+    the place is removed from what it is asked - the full name first, then each
+    comma-separated part of it. Nothing else in the question changes.
+    """
+
+    if not place:
+        return question
+    names = {place.strip(), *(part.strip() for part in place.split(","))}
+    out = question
+    for name in sorted((name for name in names if len(name) >= 3), key=len, reverse=True):
+        out = re.sub(re.escape(name), _THIS_AREA, out, flags=re.IGNORECASE)
+    out = re.sub(rf"{_THIS_AREA}(?:\s*,\s*{_THIS_AREA})+", _THIS_AREA, out)
+    return " ".join(out.split())
+
+
+def _acquired(execution: QueryExecutionResult | None, scene_id: str) -> str | None:
+    """The catalog's acquisition date for ``scene_id``, YYYY-MM-DD."""
+
+    if execution is None:
+        return None
+    for window in execution.windows:
+        for scene in window.scenes:
+            if scene.id == scene_id and scene.datetime:
+                return str(scene.datetime)[:10]
+    return None
+
+
+_VISUAL_UNAVAILABLE = (
+    "The satellite image was retrieved, but describing it needs an AI visual "
+    "model, which is not available here."
+)
+_VISUAL_FAILED = (
+    "The satellite image was retrieved, but the AI visual model did not answer."
+)
+_VISUAL_NO_IMAGE = "No normal-colour satellite image was available to describe."
+
+
 class AgentExecutor:
     """Runs a validated :class:`AgentPlan` against the deterministic services.
 
@@ -530,8 +578,9 @@ class AgentExecutor:
 
         visual: EvidenceItem | None = None
         visual_failure: str | None = None
+        visual_state: AgentVisual | None = None
         if visual_steps:
-            visual, visual_step_state = await self._run_visual(
+            visual, visual_step_state, visual_state = await self._run_visual(
                 execution, visual_steps[0][1]
             )
             status, message, rejection = visual_step_state
@@ -565,6 +614,7 @@ class AgentExecutor:
             evidence=evidence,
             discovery_failure_code=discovery_failure_code,
             discovery_failure_retry_after_seconds=discovery_failure_retry_after,
+            visual=visual_state,
         )
 
     # -- discovery -------------------------------------------------------- #
@@ -685,7 +735,9 @@ class AgentExecutor:
 
     async def _run_visual(
         self, execution: QueryExecutionResult | None, params: RsModelParams
-    ) -> tuple[EvidenceItem | None, tuple[str, str | None, str | None]]:
+    ) -> tuple[
+        EvidenceItem | None, tuple[str, str | None, str | None], AgentVisual
+    ]:
         """Ask the analyst one question about the image the server chose.
 
         Every precondition is re-checked here rather than trusted to the
@@ -694,34 +746,56 @@ class AgentExecutor:
         the plan cannot name one - and only the Sentinel-2 true-colour product
         is admitted.
 
-        Returns the evidence item (or ``None``) and the step's observed state.
-        A refusal or a provider failure yields no OBSERVATION rather than a
-        placeholder: an observation nobody made must not appear as one. (A
-        failure is separately explained by a plain execution text item - see
-        ``_assemble_evidence`` - which carries no ``visual`` field.)
-        """
+        Returns the evidence item (or ``None``), the step's observed state and
+        the reader-facing :class:`AgentVisual`. A refusal or a provider failure
+        yields no OBSERVATION rather than a placeholder: an observation nobody
+        made must not appear as one. (A failure is separately explained by a
+        plain execution text item - see ``_assemble_evidence`` - which carries
+        no ``visual`` field.)
 
-        if self._visual is None:
-            return None, (
-                "rejected",
-                None,
-                "no visual analyst is configured, so no model could observe the image",
-            )
+        The image is established first, so "no model here" is only ever said
+        about an image that was actually retrieved - the reader is then shown
+        that image even though nothing described it.
+        """
 
         selected = _visual_image(execution)
         if isinstance(selected, str):
-            return None, ("rejected", None, selected)
-
+            return (
+                None,
+                ("rejected", None, selected),
+                AgentVisual(status="no_image", message=_VISUAL_NO_IMAGE),
+            )
         image, raw = selected
+        where = {
+            "scene_id": image.scene_id,
+            "acquired": _acquired(execution, image.scene_id),
+        }
+
+        if self._visual is None:
+            return (
+                None,
+                (
+                    "rejected",
+                    None,
+                    "no visual analyst is configured, so no model could observe the image",
+                ),
+                AgentVisual(status="unavailable", message=_VISUAL_UNAVAILABLE, **where),
+            )
+
+        place = execution.plan.intent.location_query if execution is not None else None
         try:
             answer = await self._visual.observe(
-                question=params.question,
+                question=_without_place(params.question, place),
                 image=raw,
                 media_type=image.media_type,
             )
         except AppError as exc:
             logger.info("Agent visual analysis failed [%s]: %s", exc.code, exc.message)
-            return None, ("failed", exc.message, None)
+            return (
+                None,
+                ("failed", exc.message, None),
+                AgentVisual(status="failed", message=_VISUAL_FAILED, **where),
+            )
 
         item = EvidenceItem(
             # Namespaced by source and scene, so it cannot collide with
@@ -741,7 +815,15 @@ class AgentExecutor:
             self._visual.model_name,
             image.scene_id,
         )
-        return item, ("ok", None, None)
+        return (
+            item,
+            ("ok", None, None),
+            AgentVisual(
+                status="observed",
+                message=f"Described by an AI visual model ({self._visual.model_name}).",
+                **where,
+            ),
+        )
 
     # -- evidence --------------------------------------------------------- #
 

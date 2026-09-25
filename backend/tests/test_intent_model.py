@@ -484,10 +484,14 @@ def test_the_model_cannot_override_a_safety_guard() -> None:
     """Visual questions, unsupported requests and sensor contradictions are the
     rules' - a confident label cannot run past them."""
 
-    assert asked(
+    # Updated deliberately: a visual question now runs - and a confident label
+    # still cannot add a measurement to it. The rules decide: the image only.
+    chosen, _, decision = route_operation(
         "Is there visible water at Marina Beach, Chennai in January 2025?",
         FakeClassifier("NDWI"),
-    ) == "requires_ai_model"
+    )
+    assert chosen == ["imagery"]
+    assert (decision.source, decision.reason) == ("rules", "visual_question")
     assert asked(
         "Count ships and show NDVI near Chennai port in 2024", FakeClassifier("NDVI")
     ) == "analysis_unsupported"

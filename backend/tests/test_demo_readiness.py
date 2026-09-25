@@ -216,7 +216,9 @@ def test_a_missing_date_names_what_it_is_for() -> None:
         "Compare water around Pune", "Find water around this reservoir",
         "Chennai NDVI Pune January 2025", "water Forest Hill January 2025",
         "Count ships in Chennai harbor", "Show change", "Show vegetation around Chennai in May",
-        "Is there visible water at Marina Beach, Chennai in January 2025?",
+        # Updated deliberately: a visual question with its date now runs; one
+        # still missing its date is asked back, without a placeholder.
+        "Is there visible water at Marina Beach, Chennai?",
     ],
 )
 def test_no_clarification_shows_a_placeholder_or_an_internal_name(question: str) -> None:
@@ -272,9 +274,13 @@ def test_a_real_deictic_is_still_a_deictic() -> None:
 
 
 def test_a_visual_phrase_ends_the_place() -> None:
-    clarification = ask("Tell me what the image of Pune looks like in January 2025")
-    assert clarification.reason == "requires_ai_model"
-    assert clarification.understood_location == "Pune"
+    # Updated deliberately: the visual question now runs; the place still ends
+    # where the visual phrase begins.
+    interpretation = interpret(
+        "Tell me what the image of Pune looks like in January 2025", today=TODAY
+    )
+    assert interpretation.location_query == "Pune"
+    assert interpretation.visual_question is not None
 
 
 @pytest.mark.parametrize(

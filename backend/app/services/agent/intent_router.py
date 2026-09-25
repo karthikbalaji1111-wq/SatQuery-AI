@@ -89,6 +89,7 @@ DecisionReason = Literal[
     "model_unsupported",
     "model_clarification",
     "disagreement",
+    "visual_question",
 ]
 
 
@@ -173,6 +174,11 @@ def decide_operation(
     label = prediction.label
     rules = reading.measured
     rules_imagery = "imagery" in reading.analyses
+
+    if reading.visual and reading.unsupported is None and not reading.asks_to_measure:
+        # Asked to LOOK, not to measure. A label cannot add a measurement
+        # nobody asked for; the rules decide, and they retrieve the image.
+        return OperationDecision("rules", "visual_question", prediction)
 
     if label == "UNSUPPORTED":
         if rules and reading.unsupported is None:

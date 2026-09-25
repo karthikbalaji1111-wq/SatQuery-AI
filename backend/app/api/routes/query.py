@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from app.core.errors import AppError
 from app.core.limits import rate_limited, workflow_slot
 from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
@@ -11,6 +12,7 @@ from app.services.agent.intent_model import load_intent_classifier
 from app.services.agent.providers.factory import (
     get_agent_providers,
     get_intent_parser,
+    get_visual_analyst,
 )
 from app.services.agent.schemas import AgentQuestionRequest, AgentResult
 from app.services.agent.service import AgentService
@@ -20,6 +22,7 @@ from app.services.agent.standard import (
     StandardPlanner,
     StandardReport,
 )
+from app.services.agent.visual import VisualAnalyst
 from app.services.ai import AiService, ParsePromptRequest
 from app.services.analysis import AnalysisRequest, AnalysisResult, AnalysisService
 from app.services.query import (
@@ -107,14 +110,31 @@ def build_agent_service(
     )
 
 
+def configured_visual_analyst() -> VisualAnalyst | None:
+    """The deployment's own visual analyst, or ``None`` when there is none.
+
+    Describing a picture is the one step no fixed rule can do. A question that
+    ASKS what an image shows uses the model this deployment is configured
+    with - and only that step, only for that question. With no provider
+    configured the answer is ``None``: the image is still retrieved and the
+    result says plainly that no model could describe it. Never a fallback to
+    another provider, never a failure of the standard workflow.
+    """
+
+    try:
+        return get_visual_analyst()
+    except AppError:
+        return None
+
+
 def build_standard_agent_service() -> AgentService:
     """The provider-independent workflow: no model, no credential.
 
     The planner and the report are deterministic; the executor is the SAME
     executor, over the same deterministic services, that every AI provider
-    uses. There is no visual analyst, because describing a picture is the one
-    step that needs a model - the standard planner asks for clarification
-    rather than proposing it.
+    uses. Interpretation, measurement and every sentence stay model-free. The
+    only model a standard run can reach is the deployment's configured visual
+    analyst, and only for a question that asks what the image shows.
     """
 
     return AgentService(
@@ -123,6 +143,7 @@ def build_standard_agent_service() -> AgentService:
         executor=AgentExecutor(
             query_execution_service=QueryExecutionService(),
             analysis_service=AnalysisService(),
+            visual_analyst=configured_visual_analyst(),
         ),
         synthesizer=StandardReport(),
     )

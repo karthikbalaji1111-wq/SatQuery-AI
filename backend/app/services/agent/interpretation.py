@@ -53,6 +53,7 @@ from app.services.agent.schemas import (
     AgentPlan,
     ClarificationReason,
     ExecuteQueryParams,
+    RsModelParams,
     SarBackscatterParams,
     SpectralIndicesParams,
     TemporalNdwiParams,
@@ -207,8 +208,23 @@ _DETECTION_MESSAGE = (
 #: Asking what an image SHOWS needs a model that can look at it.
 _VISUAL = _terms(
     r"visible|visibly|visually|looks?\s+like|can\s+(?:you\s+)?see|can\s+be\s+seen|"
-    r"describe|description|appear(?:s|ance)?"
+    r"describe|description|appear(?:s|ance)?|"
+    r"(?:do|does|could|would)\s+you\s+see|"
+    r"(?:image|picture|photo|photograph|scene)\s+(?:shows?|contains?)|"
+    r"what(?:'s|\s+is)\s+(?:happening|going\s+on)"
 )
+
+#: Words that ask for a NUMBER. A visual question is a request to look; the
+#: measurement it mentions ("is there visible water?") is what to look FOR,
+#: and becomes a measurement only when the question asks to measure it.
+_MEASURE_REQUEST = _terms(
+    r"ndvi|ndwi|ndbi|sar|indexe?s?|indices|measur\w*|calculat\w*|comput\w*|"
+    r"values?|backscatter"
+)
+
+#: The longest question a model may be asked (``RsModelParams.question``).
+_VISUAL_QUESTION_LIMIT = 500
+_GENERAL_VISUAL_QUESTION = "Describe what is visible in this satellite image."
 
 #: A sensor named as the SOURCE of an analysis ("vegetation using radar"). Only
 #: meaningful when it contradicts the analysis asked for.
@@ -806,6 +822,9 @@ class QueryInterpretation:
     windows: tuple[TimeRange, ...]
     comparison: bool
     sar_polarization: Literal["vv", "vh"] = "vv"
+    #: The question to ask about the image, when the question asks what it
+    #: shows. The executor removes the place's name before a model sees it.
+    visual_question: str | None = None
 
     @property
     def modalities(self) -> list[Literal["sentinel-2-optical", "sentinel-1-sar"]]:
@@ -856,6 +875,8 @@ class QueryInterpretation:
             steps.append(SarBackscatterParams())
         if "temporal_ndwi" in self.analyses:
             steps.append(TemporalNdwiParams())
+        if self.visual_question is not None:
+            steps.append(RsModelParams(question=self.visual_question))
         return AgentPlan(steps=steps)
 
 
@@ -1003,6 +1024,9 @@ class QuestionReading:
     #: The refusal message for a recognised unsupported request, if any.
     unsupported: str | None
     visual: bool
+    #: Whether the question asks for a NUMBER ("measure", "index", "NDWI"...).
+    #: A visual question keeps a measurement only when this is true.
+    asks_to_measure: bool
     polarization: Literal["vv", "vh"]
     #: The question with its place and dates replaced by ``PLACE`` / ``DATE``:
     #: what a classifier of the OPERATION should see, so a place name cannot
@@ -1094,6 +1118,7 @@ def read_question(question: str) -> QuestionReading:
         comparison=_requested(reading, _COMPARISON),
         unsupported=unsupported,
         visual=_requested(reading, _VISUAL),
+        asks_to_measure=_MEASURE_REQUEST.search(text) is not None,
         polarization=(
             "vh" if _requested(reading, _VH_ONLY) and not _requested(reading, _VV) else "vv"
         ),
@@ -1157,16 +1182,31 @@ def resolve_operation(
         )
 
     if reading.visual:
-        raise _clarify(
-            "requires_ai_model",
-            "Describing what is visible in an image needs an AI model. Select one "
-            "in the AI menu, or ask for a measurement instead - for example the "
-            "water index (NDWI) or the vegetation index (NDVI) of a place in a "
-            "month.",
-            options=SUPPORTED_OPTIONS,
-            analyses=measured,
-            location=place.text,
-        )
+        # Asked to LOOK at one image. The normal-colour image is retrieved and
+        # described; a measurement joins it only when the question asks for a
+        # number too.
+        if comparison:
+            raise _clarify(
+                "analysis_unsupported",
+                "A description is given for one satellite image at a time. Ask "
+                "what one month's image shows, or ask for the water change on "
+                "its own.",
+                options=SUPPORTED_OPTIONS,
+                analyses=measured,
+                location=place.text,
+            )
+        explicit = measured if reading.asks_to_measure else []
+        if "sar_backscatter" in explicit:
+            raise _clarify(
+                "analysis_unsupported",
+                "Descriptions are given for the normal-colour satellite image, "
+                "not the radar image. Ask what the image shows, or ask for the "
+                "radar measurement on its own.",
+                options=SUPPORTED_OPTIONS,
+                analyses=explicit,
+                location=place.text,
+            )
+        return (explicit or ["imagery"]), False
 
     # -- sensor contradictions --------------------------------------------------
     optical_asked = [key for key in measured if key in _OPTICAL_INDICES]
@@ -1319,6 +1359,15 @@ def resolve(
         windows=tuple(periods),
         comparison=comparison,
         sar_polarization=reading.polarization,
+        visual_question=(
+            (
+                reading.original
+                if len(reading.original) <= _VISUAL_QUESTION_LIMIT
+                else _GENERAL_VISUAL_QUESTION
+            )
+            if reading.visual
+            else None
+        ),
     )
 
 
