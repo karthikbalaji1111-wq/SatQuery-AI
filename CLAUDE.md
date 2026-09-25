@@ -2746,14 +2746,33 @@ VV-VH 12.41 dB, "VV backscatter was stronger than VH on average".
 **Known limitations.** The interpretation says what the sign of an index
 means and nothing about magnitude: without a defensible threshold in the
 product, +0.52 and +0.02 are both "positive". A tiny sample (e.g. 4 pixels at
-a point-sized geocoder match) is stated as a count, not qualified. English
-only. The manual configuration path is not interpreted; the evidence export
+a point-sized geocoder match) is now noted as a small sample (see below), by a
+presentation rule, not a statistical one. English only. The manual configuration path is not interpreted; the evidence export
 does not include the interpretation.
+
+### Small-sample note (`9272988`)
+
+The backend has no minimum sample beyond the exact degenerate case
+(`_sample_warnings`, at most one pixel), and section 14.1 deliberately did not
+invent a stronger scientific threshold. `SMALL_SAMPLE_PIXELS = 100` in
+`interpretation.ts` is therefore a PRESENTATION safeguard only: below it, "What
+this means" adds "Small sample: only N valid pixels contributed to this result,
+so interpret it cautiously." with the returned count (100 pixels of the 10 m
+grid is about one hectare). It changes no number, marks nothing invalid,
+claims no confidence or significance, and a missing count gives no warning.
+Each temporal observation is checked on its own, and the paired-pixel change as
+a third sample. 13 tests (boundary 99/100/1, no count, multi-index naming,
+SAR, temporal per observation and paired, withheld difference, no invalidity
+or significance vocabulary, rendering under the headline and outside the card);
+5 mutations caught. Production: Lalbagh, Bengaluru (railway-stop match) and
+"Marina Beach Chennai" (beach node) each measured over 4 pixels and show the
+note; Cubbon Park (16,988) and the Marina Beach comparison (33,420 paired) do
+not; console 0 / 0.
 
 ### Baseline - VERIFIED
 
 | Check | Result |
 | --- | --- |
-| `npm run test` | **502 passed** (447 before) |
+| `npm run test` | **515 passed** (447 before this section) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
 | `pytest -q` / `ruff` / `git diff --check` | 3067 passed (unchanged) / clean / clean |
