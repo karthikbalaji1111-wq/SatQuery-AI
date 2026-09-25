@@ -3667,3 +3667,25 @@ a:focus-visible {
 .pipeline-strip:has(.run-stages) .stage-idle {
   display: none;
 }
+
+/* Phone width (found live at 390 px). The stage list was allowed to shrink
+   below its unbreakable lines, so "20 found · 2 selected" ran over the status
+   pill beside it: it now takes its own row and its lines may wrap. The map's
+   overlay note sat in the same bottom-left corner as the layer toggles and
+   covered them; it now spans the frame (fewer lines of map hidden) and sits
+   above the toggles. */
+@media (max-width: 640px) {
+  .run-stages,
+  .run-running {
+    flex-basis: 100%;
+  }
+
+  .run-stages li {
+    white-space: normal;
+  }
+
+  .map-panel > .hint {
+    bottom: 60px;
+    max-width: calc(100% - 24px);
+  }
+}

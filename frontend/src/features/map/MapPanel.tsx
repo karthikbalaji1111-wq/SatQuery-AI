@@ -142,6 +142,22 @@ const DEFAULT_BASEMAP_TILES =
   import.meta.env.VITE_BASEMAP_TILE_URL ??
   "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
+/**
+ * The deepest zoom the tile server publishes. OpenStreetMap's standard tiles
+ * stop at 19; asking for z20 returns an error page without CORS headers, so
+ * every such tile failed and the console filled with "blocked by CORS" - seen
+ * live when a landmark geocoded to a near-point box and the camera zoomed to
+ * z20. Declared on the source, MapLibre stretches z19 tiles instead.
+ */
+export const BASEMAP_MAX_ZOOM = 19;
+
+/**
+ * The closest the analysis view will frame a result. A landmark can resolve
+ * to a box a few metres wide; framing it at street level hides where it is.
+ * Below the basemap limit, so a fitted view is always drawn from real tiles.
+ */
+export const MAX_FIT_ZOOM = 17;
+
 const DEFAULT_BASEMAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>';
 
@@ -175,6 +191,7 @@ const createMapLibreMap: MapFactory = ({ container }) => {
           type: "raster",
           tiles: [DEFAULT_BASEMAP_TILES],
           tileSize: 256,
+          maxzoom: BASEMAP_MAX_ZOOM,
           attribution: DEFAULT_BASEMAP_ATTRIBUTION,
         },
       },
@@ -388,7 +405,11 @@ export function MapPanel({
         { padding: 26, duration: 0, maxZoom: 12.5 },
       );
     } else if (frameTo) {
-      map.fitBounds(footprintExtent(frameTo), { padding: 24, duration: 0 });
+      map.fitBounds(footprintExtent(frameTo), {
+        padding: 24,
+        duration: 0,
+        maxZoom: MAX_FIT_ZOOM,
+      });
     } else if (aoi) {
       // No raster, but the run resolved an area - frame it, so the viewport
       // shows the region the measurements describe.
@@ -397,7 +418,7 @@ export function MapPanel({
           [aoi.west, aoi.south],
           [aoi.east, aoi.north],
         ],
-        { padding: 96, duration: 0 },
+        { padding: 96, duration: 0, maxZoom: MAX_FIT_ZOOM },
       );
     }
   }, [aoi, imagery, ndwi, change, locator, ready]);

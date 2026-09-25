@@ -101,6 +101,11 @@ describe("resultContext and formatPeriod", () => {
   it("names the place and the requested period as planned", () => {
     expect(resultContext(NDVI_CUBBON)).toEqual({
       location: "Cubbon Park, Bengaluru",
+      matched: {
+        name: "Cubbon Park, Sampangirama Nagar",
+        full: "Cubbon Park, Sampangirama Nagar, Bengaluru Central City Corporation, Bengaluru, Karnataka, India",
+        kind: "leisure · park",
+      },
       periods: ["December 2024"],
       sceneCount: 7,
     });

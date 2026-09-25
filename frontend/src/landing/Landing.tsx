@@ -76,12 +76,17 @@ const PIPELINE = [
   { step: "Location + time", detail: "Geocoded to an area of interest and a date window." },
   { step: "Satellite data", detail: "Scenes discovered in the Sentinel catalog, selected deterministically." },
   { step: "Deterministic analysis", detail: "Spectral indices computed from the raster itself." },
-  { step: "Visual observation", detail: "A vision-language model describes what is visible." },
+  // Optional: the workspace runs this only when an AI model is selected - the
+  // standard workflow measures and never calls one. "Every time" must not
+  // include a step that does not run every time.
+  { step: "Visual observation", detail: "Optional: with an AI model selected, a vision-language model describes what is visible." },
   { step: "Grounded answer", detail: "Checked against the evidence before you see it." },
 ];
 
 const QUESTIONS = [
-  { ask: "Is there visible water here?", answers: "NDWI", note: "water-like response" },
+  // Phrased as the workspace answers it: "visible" asks for a vision model,
+  // which the standard workflow does not run.
+  { ask: "How much surface water is there?", answers: "NDWI", note: "water-like response" },
   { ask: "What is the vegetation condition?", answers: "NDVI", note: "vegetation-like response" },
   { ask: "Analyse the built-up area.", answers: "NDBI", note: "built-up / bare response" },
   { ask: "How has water changed over time?", answers: "Temporal NDWI", note: "earlier vs later" },

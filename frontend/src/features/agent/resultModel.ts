@@ -20,6 +20,7 @@
 import type {
   AgentResult,
   AnalysisResult,
+  Measurement,
   ClarificationReason,
   GridState,
   RadiometricState,
@@ -165,13 +166,38 @@ export function acquisitionDate(iso: string | null | undefined): string | null {
   return /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : iso;
 }
 
+export interface GeocoderMatch {
+  /** The geocoder's own name for what it matched, first parts only. */
+  name: string;
+  /** The full name, verbatim, for the evidence and a tooltip. */
+  full: string;
+  /** Its own classification, e.g. "railway · stop" - recorded, not judged. */
+  kind: string | null;
+}
+
 export interface ResultContext {
-  /** The place as the question named it and the geocoder resolved it. */
+  /** The place as the question named it. */
   location: string | null;
+  /** What the geocoder actually matched for it, when the server said. */
+  matched: GeocoderMatch | null;
   /** The requested period(s), as planned. */
   periods: string[];
   /** Scenes the catalog returned for the (first) searched window. */
   sceneCount: number | null;
+}
+
+export function matchFrom(
+  name: string | null | undefined,
+  placeClass: string | null | undefined,
+  placeType: string | null | undefined,
+): GeocoderMatch | null {
+  if (!name) return null;
+  const parts = name.split(",").map((part) => part.trim()).filter(Boolean);
+  const kind = [placeClass, placeType]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => part.replace(/_/g, " "))
+    .join(" · ");
+  return { name: parts.slice(0, 2).join(", ") || name, full: name, kind: kind || null };
 }
 
 function intentOf(result: AgentResult): SatQueryIntent | null {
@@ -194,8 +220,10 @@ export function resultContext(result: AgentResult): ResultContext {
     shownWindow(result.evidence.execution) ??
     result.evidence.execution?.windows[0] ??
     null;
+  const plan = result.evidence.execution?.plan ?? null;
   return {
     location: intent?.location_query ?? null,
+    matched: matchFrom(plan?.matched_name, plan?.matched_class, plan?.matched_type),
     periods,
     sceneCount: window ? window.scene_count : null,
   };
@@ -563,4 +591,25 @@ export function runStages(result: AgentResult): RunStage[] {
     });
   }
   return stages;
+}
+
+// --------------------------------------------------------------------------- //
+// Threshold shares
+// --------------------------------------------------------------------------- //
+
+/**
+ * A threshold share, labelled as what it is: a count of pixels whose INDEX
+ * exceeds a stated value - never "water" or any class. The value is read from
+ * the measurement's own name (`ndwi_percent_above_index_threshold_0.3`); a bare
+ * "above threshold" left the reader to guess both the threshold and what it
+ * was a threshold on.
+ */
+export function thresholdNote(measurement: Measurement): string {
+  const share = `${measurement.value.toFixed(1)}%`;
+  const parsed = /^([a-z]+)_percent_above_index_threshold_(-?\d+(?:\.\d+)?)$/i.exec(
+    measurement.name,
+  );
+  return parsed
+    ? `${share} of valid pixels with ${parsed[1].toUpperCase()} > ${parsed[2]}`
+    : `${share} of valid pixels above the index threshold`;
 }

@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentResult } from "../../api/types";
 import { AgentAnswerPanel, AgentEvidencePanel, AgentPanel } from "./AgentPanel";
+import { thresholdNote } from "./resultModel";
 import { useAgentRun } from "./agentRun";
 import {
   AREA_TOO_LARGE_CHENNAI,
@@ -18,6 +19,7 @@ import {
   LOCATION_UNAVAILABLE,
   NDBI_AMEERPET,
   NDVI_CUBBON,
+  NDVI_LALBAGH_STOP,
   NDWI_MARINA,
   NO_SCENES,
   NOT_FOUND,
@@ -102,6 +104,7 @@ describe("M6 result card", () => {
     );
     expect(context(panel)).toEqual({
       Location: "Cubbon Park, Bengaluru",
+      Matched: "Cubbon Park, Sampangirama Nagar (leisure · park)",
       Period: "December 2024",
       Scene: "2024-12-08 · Sentinel-2B",
       "Scenes matched": "7",
@@ -459,5 +462,83 @@ describe("M6 query flow", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(answerPanel().querySelector(".result-value")).toBeNull();
     expect(answerPanel()).not.toHaveTextContent("+0.5204");
+  });
+});
+
+// =========================================================================== //
+// Final demo audit: a threshold share names its threshold and its index
+// =========================================================================== //
+
+describe("audit: threshold shares are labelled as index thresholds", () => {
+  it("states the index and the value from the measurement's own name", () => {
+    expect(
+      thresholdNote({ name: "ndwi_percent_above_index_threshold_0.3", value: 14.118, unit: "%" }),
+    ).toBe("14.1% of valid pixels with NDWI > 0.3");
+    expect(
+      thresholdNote({ name: "ndwi_percent_above_index_threshold_-0.05", value: 50, unit: "%" }),
+    ).toBe("50.0% of valid pixels with NDWI > -0.05");
+  });
+
+  it("never falls back to a bare 'above threshold' or a class name", () => {
+    const note = thresholdNote({ name: "ndwi_share_something", value: 3.2, unit: "%" });
+    expect(note).toBe("3.2% of valid pixels above the index threshold");
+    expect(note).not.toMatch(/water|flood|built|vegetation/i);
+  });
+
+  it("renders it in the evidence readout", () => {
+    const evidence = {
+      ...NDWI_MARINA.evidence,
+      items: [
+        ...NDWI_MARINA.evidence.items,
+        {
+          id: "ndwi.ndwi_percent_above_index_threshold_0.3",
+          source: "ndwi",
+          measurement: { name: "ndwi_percent_above_index_threshold_0.3", value: 45.49, unit: "%" },
+          text: null,
+          produced_by: "analysis",
+          visual: null,
+        },
+      ],
+    } as unknown as typeof NDWI_MARINA.evidence;
+    render(<AgentEvidencePanel evidence={evidence} />);
+    expect(screen.getByText("45.5% of valid pixels with NDWI > 0.3")).toBeInTheDocument();
+    expect(screen.queryByText(/above\s+threshold/)).toBeNull();
+  });
+});
+
+// =========================================================================== //
+// Final demo audit: the result names what the geocoder actually matched
+// =========================================================================== //
+
+describe("audit: the geocoder's match is shown beside the typed place", () => {
+  it("a place that matched a point of interest says so - no silent substitution", () => {
+    // Live: "Lalbagh, Bengaluru" matched a railway stop; the NDVI covered 4
+    // pixels around it. Both facts are now on screen next to the number.
+    render(<AgentAnswerPanel result={NDVI_LALBAGH_STOP} />);
+    const panel = answerPanel();
+    expect(context(panel)).toMatchObject({
+      Location: "Lalbagh, Bengaluru",
+      Matched: "Lalbagh, Rashtriya Vidyalaya Road (railway · stop)",
+    });
+    expect(panel.querySelector(".result-sub")).toHaveTextContent("Mean over 4 valid pixels");
+    const matched = [...panel.querySelectorAll(".result-context dd")].find((dd) =>
+      dd.textContent?.startsWith("Lalbagh, Rashtriya"),
+    );
+    expect(matched).toHaveAttribute("title", expect.stringContaining("Kankanpalya, Ashoka Pillar"));
+  });
+
+  it("the evidence records the full match verbatim", () => {
+    render(<AgentEvidencePanel evidence={NDVI_LALBAGH_STOP.evidence} />);
+    const panel = screen
+      .getByRole("heading", { name: "Deterministic evidence" })
+      .closest("section") as HTMLElement;
+    expect(within(panel).getByText("Geocoder match").nextSibling).toHaveTextContent(
+      "Lalbagh, Rashtriya Vidyalaya Road, Kankanpalya, Ashoka Pillar, Bengaluru, Karnataka, India · railway · stop",
+    );
+  });
+
+  it("an older server without the match shows the typed place only - nothing invented", () => {
+    render(<AgentAnswerPanel result={NDWI_MARINA} />);
+    expect(context(answerPanel())).not.toHaveProperty("Matched");
   });
 });

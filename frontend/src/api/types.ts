@@ -218,6 +218,15 @@ export interface SatQueryIntent {
 export interface ResolvedQueryPlan {
   intent: SatQueryIntent;
   bbox: BoundingBox;
+  /**
+   * What the geocoder matched for `intent.location_query`, verbatim. The typed
+   * name and the measured feature can differ ("Lalbagh, Bengaluru" matched a
+   * railway stop), so this is what a reader needs to see. Optional for older
+   * servers; absent for a bbox given directly.
+   */
+  matched_name?: string | null;
+  matched_class?: string | null;
+  matched_type?: string | null;
 }
 
 export interface SkippedModality {

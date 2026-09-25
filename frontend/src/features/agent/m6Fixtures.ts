@@ -86,7 +86,7 @@ function singleIndex(opts: {
   key: "ndvi" | "ndwi" | "ndbi"; place: string; start: string; end: string; sceneId: string;
   acquired: string; platform: string; cloud: number; count: number; mean: number; min: number;
   max: number; valid: number; total: number; crs: string; width: number; height: number;
-  answer: string;
+  answer: string; matched?: { name: string; class: string; type: string };
 }): AgentResult {
   const intent = { location_query: opts.place, time_windows: [{ start_date: opts.start, end_date: opts.end }], modalities: ["sentinel-2-optical"], task: "visualize", temporal_mode: "single" };
   const p = plan(intent, { tool: "spectral_indices", indices: [opts.key] });
@@ -107,7 +107,12 @@ function singleIndex(opts: {
         item(`${k}.${k}_quality_total_pixel_count`, k, `${k}_quality_total_pixel_count`, opts.total, "pixels"),
       ],
       execution: {
-        plan: { intent, bbox: { west: 77.5879274, south: 12.9679621, east: 77.5989019, north: 12.9803864 } },
+        plan: {
+          intent, bbox: { west: 77.5879274, south: 12.9679621, east: 77.5989019, north: 12.9803864 },
+          ...(opts.matched
+            ? { matched_name: opts.matched.name, matched_class: opts.matched.class, matched_type: opts.matched.type }
+            : {}),
+        },
         executed_modalities: ["sentinel-2-optical"], skipped_modalities: [],
         windows: [window("single", opts.start, opts.end, opts.count, scene(opts.sceneId, opts.acquired, opts.platform, opts.cloud))],
         catalog: EARTH_SEARCH, catalogs: [EARTH_SEARCH], status: "completed", observations: null,
@@ -130,6 +135,26 @@ export const NDVI_CUBBON = singleIndex({
   cloud: 12.7, count: 7, mean: 0.5204459203473597, min: -0.08767303889255108, max: 0.8779860345461228,
   valid: 16988, total: 17080, crs: "EPSG:32643", width: 122, height: 140,
   answer: "The mean NDVI was 0.5204 index. Scene S2B_43PGQ_20241208_0_L2A was selected. The scene was acquired on 2024-12-08.",
+  // Nominatim's own match for "Cubbon Park, Bengaluru" (live, 2026-09-24).
+  matched: {
+    name: "Cubbon Park, Sampangirama Nagar, Bengaluru Central City Corporation, Bengaluru, Karnataka, India",
+    class: "leisure",
+    type: "park",
+  },
+});
+
+/** "Lalbagh, Bengaluru" - live: Nominatim matched a railway STOP node, not the garden. */
+export const NDVI_LALBAGH_STOP = singleIndex({
+  key: "ndvi", place: "Lalbagh, Bengaluru", start: "2024-12-01", end: "2024-12-31",
+  sceneId: "S2B_43PGQ_20241208_0_L2A", acquired: "2024-12-08T05:25:20.000000Z", platform: "sentinel-2b",
+  cloud: 12.7, count: 7, mean: 0.3727682271082574, min: 0.34341397849462363, max: 0.41478129713423834,
+  valid: 4, total: 4, crs: "EPSG:32643", width: 2, height: 2,
+  answer: "The mean NDVI was 0.3728 index. Scene S2B_43PGQ_20241208_0_L2A was selected. The scene was acquired on 2024-12-08.",
+  matched: {
+    name: "Lalbagh, Rashtriya Vidyalaya Road, Kankanpalya, Ashoka Pillar, Bengaluru, Karnataka, India",
+    class: "railway",
+    type: "stop",
+  },
 });
 
 /** "Show water around Marina Beach, Chennai in January 2025" - live. */
