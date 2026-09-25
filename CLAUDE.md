@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 29 (M6 product completion). Section 23 (the scientific core,
+current figures are in section 30 (final demo audit). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, and section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider.
@@ -2562,3 +2562,104 @@ CORS error; no duplicate agent request.
 | `npm run test` | **440 passed** (379 before M6) |
 | `npm run typecheck` / `lint` / `build` | clean / clean / builds |
 | `pytest -q` / `ruff` / `git diff --check` | 3062 passed / clean / clean |
+
+---
+
+## 30. Final demo / robustness audit - IMPLEMENTED (2026-09-25)
+
+No scientific change: M0-M5 formulas, SCL classes, radiometric and geometric
+rules, the area limit, scene selection, intent model v2 and its thresholds are
+untouched. No new service, geocoder, model or dependency.
+
+**Matrix (48 real queries, production UI unless noted; standard workflow, no
+AI key):** 20 measured (Juhu Beach NDWI +0.1525, Dal Lake NDWI +0.0317 without
+a lead word, Bandra NDBI, a misspelled "vegitation ... Bangalore ... Dec 2024"
+NDVI +0.5204, Ameerpet NDBI -0.0248 with brackets and "!", Dal Lake SAR VV
+-5.10 / VH -14.44 dB, Koramangala "concrete" NDBI via the intent model, Dal Lake
+temporal +0.0403 -> +0.0317, repeats); 8 clarifications (six "no date" phrasings
+- "NDVI Mumbai", "water in Dal Lake", "analyze SAR near Delhi" ... - a future
+month, an unknown place); 19 refusals, each scientifically valid (area too
+large: Mumbai, Sanjay Gandhi NP, Thanjavur, Springfield, India, Karnataka,
+Nandi Hills; unsupported: floods, ships, temperature; analysis not computed:
+India Gate, Hampi and Cubbon Park January 2025 by M4, Cubbon Park 2 January
+2025 by M3 - all 17,080 pixels cloud; a >4000-character question -> 422); 1
+run aborted by design (race test). 0 dependency failures observed.
+
+### Bugs found and fixed
+
+1. **Point-sized AOIs zoomed past the basemap** (production console: 201 of
+   201 errors). A geocoded node (India Gate's 28 x 21 m way, "Marina Beach
+   Chennai" without a comma -> an 11 m beach node) made `fitBounds` reach z20;
+   OSM serves to z19 and its error page carries no CORS header, so the basemap
+   went blank. `MapPanel`: source `maxzoom: 19` (`BASEMAP_MAX_ZOOM`) and
+   `fitBounds` `maxZoom: 17` (`MAX_FIT_ZOOM`); a 256 px raster source loads
+   tiles one level above the map zoom, so z18 at most. Test + mutation.
+2. **The geocoder's actual match was invisible.** "Chennai Pune" measured a
+   restaurant called "Chennai Express" in Pune; "Lalbagh, Bengaluru" a railway
+   stop; "SAR Marina Beach Chennai" an 11 m beach node. No threshold was
+   invented and nothing is refused on class (that would break real places):
+   `ResolvedQueryPlan` gains `matched_name` / `matched_class` / `matched_type`
+   (descriptive only, from the existing `ResolvedLocation`), shown as a
+   "Matched" row ("Lalbagh, Rashtriya Vidyalaya Road (railway · stop)") and a
+   "Geocoder match" evidence field. Four key-set pins updated deliberately.
+3. **An unavailable analysis gave a passed check as its reason.** The outcome
+   reason was the step's FIRST warning - the record of a radiometric check that
+   passed. Cubbon Park 2 January 2025 said "Why: NDVI radiometric state:
+   verified_with_unknown_metadata ..." when every pixel was cloud; with NDVI +
+   NDBI, NDBI's reason was NDVI's record; and the `include_ndwi` path reported a
+   fully masked grid as `completed` with no NDWI mean. `_outcome` now takes an
+   explicit reason: each index path records the warning that explains ITS
+   absence (only indices needing a failed band are blamed for it), a masked
+   grid gives its pixel-quality note, SAR and temporal give the warning said on
+   giving up, and NDWI is produced only with `ndwi_mean`. 4 tests; 4 mutations
+   caught (one only after adding the cloud + SWIR-failure case).
+4. **Threshold label**: "X% above threshold" -> "X% of valid pixels with NDWI
+   > 0.3", parsed from the measurement's own name (`thresholdNote`).
+5. **Landing copy**: "One path, every time" listed a vision-language step the
+   standard workflow never runs (now "Optional: with an AI model selected");
+   its first example asked "Is there visible water here?", which the standard
+   workflow refuses (now "How much surface water is there?"). A refusal notice
+   adds that each period selects its own scene.
+6. **390 px layout**: stage lines were `nowrap` in a list allowed to shrink to
+   0, so "20 found · 2 selected" ran over the status pill; the map's overlay
+   note and the phone-width layer toggles shared the bottom-left corner and the
+   note covered the toggles. `@media (max-width: 640px)`: the stage list takes
+   its own row and may wrap; the note spans the frame above the toggles.
+   Verified by bounding-box measurement in a real browser (jsdom has no
+   layout): no stage overlaps the tail, no toggle overlaps the note.
+
+### Verified correct, unchanged
+
+- **Race**: while a run is in flight the question box, Run, Clear and every
+  chip are disabled - B cannot start (production: 1 request). The manual
+  panel's Resolve during an agent run ABORTED the agent request
+  (`AbortError`); 45 s later nothing from it had painted. A 422 after a
+  success cleared the old result and showed one alert; no hybrid state.
+- **One request per submission**: every query sent exactly one
+  `/query/agent` (fetch wrapper; the resource-timing buffer caps at 250).
+- **Responsive**: no horizontal scroll at 1440, 1280, 1024, 820 or 390 px.
+- **Honesty sweep** of the source and the rendered UI: no fabricated imagery,
+  measurement, coordinate, scene or progress; the temporal card and evidence
+  name Earlier / Later; "no cause is inferred" beside every change.
+
+### Known limitations (unchanged by this audit)
+
+- A point-sized geocoder match is measured over its own tiny box; the Matched
+  row makes it visible, it does not prevent it. Qualify a landmark with its
+  city and a comma ("Marina Beach, Chennai" resolves the 3 km way).
+- Scene selection ignores radiometric usability and cloud over the AOI, so a
+  month can select a scene the index then refuses (M3/M4), stated with the
+  reason.
+- Whole cities, districts and states are refused as too large; sub-areas are
+  not suggested.
+- The manual config panel stays enabled during an agent run (starting it
+  supersedes the run - by design, verified above).
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3067 passed** (3062 before) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **447 passed** (440 at M6) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
