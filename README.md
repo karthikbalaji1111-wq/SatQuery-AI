@@ -451,7 +451,7 @@ workers and replicas multiply them.
 
 What the system will and will not measure is stated in
 [`SUPPORTED_DATA.md`](SUPPORTED_DATA.md): supported, conditionally supported
-(with the condition), and unsupported (with the reason).
+(with the condition), and unsupported (with the reason)..
 
 ---
 
