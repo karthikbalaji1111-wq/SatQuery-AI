@@ -39,7 +39,7 @@ This distinction is enforced in code, not by convention:
 
 ---
 
-## Architecture
+## Architecture:
 
 ```
 Natural-language question
