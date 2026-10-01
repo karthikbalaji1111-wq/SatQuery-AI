@@ -584,3 +584,6 @@ frontend/
 `CLAUDE.md` holds the authoritative phase-by-phase record, including the
 boundaries each phase deliberately did not cross and the architectural traps
 that were verified against live data.
+
+The user just types in a simple text query and rest of the work is done by SatqueryAI
+
