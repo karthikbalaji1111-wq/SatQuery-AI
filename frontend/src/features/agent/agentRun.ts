@@ -1,7 +1,7 @@
 import { type FormEvent, useRef, useState } from "react";
 
 import { askAgent } from "../../api/agent";
-import { ApiError } from "../../api/client";
+import { ApiError, describeApiError } from "../../api/client";
 import type {
   AgentResult,
   ImageryResponse,
@@ -31,7 +31,7 @@ export type AskState =
   | { status: "done"; result: AgentResult; elapsedMs: number };
 
 function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
+  if (error instanceof ApiError) return describeApiError(error);
   return error instanceof Error ? error.message : "Unexpected error";
 }
 

@@ -72,7 +72,10 @@ def workflow(name: str, **fields: object) -> Iterator[str]:
     on purpose: it is read off a terminal and typed into a search, not parsed.
     """
 
-    run_id = uuid.uuid4().hex[:12]
+    # Inside a request the id is the request's own (``X-Request-ID``), so the
+    # id a user quotes from a response finds this workflow's lines too.
+    inherited = RUN_ID.get()
+    run_id = inherited if inherited != "-" else uuid.uuid4().hex[:12]
     token = RUN_ID.set(run_id)
     started = time.perf_counter()
     outcome = "ok"
