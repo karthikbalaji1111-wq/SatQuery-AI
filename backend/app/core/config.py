@@ -8,10 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     app_name: str = "SatQuery API"
     environment: str = "development"
     log_level: str = "INFO"
+    #: ``text`` for a terminal, ``json`` for a log platform: one JSON object
+    #: per line with ts, level, logger, run_id and message.
+    log_format: Literal["text", "json"] = "text"
+    #: Bearer token for ``GET /metrics``. Unset (the default), the route
+    #: answers 404 and no metric is published.
+    metrics_token: SecretStr | None = None
     api_v1_prefix: str = "/api/v1"
 
     #: ``NoDecode`` because pydantic-settings JSON-decodes a complex field
