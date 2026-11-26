@@ -366,8 +366,28 @@ def system_outcome_full(text: str, label: str, classifier) -> tuple[str, str]:
     return ("correct" if (chosen, comparison) == _EXPECTED[label] else "WRONG"), detail
 
 
+#: Rows whose expected SYSTEM outcome changed after they were labelled.
+#:
+#: Each asks what a satellite image shows. When the datasets were written such
+#: questions were refused, so they carry the operation label UNSUPPORTED - and
+#: the model was trained with that label, which stays, because no measurable
+#: operation answers them. Since visual questions shipped (CLAUDE.md section
+#: 34) the product answers them by retrieving the normal-colour image and
+#: describing it only when a visual model is configured. The full-pipeline
+#: judgement therefore expects imagery for exactly these rows. Listed by id,
+#: not detected by rule, so the rules under evaluation do not grade themselves.
+SYSTEM_EXPECTATION: dict[str, str] = {
+    "unsup-101": "TRUE_COLOR",
+    "challenge2-unsup-14": "TRUE_COLOR",
+    "challenge-unsup-13": "TRUE_COLOR",
+}
+
+
 def system_summary(rows: list[dict], classifier, judge=system_outcome) -> dict:
-    outcomes = [judge(row["text"], row["intent"], classifier) for row in rows]
+    outcomes = [
+        judge(row["text"], SYSTEM_EXPECTATION.get(row["id"], row["intent"]), classifier)
+        for row in rows
+    ]
     counts = Counter(outcome for outcome, _ in outcomes)
     return {
         "correct": counts["correct"],

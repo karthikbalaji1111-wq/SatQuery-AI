@@ -2,132 +2,132 @@
   "model_version": "satquery-intent-v2",
   "artifact": {
     "path": "app/services/agent/intent_artifacts/satquery_intent_v2.json.gz",
-    "bytes": 190567,
-    "json_bytes": 739959,
-    "sha256": "11ba50951acc1f24945877755e356d2e752135f09633802e7a5e5ed03a7a6d3d",
+    "bytes": 190992,
+    "json_bytes": 741038,
+    "sha256": "cfdd3cec389977c7cf37ac6839ed168bcaa27393a623f3c8e1e13e820a8c945e",
     "features_word": 2217,
-    "features_char": 3639,
-    "peak_load_memory_bytes": 3861141,
-    "sklearn_equivalence_max_abs_diff": 2.434316193067332e-09,
+    "features_char": 3641,
+    "peak_load_memory_bytes": 3862963,
+    "sklearn_equivalence_max_abs_diff": 3.5610355775261837e-09,
     "sklearn_equivalence_same_argmax": true
   },
   "latency_ms": {
-    "predict_mean": 0.04555395111231558,
-    "predict_p95": 0.0633371550065931,
-    "route_operation_mean": 0.24840083666355856,
-    "route_operation_p95": 0.3419723056140356
+    "predict_mean": 0.04922710000834701,
+    "predict_p95": 0.06888125062687322,
+    "route_operation_mean": 0.2726115653390677,
+    "route_operation_p95": 0.3743500499695074
   },
   "threshold": 0.95,
   "threshold_calibration": [
     {
       "threshold": 0.3,
-      "accepted": 1063,
-      "coverage": 0.9897579143389199,
-      "accepted_errors": 56,
-      "accepted_precision": 0.9473189087488241
+      "accepted": 1062,
+      "coverage": 0.9888268156424581,
+      "accepted_errors": 55,
+      "accepted_precision": 0.948210922787194
     },
     {
       "threshold": 0.35,
-      "accepted": 1054,
-      "coverage": 0.9813780260707635,
-      "accepted_errors": 53,
-      "accepted_precision": 0.9497153700189753
+      "accepted": 1055,
+      "coverage": 0.9823091247672253,
+      "accepted_errors": 54,
+      "accepted_precision": 0.9488151658767773
     },
     {
       "threshold": 0.4,
-      "accepted": 1049,
-      "coverage": 0.9767225325884544,
-      "accepted_errors": 49,
-      "accepted_precision": 0.9532888465204957
+      "accepted": 1050,
+      "coverage": 0.9776536312849162,
+      "accepted_errors": 50,
+      "accepted_precision": 0.9523809523809523
     },
     {
       "threshold": 0.45,
-      "accepted": 1043,
-      "coverage": 0.9711359404096834,
+      "accepted": 1042,
+      "coverage": 0.9702048417132216,
       "accepted_errors": 47,
-      "accepted_precision": 0.9549376797698945
+      "accepted_precision": 0.95489443378119
     },
     {
       "threshold": 0.5,
-      "accepted": 1031,
-      "coverage": 0.9599627560521415,
+      "accepted": 1032,
+      "coverage": 0.9608938547486033,
       "accepted_errors": 47,
-      "accepted_precision": 0.9544131910766246
+      "accepted_precision": 0.9544573643410853
     },
     {
       "threshold": 0.55,
-      "accepted": 1024,
-      "coverage": 0.9534450651769087,
-      "accepted_errors": 43,
-      "accepted_precision": 0.9580078125
+      "accepted": 1027,
+      "coverage": 0.9562383612662942,
+      "accepted_errors": 45,
+      "accepted_precision": 0.9561830574488802
     },
     {
       "threshold": 0.6,
-      "accepted": 1004,
-      "coverage": 0.9348230912476723,
-      "accepted_errors": 36,
-      "accepted_precision": 0.9641434262948207
+      "accepted": 1006,
+      "coverage": 0.9366852886405959,
+      "accepted_errors": 37,
+      "accepted_precision": 0.963220675944334
     },
     {
       "threshold": 0.65,
-      "accepted": 989,
-      "coverage": 0.9208566108007449,
-      "accepted_errors": 34,
-      "accepted_precision": 0.9656218402426694
+      "accepted": 988,
+      "coverage": 0.9199255121042831,
+      "accepted_errors": 31,
+      "accepted_precision": 0.9686234817813765
     },
     {
       "threshold": 0.7,
       "accepted": 970,
       "coverage": 0.9031657355679702,
-      "accepted_errors": 27,
-      "accepted_precision": 0.9721649484536082
+      "accepted_errors": 28,
+      "accepted_precision": 0.9711340206185567
     },
     {
       "threshold": 0.75,
-      "accepted": 949,
-      "coverage": 0.8836126629422719,
-      "accepted_errors": 25,
-      "accepted_precision": 0.9736564805057956
+      "accepted": 940,
+      "coverage": 0.8752327746741154,
+      "accepted_errors": 21,
+      "accepted_precision": 0.9776595744680852
     },
     {
       "threshold": 0.8,
-      "accepted": 923,
-      "coverage": 0.8594040968342644,
+      "accepted": 919,
+      "coverage": 0.8556797020484171,
       "accepted_errors": 16,
-      "accepted_precision": 0.9826652221018418
+      "accepted_precision": 0.9825897714907508
     },
     {
       "threshold": 0.85,
-      "accepted": 890,
-      "coverage": 0.8286778398510242,
+      "accepted": 887,
+      "coverage": 0.8258845437616388,
       "accepted_errors": 14,
-      "accepted_precision": 0.9842696629213483
+      "accepted_precision": 0.9842164599774521
     },
     {
       "threshold": 0.9,
-      "accepted": 833,
-      "coverage": 0.7756052141527002,
+      "accepted": 837,
+      "coverage": 0.7793296089385475,
       "accepted_errors": 9,
-      "accepted_precision": 0.9891956782713085
+      "accepted_precision": 0.989247311827957
     },
     {
       "threshold": 0.95,
-      "accepted": 728,
-      "coverage": 0.6778398510242085,
+      "accepted": 727,
+      "coverage": 0.6769087523277467,
       "accepted_errors": 3,
-      "accepted_precision": 0.9958791208791209
+      "accepted_precision": 0.9958734525447043
     }
   ],
   "validation": {
     "count": 185,
-    "accuracy": 0.918918918918919,
-    "macro_f1": 0.9190952002419559,
-    "weighted_f1": 0.9184514424028103,
+    "accuracy": 0.9135135135135135,
+    "macro_f1": 0.9127160247245817,
+    "weighted_f1": 0.9119593287678395,
     "per_class": {
       "NDVI": {
-        "precision": 1.0,
+        "precision": 0.9565217391304348,
         "recall": 0.9565217391304348,
-        "f1": 0.9777777777777777,
+        "f1": 0.9565217391304348,
         "support": 23
       },
       "NDWI": {
@@ -137,15 +137,15 @@
         "support": 23
       },
       "NDBI": {
-        "precision": 0.8461538461538461,
+        "precision": 0.88,
         "recall": 0.9565217391304348,
-        "f1": 0.8979591836734694,
+        "f1": 0.9166666666666666,
         "support": 23
       },
       "SAR_BACKSCATTER": {
-        "precision": 1.0,
+        "precision": 0.9545454545454546,
         "recall": 0.9130434782608695,
-        "f1": 0.9545454545454546,
+        "f1": 0.9333333333333333,
         "support": 23
       },
       "TEMPORAL_NDWI": {
@@ -161,9 +161,9 @@
         "support": 23
       },
       "CLARIFICATION": {
-        "precision": 0.8571428571428571,
-        "recall": 0.75,
-        "f1": 0.8,
+        "precision": 0.85,
+        "recall": 0.7083333333333334,
+        "f1": 0.7727272727272727,
         "support": 24
       },
       "UNSUPPORTED": {
@@ -246,13 +246,13 @@
           1
         ],
         [
+          1,
           0,
-          0,
-          4,
-          0,
+          3,
           1,
           1,
-          18,
+          1,
+          17,
           0
         ],
         [
@@ -420,8 +420,8 @@
   },
   "test_at_threshold": {
     "threshold": 0.95,
-    "accepted": 125,
-    "coverage": 0.6793478260869565,
+    "accepted": 122,
+    "coverage": 0.6630434782608695,
     "accepted_errors": 0,
     "accepted_precision": 1.0
   },
@@ -432,7 +432,7 @@
       "masked": "Crop condition around PLACE between DATE and DATE",
       "intent": "NDVI",
       "predicted": "UNSUPPORTED",
-      "confidence": 0.4765,
+      "confidence": 0.3487,
       "acted_on": false
     },
     {
@@ -441,7 +441,7 @@
       "masked": "foliage density around PLACE in DATE",
       "intent": "NDVI",
       "predicted": "NDBI",
-      "confidence": 0.9098,
+      "confidence": 0.9172,
       "acted_on": false
     },
     {
@@ -450,7 +450,7 @@
       "masked": "Please run the water analysis for PLACE in DATE",
       "intent": "NDWI",
       "predicted": "CLARIFICATION",
-      "confidence": 0.5666,
+      "confidence": 0.5409,
       "acted_on": false
     },
     {
@@ -459,7 +459,7 @@
       "masked": "Map the urban area of PLACE in DATE",
       "intent": "NDBI",
       "predicted": "UNSUPPORTED",
-      "confidence": 0.6317,
+      "confidence": 0.6583,
       "acted_on": false
     },
     {
@@ -468,7 +468,7 @@
       "masked": "What fraction of PLACE on in DATE",
       "intent": "NDBI",
       "predicted": "UNSUPPORTED",
-      "confidence": 0.4645,
+      "confidence": 0.458,
       "acted_on": false
     },
     {
@@ -477,7 +477,7 @@
       "masked": "Please compare the water analysis for PLACE in DATE and DATE",
       "intent": "TEMPORAL_NDWI",
       "predicted": "CLARIFICATION",
-      "confidence": 0.6408,
+      "confidence": 0.5896,
       "acted_on": false
     },
     {
@@ -486,7 +486,7 @@
       "masked": "Show change",
       "intent": "CLARIFICATION",
       "predicted": "UNSUPPORTED",
-      "confidence": 0.8928,
+      "confidence": 0.873,
       "acted_on": false
     },
     {
@@ -495,7 +495,7 @@
       "masked": "Show the difference for PLACE between DATE and DATE",
       "intent": "CLARIFICATION",
       "predicted": "TEMPORAL_NDWI",
-      "confidence": 0.9257,
+      "confidence": 0.9194,
       "acted_on": false
     },
     {
@@ -504,7 +504,7 @@
       "masked": "Show the difference for PLACE between DATE and DATE",
       "intent": "CLARIFICATION",
       "predicted": "TEMPORAL_NDWI",
-      "confidence": 0.9257,
+      "confidence": 0.9194,
       "acted_on": false
     },
     {
@@ -513,7 +513,7 @@
       "masked": "Tell me what the image of PLACE looks like in DATE",
       "intent": "UNSUPPORTED",
       "predicted": "TRUE_COLOR",
-      "confidence": 0.5526,
+      "confidence": 0.5232,
       "acted_on": false
     },
     {
@@ -522,7 +522,7 @@
       "masked": "Show landslide susceptibility for PLACE",
       "intent": "UNSUPPORTED",
       "predicted": "CLARIFICATION",
-      "confidence": 0.5006,
+      "confidence": 0.5104,
       "acted_on": false
     }
   ],
@@ -969,9 +969,9 @@
       "sha256": "ab1cbef517442361e2930c1b0df6b1c2dc94710a9d9053274430354539fdeaba",
       "model": {
         "count": 120,
-        "accuracy": 0.9833333333333333,
-        "macro_f1": 0.9830069124423964,
-        "weighted_f1": 0.9830069124423964,
+        "accuracy": 0.9916666666666667,
+        "macro_f1": 0.9916573971078977,
+        "weighted_f1": 0.9916573971078978,
         "per_class": {
           "NDVI": {
             "precision": 1.0,
@@ -1004,9 +1004,9 @@
             "support": 15
           },
           "TRUE_COLOR": {
-            "precision": 0.9375,
+            "precision": 1.0,
             "recall": 1.0,
-            "f1": 0.967741935483871,
+            "f1": 1.0,
             "support": 15
           },
           "CLARIFICATION": {
@@ -1017,8 +1017,8 @@
           },
           "UNSUPPORTED": {
             "precision": 1.0,
-            "recall": 0.8666666666666667,
-            "f1": 0.9285714285714286,
+            "recall": 0.9333333333333333,
+            "f1": 0.9655172413793104,
             "support": 15
           }
         },
@@ -1110,25 +1110,25 @@
               0,
               0,
               1,
-              1,
               0,
-              13
+              0,
+              14
             ]
           ]
         }
       },
       "at_threshold": {
         "threshold": 0.95,
-        "accepted": 106,
-        "coverage": 0.8833333333333333,
+        "accepted": 107,
+        "coverage": 0.8916666666666667,
         "accepted_errors": 0,
         "accepted_precision": 1.0
       },
       "system": {
         "model_plus_rules": {
-          "correct": 119,
+          "correct": 118,
           "clarified_safely": 1,
-          "wrong_operation_executed": 0,
+          "wrong_operation_executed": 1,
           "examples": [
             {
               "id": "challenge2-rgb-14",
@@ -1136,13 +1136,20 @@
               "intent": "TRUE_COLOR",
               "outcome": "clarified",
               "detail": "clarify:analysis_missing"
+            },
+            {
+              "id": "challenge2-clar-03",
+              "text": "What is happening at Kodagu?",
+              "intent": "CLARIFICATION",
+              "outcome": "WRONG",
+              "detail": "execute:imagery"
             }
           ]
         },
         "rules_only": {
-          "correct": 102,
+          "correct": 101,
           "clarified_safely": 15,
-          "wrong_operation_executed": 3,
+          "wrong_operation_executed": 4,
           "examples": [
             {
               "id": "challenge2-ndvi-04",
@@ -1262,6 +1269,13 @@
               "intent": "TRUE_COLOR",
               "outcome": "clarified",
               "detail": "clarify:analysis_missing"
+            },
+            {
+              "id": "challenge2-clar-03",
+              "text": "What is happening at Kodagu?",
+              "intent": "CLARIFICATION",
+              "outcome": "WRONG",
+              "detail": "execute:imagery"
             },
             {
               "id": "challenge2-unsup-10",
@@ -1433,20 +1447,12 @@
           "text": "Did urbanization increase around Hebbal between 2015 and 2024",
           "intent": "UNSUPPORTED",
           "predicted": "TEMPORAL_NDWI",
-          "confidence": 0.8171,
-          "acted_on": false
-        },
-        {
-          "id": "challenge2-unsup-14",
-          "text": "Describe what the satellite image of Amboli shows in 2024",
-          "intent": "UNSUPPORTED",
-          "predicted": "TRUE_COLOR",
-          "confidence": 0.5634,
+          "confidence": 0.8286,
           "acted_on": false
         }
       ],
       "max_masked_jaccard_to_train": 1.0,
-      "items_at_or_above_near_duplicate_threshold": 39
+      "items_at_or_above_near_duplicate_threshold": 38
     },
     "challenge_v1": {
       "path": "data/intent/satquery_intents_v1_challenge.jsonl",
@@ -1604,24 +1610,17 @@
       },
       "at_threshold": {
         "threshold": 0.95,
-        "accepted": 96,
-        "coverage": 0.8,
+        "accepted": 101,
+        "coverage": 0.8416666666666667,
         "accepted_errors": 0,
         "accepted_precision": 1.0
       },
       "system": {
         "model_plus_rules": {
           "correct": 115,
-          "clarified_safely": 3,
-          "wrong_operation_executed": 2,
+          "clarified_safely": 2,
+          "wrong_operation_executed": 3,
           "examples": [
-            {
-              "id": "challenge-ndvi-07",
-              "text": "How much plant growth is there near Anand Vihar park in 2024",
-              "intent": "NDVI",
-              "outcome": "clarified",
-              "detail": "clarify:analysis_missing"
-            },
             {
               "id": "challenge-ndwi-13",
               "text": "How wet was the Kuttanad region in September 2024?",
@@ -1649,13 +1648,20 @@
               "intent": "TRUE_COLOR",
               "outcome": "clarified",
               "detail": "clarify:analysis_missing"
+            },
+            {
+              "id": "challenge-clar-03",
+              "text": "What is happening around the Chilika lagoon?",
+              "intent": "CLARIFICATION",
+              "outcome": "WRONG",
+              "detail": "execute:imagery"
             }
           ]
         },
         "rules_only": {
-          "correct": 103,
+          "correct": 102,
           "clarified_safely": 14,
-          "wrong_operation_executed": 3,
+          "wrong_operation_executed": 4,
           "examples": [
             {
               "id": "challenge-ndvi-07",
@@ -1775,12 +1781,19 @@
               "intent": "TRUE_COLOR",
               "outcome": "clarified",
               "detail": "clarify:analysis_missing"
+            },
+            {
+              "id": "challenge-clar-03",
+              "text": "What is happening around the Chilika lagoon?",
+              "intent": "CLARIFICATION",
+              "outcome": "WRONG",
+              "detail": "execute:imagery"
             }
           ]
         },
         "full_pipeline_model_plus_rules": {
-          "correct": 114,
-          "clarified_safely": 6,
+          "correct": 115,
+          "clarified_safely": 5,
           "wrong_operation_executed": 0,
           "examples": [
             {
@@ -1789,13 +1802,6 @@
               "intent": "NDVI",
               "outcome": "clarified",
               "detail": "clarify:date_ambiguous"
-            },
-            {
-              "id": "challenge-ndvi-07",
-              "text": "How much plant growth is there near Anand Vihar park in 2024",
-              "intent": "NDVI",
-              "outcome": "clarified",
-              "detail": "clarify:analysis_missing"
             },
             {
               "id": "challenge-ndwi-13",
@@ -1967,7 +1973,7 @@
           "text": "comapre water around Thrissur in 2023 and 2024",
           "intent": "TEMPORAL_NDWI",
           "predicted": "NDWI",
-          "confidence": 0.8919,
+          "confidence": 0.9287,
           "acted_on": false
         },
         {
@@ -1975,7 +1981,7 @@
           "text": "report for the fields near Nashik",
           "intent": "CLARIFICATION",
           "predicted": "NDVI",
-          "confidence": 0.5696,
+          "confidence": 0.5618,
           "acted_on": false
         },
         {
@@ -1983,7 +1989,7 @@
           "text": "How was Wayanad in September 2024?",
           "intent": "CLARIFICATION",
           "predicted": "NDVI",
-          "confidence": 0.2136,
+          "confidence": 0.2361,
           "acted_on": false
         }
       ],
@@ -2161,9 +2167,9 @@
         },
         "system": {
           "model_plus_rules": {
-            "correct": 115,
+            "correct": 114,
             "clarified_safely": 5,
-            "wrong_operation_executed": 0,
+            "wrong_operation_executed": 1,
             "examples": [
               {
                 "id": "challenge2-ndwi-08",
@@ -2199,13 +2205,20 @@
                 "intent": "TRUE_COLOR",
                 "outcome": "clarified",
                 "detail": "clarify:analysis_missing"
+              },
+              {
+                "id": "challenge2-clar-03",
+                "text": "What is happening at Kodagu?",
+                "intent": "CLARIFICATION",
+                "outcome": "WRONG",
+                "detail": "execute:imagery"
               }
             ]
           },
           "rules_only": {
-            "correct": 102,
+            "correct": 101,
             "clarified_safely": 15,
-            "wrong_operation_executed": 3,
+            "wrong_operation_executed": 4,
             "examples": [
               {
                 "id": "challenge2-ndvi-04",
@@ -2325,6 +2338,13 @@
                 "intent": "TRUE_COLOR",
                 "outcome": "clarified",
                 "detail": "clarify:analysis_missing"
+              },
+              {
+                "id": "challenge2-clar-03",
+                "text": "What is happening at Kodagu?",
+                "intent": "CLARIFICATION",
+                "outcome": "WRONG",
+                "detail": "execute:imagery"
               },
               {
                 "id": "challenge2-unsup-10",
@@ -2564,7 +2584,7 @@
             "text": "Describe what the satellite image of Amboli shows in 2024",
             "intent": "UNSUPPORTED",
             "predicted": "TRUE_COLOR",
-            "confidence": 0.8439,
+            "confidence": 0.8321,
             "acted_on": false
           }
         ]
@@ -2732,9 +2752,9 @@
         },
         "system": {
           "model_plus_rules": {
-            "correct": 112,
+            "correct": 111,
             "clarified_safely": 5,
-            "wrong_operation_executed": 3,
+            "wrong_operation_executed": 4,
             "examples": [
               {
                 "id": "challenge-ndvi-07",
@@ -2791,13 +2811,20 @@
                 "intent": "TEMPORAL_NDWI",
                 "outcome": "WRONG",
                 "detail": "execute:ndwi"
+              },
+              {
+                "id": "challenge-clar-03",
+                "text": "What is happening around the Chilika lagoon?",
+                "intent": "CLARIFICATION",
+                "outcome": "WRONG",
+                "detail": "execute:imagery"
               }
             ]
           },
           "rules_only": {
-            "correct": 103,
+            "correct": 102,
             "clarified_safely": 14,
-            "wrong_operation_executed": 3,
+            "wrong_operation_executed": 4,
             "examples": [
               {
                 "id": "challenge-ndvi-07",
@@ -2917,6 +2944,13 @@
                 "intent": "TRUE_COLOR",
                 "outcome": "clarified",
                 "detail": "clarify:analysis_missing"
+              },
+              {
+                "id": "challenge-clar-03",
+                "text": "What is happening around the Chilika lagoon?",
+                "intent": "CLARIFICATION",
+                "outcome": "WRONG",
+                "detail": "execute:imagery"
               }
             ]
           },
@@ -3251,9 +3285,9 @@
       "c_cv_macro_f1": {
         "1.0": 0.9286693596139468,
         "3.0": 0.9370077611428476,
-        "10.0": 0.9403052726473022,
+        "10.0": 0.9426583362529466,
         "30.0": 0.942542801661077,
-        "100.0": 0.9434833461411987
+        "100.0": 0.944768283331813
       },
       "threshold_rule": "lowest of 0.3..0.95 with accepted precision >= 0.99 on out-of-fold train plus validation predictions, never below 0.9",
       "threshold_calibrated": 0.95,

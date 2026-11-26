@@ -786,7 +786,7 @@ def _scan_places(masked: str, *, allow_term_start: bool) -> _Place:
         previous = None
         while previous != raw:
             previous = raw
-            raw = _TRAILING_CONNECTOR.sub("", raw.rstrip(" ,"))
+            raw = _TRAILING_CONNECTOR.sub("", raw.rstrip(" ,:;"))
         phrase = " ".join(raw.split())
 
         if not phrase or _NOT_A_PLACE.fullmatch(phrase):
@@ -805,7 +805,7 @@ def _scan_places(masked: str, *, allow_term_start: bool) -> _Place:
         if not _COORDINATES.match(place):
             # "<landmark> in <city>" is one place, written nested.
             place = re.sub(r"\s+in\s+", ", ", place, flags=re.IGNORECASE)
-        place = place.strip(" '\"“”‘’")
+        place = place.strip(" '\"“”‘’:;,")
         if place:
             return _Place(text=place[:300], span=(begin, begin + len(raw)))
     return _Place(text=None, deictic=deictic)
