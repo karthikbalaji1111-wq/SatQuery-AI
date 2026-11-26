@@ -11,6 +11,9 @@ dependencies = [
     "pydantic-settings>=2.5.0",
     "httpx>=0.27.0",
     "rasterio>=1.3",
+    # Imported directly by the analysis engines and the intent model; it was
+    # present only as a rasterio dependency before.
+    "numpy>=2",
     "pillow>=10",
     "google-genai>=2.20.0",
     "anthropic>=1.0.0",
