@@ -169,6 +169,10 @@ class Settings(BaseSettings):
     #: How long a request may wait for a slot before it is refused. Absorbs a
     #: passing burst without letting a queue grow without bound.
     admission_wait_seconds: float = 2.0
+    #: How long one raster read may wait for a raster slot. Longer than the
+    #: workflow wait: a read queued behind another analysis's reads is normal
+    #: work in progress, and refusing it would fail a run half-way through.
+    raster_admission_wait_seconds: float = Field(default=60.0, gt=0, le=600)
     #: Total budget for one workflow. A local model alone may legitimately take
     #: minutes (LOCAL_AI_TIMEOUT_SECONDS is 300), so this is deliberately far
     #: above the normal case - it exists to end a run that will never finish,

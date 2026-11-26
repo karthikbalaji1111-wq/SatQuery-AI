@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.core.errors import AppError
-from app.core.limits import rate_limited, workflow_slot
+from app.core.limits import rate_limited, within_budget, workflow_slot
 from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
 from app.services.agent.intent_model import load_intent_classifier
@@ -168,6 +168,7 @@ def get_agent_service() -> AgentService:
 )
 async def parse_intent(
     request: ParsePromptRequest,
+    http_request: Request,
     service: AiService = Depends(get_ai_service),
 ) -> SatQueryIntent:
     """Convert a natural-language request into a structured ``SatQueryIntent``.
@@ -180,7 +181,7 @@ async def parse_intent(
 
     if request.provider is not None:
         service = AiService(parser=get_intent_parser(provider=request.provider))
-    return await service.parse_intent(request.prompt)
+    return await within_budget(http_request, service.parse_intent(request.prompt))
 
 
 @router.post(
@@ -209,6 +210,7 @@ async def build_plan(
 )
 async def execute_query(
     request: QueryExecutionRequest,
+    http_request: Request,
     service: QueryExecutionService = Depends(get_query_execution_service),
 ) -> QueryExecutionResult:
     """Execute a validated ``SatQueryIntent`` end to end.
@@ -219,7 +221,7 @@ async def execute_query(
     each selected scene. Sentinel-1 SAR is reported under ``skipped_modalities``
     and is not executed in this phase. No LLM/AI inference happens here."""
 
-    return await service.execute(request)
+    return await within_budget(http_request, service.execute(request))
 
 
 @router.post(
@@ -229,6 +231,7 @@ async def execute_query(
 )
 async def analyze_query(
     request: AnalysisRequest,
+    http_request: Request,
     service: AnalysisService = Depends(get_analysis_service),
 ) -> AnalysisResult:
     """Interpret an already-computed ``QueryExecutionResult``.
@@ -242,7 +245,7 @@ async def analyze_query(
     retrieval, no raster I/O, and no LLM/VLM inference - it only reads the
     execution result it is given."""
 
-    return await service.analyze(request)
+    return await within_budget(http_request, service.analyze(request))
 
 
 @router.post(
@@ -254,6 +257,7 @@ async def analyze_query(
 )
 async def answer_question(
     request: AgentQuestionRequest,
+    http_request: Request,
     service: AgentService = Depends(get_agent_service),
 ) -> AgentResult:
     """Answer a free-form question by planning, executing and describing.
@@ -299,4 +303,4 @@ async def answer_question(
         if explicit:
             # AI was asked for by name; only then is a provider built.
             service = build_agent_service(request.provider, request.model)
-        return await service.answer(request)
+        return await within_budget(http_request, service.answer(request))
