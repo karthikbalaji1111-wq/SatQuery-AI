@@ -112,3 +112,25 @@ def _no_local_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
     # whatever happened to be installed on it.
     monkeypatch.setattr(ai_route, "installed_models", not_running)
     monkeypatch.setattr(health_route, "installed_models", not_running)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_provider_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retry tests prove THAT a provider retries, not how long it waits.
+
+    Left at their production values, every NVIDIA and Gemini failure-path test slept
+    through 1.5 s and 3 s of real backoff - about 4.5 s each, the 15 slowest
+    tests in the suite. A test that is about the delay itself can still set
+    its own value with monkeypatch.
+    """
+
+    from app.services.agent.providers import anthropic as anthropic_provider
+    from app.services.agent.providers import gemini as gemini_provider
+    from app.services.agent.providers import nvidia as nvidia_provider
+    from app.services.satellite import stac as stac_module
+
+    monkeypatch.setattr(nvidia_provider, "_TRANSIENT_BACKOFF_SECONDS", 0.0)
+    monkeypatch.setattr(nvidia_provider, "_PLAN_BACKOFF_SECONDS", 0.0)
+    monkeypatch.setattr(anthropic_provider, "_PLAN_BACKOFF_SECONDS", 0.0)
+    monkeypatch.setattr(gemini_provider, "_BACKOFF_SECONDS", (0.0, 0.0))
+    monkeypatch.setattr(stac_module, "_SEARCH_BACKOFF_SECONDS", 0.0)
