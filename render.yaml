@@ -68,8 +68,17 @@ services:
         value: "120"
       - key: SATQUERY_RATE_LIMIT_WINDOW_SECONDS
         value: "60"
+      # Sized from backend/scripts/benchmark_memory.py for the free plan's
+      # 512 MB. An idle server holds ~104 MB; one all-indices or two-date run
+      # holds up to ~132 MB at a 1024 px window but ~454 MB at 2048 px. So the
+      # quantitative window is capped at 1024 px (about 10 km at 10 m; areas
+      # larger than that are refused as too large, with the limit stated) and
+      # two runs may hold rasters at once: ~370 MB worst case. A paid instance
+      # with 2 GB can return to the defaults (2048 px, 4 workflows).
+      - key: SATQUERY_IMAGERY_HARD_MAX_DIMENSION
+        value: "1024"
       - key: SATQUERY_MAX_CONCURRENT_WORKFLOWS
-        value: "4"
+        value: "2"
       - key: SATQUERY_MAX_CONCURRENT_RASTER_READS
         value: "2"
       - key: SATQUERY_MAX_REQUEST_BYTES
