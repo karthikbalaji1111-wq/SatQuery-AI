@@ -48,6 +48,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 
 from fastapi import FastAPI, Request
 
@@ -343,16 +344,61 @@ def install_request_limits(app: FastAPI, settings: Settings) -> None:
         return await call_next(request)
 
 
-def _client_of(request: Request) -> str:
+_FORWARDED_CHAIN_REPORTED = False
+
+
+def _peer(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _client_of(request: Request, trusted_proxy_hops: int = 0) -> str:
     """Who this request is attributed to.
 
-    The peer address, never a client-supplied header: ``X-Forwarded-For`` is
-    trivially spoofed, so trusting it would let one caller present as many and
-    bypass the limit entirely. A deployment behind a trusted proxy must
-    terminate that header at the proxy and is documented as such.
+    With ``trusted_proxy_hops == 0`` (the default) it is the TCP peer, never a
+    header, because ``X-Forwarded-For`` is written by whoever sends the request.
+
+    Behind proxies, the peer is the proxy, so every caller would share ONE
+    allowance and one busy client would lock everyone out. Each proxy APPENDS
+    the address it received the connection from, so the entry ``hops`` places
+    from the right was written by the outermost trusted proxy and cannot be
+    forged by the client; anything to its left can be. That entry is used.
+
+    The header is read here rather than taken from ``request.client`` after
+    uvicorn's proxy-header rewriting: told to trust every proxy
+    (``FORWARDED_ALLOW_IPS=*``), uvicorn takes the LEFTMOST entry, which the
+    client chose. A chain shorter than the configured hop count, or an entry
+    that is not an IP address, falls back to the peer rather than to anything
+    the client supplied.
     """
 
-    return request.client.host if request.client else "unknown"
+    if trusted_proxy_hops <= 0:
+        return _peer(request)
+
+    header = ",".join(request.headers.getlist("x-forwarded-for"))
+    chain = [entry.strip() for entry in header.split(",") if entry.strip()]
+    _report_chain_length(len(chain))
+    if len(chain) < trusted_proxy_hops:
+        return _peer(request)
+    candidate = chain[-trusted_proxy_hops]
+    try:
+        return str(ip_address(candidate))
+    except ValueError:
+        return _peer(request)
+
+
+def _report_chain_length(length: int) -> None:
+    """Log, once per process, how many forwarding entries arrive.
+
+    Hosting platforms rarely document how many proxies sit in front of a
+    service. For a request the client sent WITHOUT its own X-Forwarded-For,
+    this count is exactly the value ``SATQUERY_TRUSTED_PROXY_HOPS`` should
+    have. Only the count is logged - never an address.
+    """
+
+    global _FORWARDED_CHAIN_REPORTED
+    if not _FORWARDED_CHAIN_REPORTED:
+        _FORWARDED_CHAIN_REPORTED = True
+        logger.info("first request carried %d X-Forwarded-For entries", length)
 
 
 async def rate_limited(request: Request) -> None:
@@ -361,7 +407,7 @@ async def rate_limited(request: Request) -> None:
     limits: RequestLimits | None = getattr(request.app.state, "limits", None)
     if limits is None:  # an app built without limits installed
         return
-    limits.limiter.admit(_client_of(request))
+    limits.limiter.admit(_client_of(request, limits.settings.trusted_proxy_hops))
 
 
 async def workflow_slot(request: Request) -> AsyncIterator[None]:

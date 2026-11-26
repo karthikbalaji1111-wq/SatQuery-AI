@@ -163,6 +163,12 @@ class Settings(BaseSettings):
     #: Simultaneous in-flight workflows (discovery, analysis, agent runs).
     #: Four keeps a small machine responsive; each one can hold raster arrays.
     max_concurrent_workflows: int = 4
+    #: How many reverse proxies in front of this process APPEND to
+    #: X-Forwarded-For. 0 (the default) attributes requests to the TCP peer.
+    #: Set it to the proxy count of the hosting platform so the rate limit is
+    #: per caller rather than shared by everyone behind the proxy; see
+    #: ``core/limits._client_of`` and DEPLOYMENT.md for how to measure it.
+    trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
     #: Simultaneous windowed COG reads. Raster work is the memory-hungriest
     #: thing this process does, and this machine has been OOM-killed before.
     max_concurrent_raster_reads: int = 2

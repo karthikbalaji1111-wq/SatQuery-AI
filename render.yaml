@@ -58,6 +58,12 @@ services:
 
       # Admission control - PER PROCESS, and the image runs one worker.
       # Identical to docker-compose.prod.yml.
+      # Render's load balancer appends the caller's address to X-Forwarded-For.
+      # One trusted hop keys the rate limit per caller instead of per balancer.
+      # The backend logs, once per process, how many entries the first request
+      # carried; if that log shows 2 for a plain browser request, set this to 2.
+      - key: SATQUERY_TRUSTED_PROXY_HOPS
+        value: "1"
       - key: SATQUERY_RATE_LIMIT_REQUESTS
         value: "120"
       - key: SATQUERY_RATE_LIMIT_WINDOW_SECONDS
