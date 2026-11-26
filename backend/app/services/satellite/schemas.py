@@ -117,6 +117,14 @@ class Scene(BaseModel):
     sar_polarizations: list[str] | None = None
     sar_instrument_mode: str | None = None
     orbit_state: str | None = None
+    #: Sentinel-2 ``s2:processing_baseline`` and the published
+    #: ``earthsearch:boa_offset_applied`` flag, as the catalog search returned
+    #: them. Used only to PREFER scenes whose metadata already establishes
+    #: offset-free values; the radiometric validation of the selected scene
+    #: (``satellite/radiometry.py``) remains the authority. ``None`` when the
+    #: catalog did not say.
+    processing_baseline: str | None = None
+    boa_offset_flag: Literal["true", "false", "absent", "unparseable"] | None = None
 
 
 class QueryEcho(BaseModel):

@@ -103,6 +103,10 @@ export interface SatelliteScene {
   sar_polarizations?: string[] | null;
   sar_instrument_mode?: string | null;
   orbit_state?: string | null;
+  /** Sentinel-2 processing baseline, as the catalog search returned it. */
+  processing_baseline?: string | null;
+  /** The published `earthsearch:boa_offset_applied` flag, read as text. */
+  boa_offset_flag?: "true" | "false" | "absent" | "unparseable" | null;
   thumbnail_url: string | null;
   assets: SceneAsset[];
 }

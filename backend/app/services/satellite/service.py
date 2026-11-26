@@ -5,7 +5,7 @@ place name -> geospatial resolve -> validated bbox -> (this) STAC scene search.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -108,6 +108,23 @@ def _processing_level(props: dict[str, Any], collection: str | None) -> str | No
     return None
 
 
+def _boa_offset_flag(
+    props: dict,
+) -> Literal["true", "false", "absent", "unparseable"] | None:
+    """The published offset flag, read exactly as scene validation reads it.
+
+    ``None`` for an item with no processing baseline (Sentinel-1, or a catalog
+    that does not publish one): the flag means nothing without it.
+    """
+
+    if "s2:processing_baseline" not in props:
+        return None
+    if "earthsearch:boa_offset_applied" not in props:
+        return "absent"
+    flag = props["earthsearch:boa_offset_applied"]
+    return "true" if flag is True else "false" if flag is False else "unparseable"
+
+
 def _normalize_scene(feature: object) -> Scene:
     if not isinstance(feature, dict):
         raise UpstreamServiceError("The satellite catalog returned a malformed scene.")
@@ -149,6 +166,8 @@ def _normalize_scene(feature: object) -> Scene:
         thumbnail_url=thumbnail_url,
         assets=assets,
         sar_polarizations=_str_list_or_none(props.get("sar:polarizations")),
+        processing_baseline=_str_or_none(props.get("s2:processing_baseline")),
+        boa_offset_flag=_boa_offset_flag(props),
         sar_instrument_mode=_str_or_none(props.get("sar:instrument_mode")),
         orbit_state=_str_or_none(props.get("sat:orbit_state")),
     )

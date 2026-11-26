@@ -243,6 +243,25 @@ def _offset_state(baseline: tuple[int, int] | None, flag: str) -> OffsetState:
     return "unparseable"
 
 
+def offset_free_by_metadata(
+    processing_baseline: str | None, flag: str | None
+) -> bool | None:
+    """Whether catalog SEARCH metadata alone already places the values offset-free.
+
+    For scene SELECTION only, so a month with a usable scene is not answered
+    with one the validation below will refuse. ``True`` where the central rule
+    reads the provider as having removed the offset, or the baseline as
+    predating it; ``False`` where it does not; ``None`` where the baseline is
+    unknown. It never accepts a scene: the selected scene is still assessed in
+    full by :func:`assess_radiometry`, declared band offsets included.
+    """
+
+    baseline = parse_baseline(processing_baseline)
+    if baseline is None or flag is None:
+        return None
+    return _offset_state(baseline, flag) in {"removed_by_provider", "not_introduced"}
+
+
 def _offset_decision(
     processing_baseline: str | None, flag: str, encodings: Sequence[AssetEncoding]
 ) -> tuple[OffsetState, str | None, list[str], list[str]]:

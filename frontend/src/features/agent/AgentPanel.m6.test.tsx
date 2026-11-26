@@ -283,7 +283,7 @@ describe("M6 evidence panel", () => {
       "earth-search.aws.element84.com",
     );
     expect(within(panel).getByText("Scenes matched").nextSibling).toHaveTextContent(
-      "7 · lowest cloud cover selected",
+      "7 · verifiable radiometry first, then lowest cloud cover",
     );
   });
 
