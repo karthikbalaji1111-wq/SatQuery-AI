@@ -234,6 +234,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AI_PROVIDER"),
     )
 
+    #: Whether a CALLER may name an AI provider or model for a run. ``None``
+    #: (the default) allows it in development and refuses it in production:
+    #: the API has no accounts, so a public deployment cannot attribute or cap
+    #: what an anonymous caller spends on a metered provider. The standard
+    #: workflow - deterministic rules and the local intent model - needs no
+    #: provider and is unaffected. Set ``SATQUERY_CLIENT_AI_SELECTION=true`` only
+    #: where every caller is trusted.
+    client_ai_selection: bool | None = None
+
     # NVIDIA's hosted NIM endpoints, which speak the OpenAI chat-completions
     # dialect. The model must accept image input - a text-only model cannot
     # serve the visual-analysis path. Never commit a real key.
@@ -403,6 +412,12 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() in {"production", "prod"}
+
+    @property
+    def client_ai_selection_enabled(self) -> bool:
+        if self.client_ai_selection is not None:
+            return self.client_ai_selection
+        return not self.is_production
 
     @model_validator(mode="after")
     def _production_configuration(self) -> Settings:

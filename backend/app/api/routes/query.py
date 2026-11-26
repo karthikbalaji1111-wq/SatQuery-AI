@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from app.core.errors import AppError
+from app.core.config import get_settings
+from app.core.errors import AiSelectionDisabledError, AppError
 from app.core.limits import rate_limited, within_budget, workflow_slot
 from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
@@ -35,6 +36,20 @@ from app.services.query import (
 )
 
 router = APIRouter()
+
+
+def require_client_ai_selection() -> None:
+    """Refuse a caller-chosen AI provider where this deployment forbids it.
+
+    Checked before any provider object is built, so a refused request never
+    constructs a client, reads a credential or contacts a provider.
+    """
+
+    if not get_settings().client_ai_selection_enabled:
+        raise AiSelectionDisabledError(
+            "This deployment answers with the standard workflow only. "
+            "Ask again without choosing an AI model."
+        )
 
 
 def get_query_service() -> QueryService:
@@ -180,6 +195,7 @@ async def parse_intent(
     provider parses with that provider and no other."""
 
     if request.provider is not None:
+        require_client_ai_selection()
         service = AiService(parser=get_intent_parser(provider=request.provider))
     return await within_budget(http_request, service.parse_intent(request.prompt))
 
@@ -301,6 +317,8 @@ async def answer_question(
         model=request.model or ("configured-default" if explicit else "none"),
     ):
         if explicit:
-            # AI was asked for by name; only then is a provider built.
+            # AI was asked for by name; only then is a provider built - and
+            # only where this deployment lets a caller make that choice.
+            require_client_ai_selection()
             service = build_agent_service(request.provider, request.model)
         return await within_budget(http_request, service.answer(request))

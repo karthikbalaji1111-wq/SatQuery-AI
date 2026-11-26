@@ -965,6 +965,13 @@ export interface ModelCatalogResponse {
   role: string;
   default_provider: string;
   default_model: string;
+  /**
+   * False where callers may not choose an AI model: the server then refuses a
+   * named provider or model with 403 `ai_selection_disabled`, so the client
+   * offers the standard workflow only. Absent on older servers (treated as
+   * true).
+   */
+  client_selection_enabled?: boolean;
   models: ModelOption[];
 }
 

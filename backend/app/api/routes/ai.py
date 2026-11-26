@@ -70,6 +70,10 @@ class ModelCatalogResponse(BaseModel):
     role: str
     default_provider: str
     default_model: str
+    #: False where callers may not choose an AI model (``/query/agent`` and
+    #: ``/query/parse`` then refuse ``provider``/``model`` with 403): a client
+    #: should offer the standard workflow only.
+    client_selection_enabled: bool = True
     models: list[ModelOption]
 
 
@@ -186,6 +190,7 @@ async def list_models(
         role=role,
         default_provider=settings.ai_provider,
         default_model=default_model,
+        client_selection_enabled=settings.client_ai_selection_enabled,
         models=[
             _option(card, settings=settings, role=role, installed=installed)
             for card in MODEL_CATALOG
