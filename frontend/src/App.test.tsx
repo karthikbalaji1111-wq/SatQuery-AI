@@ -981,6 +981,35 @@ describe("App - AI provider and model selection", () => {
     );
   });
 
+  it("offers no AI choice where the server refuses caller-chosen AI", async () => {
+    // Production deployments answer with the standard workflow only; a
+    // picker there would produce nothing but 403 refusals.
+    const fetchMock = stubRouter({
+      "/health": HEALTH,
+      "/ai/models": { ...CATALOG, client_selection_enabled: false },
+      "/query/agent": OK_RESULT,
+    });
+    render(<App />);
+
+    expect(await screen.findByText("Standard · no external AI")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/ai provider and model/i)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Is there visible water in Marina Beach?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^run analysis$/i }));
+    await screen.findByText(OK_RESULT.answer);
+
+    const agentCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/query/agent"),
+    );
+    expect(agentCall).toBeDefined();
+    const init = (agentCall as unknown[] | undefined)?.[1] as RequestInit | undefined;
+    const sent = JSON.parse(String(init?.body));
+    expect(sent.provider).toBeUndefined();
+    expect(sent.model).toBeUndefined();
+  });
+
   it("attributes a default run to the standard workflow, never to the default AI", async () => {
     // M5.5: a run that names no provider is interpreted without any model.
     // Crediting it to the deployment's default provider (Gemini here) would
