@@ -33,6 +33,7 @@ from app.core.errors import (
     NotFoundError,
     UpstreamServiceError,
 )
+from app.core.limits import raster_read_slot
 from app.core.logging import get_logger
 from app.services.base import DomainService
 from app.services.geospatial.schemas import BoundingBox
@@ -476,12 +477,13 @@ class ImageryService(DomainService):
             sign_rtc_asset(href, settings=self._settings, transport=self._transport)
             if collection == RTC_COLLECTION else href
         )
-        window = self._read_window(
-            read_href,
-            request.bbox,
-            max_dimension=max_dimension,
-            max_window_pixels=self._settings.imagery_max_window_pixels,
-        )
+        with raster_read_slot(self._settings):
+            window = self._read_window(
+                read_href,
+                request.bbox,
+                max_dimension=max_dimension,
+                max_window_pixels=self._settings.imagery_max_window_pixels,
+            )
 
         image_b64 = _encode_png(window.array)
         logger.info(
@@ -618,14 +620,15 @@ class ImageryService(DomainService):
         )
 
         limits = self.quantitative_read_limits()
-        band = self._read_band(
-            read_href,
-            bbox,
-            # Rejection bounds, not a decimation target: quantitative reads stay
-            # at native resolution, so an oversized window is refused.
-            max_dimension=limits.max_dimension,
-            max_window_pixels=limits.max_window_pixels,
-        )
+        with raster_read_slot(self._settings):
+            band = self._read_band(
+                read_href,
+                bbox,
+                # Rejection bounds, not a decimation target: quantitative reads
+                # stay at native resolution, so an oversized window is refused.
+                max_dimension=limits.max_dimension,
+                max_window_pixels=limits.max_window_pixels,
+            )
         if asset in SAR_ANALYSIS_BAND_ASSETS:
             require_linear_power_encoding(
                 scale=band.source_scale, offset=band.source_offset, unit=band.source_unit,

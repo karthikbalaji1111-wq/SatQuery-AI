@@ -42,18 +42,21 @@ makes a burst expensive for the burster rather than for everyone else.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from fastapi import FastAPI, Request
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.core.errors import (
     PayloadTooLargeError,
     RateLimitedError,
     ServiceOverloadedError,
+    WorkflowTimeoutError,
     error_response,
 )
 from app.core.logging import get_logger
@@ -65,6 +68,7 @@ logger = get_logger("limits")
 #: has to be bounded - otherwise the defence against unbounded memory is an
 #: unbounded dictionary.
 _MAX_TRACKED_CLIENTS = 4096
+
 
 
 @dataclass
@@ -195,13 +199,93 @@ class _GateSlot:
 #: a cap, concurrent analyses multiply resident raster memory on a machine that
 #: has already been observed being OOM-killed.
 #:
+#: A THREADING semaphore, not an asyncio one: the reads run inside
+#: ``run_in_threadpool`` workers (and the sync imagery route), where there is no
+#: event loop to await on. An earlier asyncio ``RASTER_GATE`` was declared here
+#: and documented as enforced, but nothing ever entered it - so the setting
+#: bounded nothing. This one is entered by ``ImageryService`` around every
+#: remote raster read.
+#:
+#: One semaphore per configured limit, created on first use: the limit is read
+#: from the settings the service was built with, never fixed at import time.
+#:
 #: The geocoder's own budget is NOT here: OpenStreetMap's policy is about
 #: request SPACING as well as concurrency, and both live together in
 #: ``services/geospatial/nominatim.py`` so there is one place that decides how
 #: this application treats that service, rather than two that must agree.
-RASTER_GATE = ConcurrencyGate(
-    get_settings().max_concurrent_raster_reads, name="raster reads"
-)
+_RASTER_SEMAPHORES: dict[int, threading.BoundedSemaphore] = {}
+_RASTER_SEMAPHORES_LOCK = threading.Lock()
+
+
+def _raster_semaphore(limit: int) -> threading.BoundedSemaphore:
+    with _RASTER_SEMAPHORES_LOCK:
+        semaphore = _RASTER_SEMAPHORES.get(limit)
+        if semaphore is None:
+            semaphore = threading.BoundedSemaphore(max(1, limit))
+            _RASTER_SEMAPHORES[limit] = semaphore
+        return semaphore
+
+
+@contextmanager
+def raster_read_slot(settings: Settings) -> Iterator[None]:
+    """Hold one of the process's raster-read slots for the duration of a read.
+
+    Blocks the calling worker thread for up to
+    ``raster_admission_wait_seconds``; past that the read is refused with 503
+    rather than queueing without bound behind a slow upstream.
+    """
+
+    semaphore = _raster_semaphore(settings.max_concurrent_raster_reads)
+    wait = settings.raster_admission_wait_seconds
+    if not semaphore.acquire(timeout=wait):
+        logger.info(
+            "raster reads at capacity (%d in use, waited %.0fs)",
+            settings.max_concurrent_raster_reads,
+            wait,
+        )
+        raise ServiceOverloadedError(
+            "The service is at capacity for raster reads. "
+            "Please retry in a few seconds."
+        )
+    try:
+        yield
+    finally:
+        semaphore.release()
+
+
+async def within_budget[T](request: Request, awaitable: Awaitable[T]) -> T:
+    """Await one workflow, ending it with 504 once its budget is spent.
+
+    ``workflow_budget_seconds`` was configured and documented as enforced, and
+    nothing read it. This is the one place it is applied; the expensive routes
+    await their service call through it.
+
+    Only THIS timeout becomes a 504: a ``TimeoutError`` raised by the work
+    itself (an upstream that timed out) propagates unchanged, because
+    ``asyncio.timeout`` reports separately whether it was the one that expired.
+
+    KNOWN LIMITATION: cancelling the awaiting coroutine cannot stop a raster
+    read already running in a worker thread. That read finishes (bounded by
+    the HTTP timeouts below it) and its result is discarded; the request's
+    workflow slot is released at once.
+    """
+
+    limits: RequestLimits | None = getattr(request.app.state, "limits", None)
+    if limits is None:
+        return await awaitable
+    budget = limits.settings.workflow_budget_seconds
+    deadline = asyncio.timeout(budget)
+    try:
+        async with deadline:
+            return await awaitable
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
+        logger.warning("workflow exceeded its %.0fs budget", budget)
+        raise WorkflowTimeoutError(
+            f"The request did not finish within {budget:.0f} seconds and was "
+            "stopped. Try a smaller area or a single period."
+        ) from exc
 
 
 @dataclass

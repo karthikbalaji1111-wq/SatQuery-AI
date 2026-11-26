@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from app.core.limits import rate_limited, workflow_slot
+from app.core.limits import rate_limited, within_budget, workflow_slot
 from app.services.satellite import (
     ImageryRequest,
     ImageryResponse,
@@ -38,12 +38,13 @@ def get_imagery_service() -> ImageryService:
 )
 async def search_scenes(
     request: SceneSearchRequest,
+    http_request: Request,
     service: SatelliteService = Depends(get_satellite_service),
 ) -> SceneSearchResponse:
     """Discover Sentinel-2 L2A scenes (STAC metadata only) for a bounding box
     and date range, with optional cloud-cover and result limits."""
 
-    return await service.search(request)
+    return await within_budget(http_request, service.search(request))
 
 
 @router.post(
