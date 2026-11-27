@@ -184,9 +184,12 @@ class Settings(BaseSettings):
     #: per caller rather than shared by everyone behind the proxy; see
     #: ``core/limits._client_of`` and DEPLOYMENT.md for how to measure it.
     trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
-    #: Simultaneous windowed COG reads. Raster work is the memory-hungriest
-    #: thing this process does, and this machine has been OOM-killed before.
-    max_concurrent_raster_reads: int = 2
+    #: Simultaneous windowed COG reads, process-wide. Memory is bounded by the
+    #: workflow count and the tile size (every band of a tile is held until it
+    #: is measured, however the reads are scheduled); this bounds open remote
+    #: connections. A remote read is latency-bound, so a tile's bands are read
+    #: together: six halved a whole-city analysis (388 s -> 194 s, measured).
+    max_concurrent_raster_reads: int = 6
     #: How long a request may wait for a slot before it is refused. Absorbs a
     #: passing burst without letting a queue grow without bound.
     admission_wait_seconds: float = 2.0

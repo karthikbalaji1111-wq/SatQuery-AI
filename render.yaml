@@ -88,7 +88,7 @@ services:
       - key: SATQUERY_MAX_CONCURRENT_WORKFLOWS
         value: "2"
       - key: SATQUERY_MAX_CONCURRENT_RASTER_READS
-        value: "2"
+        value: "6"
       - key: SATQUERY_MAX_REQUEST_BYTES
         value: "1000000"
       - key: SATQUERY_WORKFLOW_BUDGET_SECONDS

@@ -28,6 +28,7 @@ here without changing this contract.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Mapping
 from datetime import datetime
@@ -730,30 +731,44 @@ class AnalysisService(DomainService):
             live = tuple(k for k in keys if k not in failed)
             if not live:
                 break
-            try:
-                scl = await self._read_tile(
-                    scene_id=window.selected_scene_id, bbox=bbox, asset=_SCL_ASSET,
-                    collection=collection, plan=plan, tile=tile,
-                )
-            except AppError as exc:
-                fail(_scl_unavailable("Spectral indices", window, exc.message), live)
-                break
-            bands: dict[str, BandWindow] = {}
-            for asset in bands_for(live):
-                try:
-                    bands[asset] = await self._read_tile(
+            # The tile's bands are read concurrently: a remote read is bound by
+            # latency, not memory - every band of the tile is held until it is
+            # measured either way - and the raster gate still caps how many
+            # reads the process runs at once.
+            assets = (_SCL_ASSET, *bands_for(live))
+            reads = await asyncio.gather(
+                *(
+                    self._read_tile(
                         scene_id=window.selected_scene_id, bbox=bbox, asset=asset,
                         collection=collection, plan=plan, tile=tile,
                     )
-                except AppError as exc:
+                    for asset in assets
+                ),
+                return_exceptions=True,
+            )
+            outcome = dict(zip(assets, reads, strict=True))
+            scl_read = outcome.pop(_SCL_ASSET)
+            if isinstance(scl_read, AppError):
+                fail(_scl_unavailable("Spectral indices", window, scl_read.message), live)
+                break
+            if isinstance(scl_read, BaseException):
+                raise scl_read
+            scl = scl_read
+            bands: dict[str, BandWindow] = {}
+            for asset, read in outcome.items():
+                if isinstance(read, AppError):
                     fail(
                         f"The {asset} band could not be read, so any index needing "
-                        f"it was not computed: {exc.message}",
+                        f"it was not computed: {read.message}",
                         tuple(
                             k for k in live
                             if asset in (resolve_index(k).high_band, resolve_index(k).low_band)
                         ),
                     )
+                elif isinstance(read, BaseException):
+                    raise read
+                else:
+                    bands[asset] = read
             scl_on_grid: dict[tuple[object, ...], BandWindow] = {}
             for key in live:
                 if key in failed:
@@ -844,21 +859,29 @@ class AnalysisService(DomainService):
         difference_refusals: list[str] = []
         states: list[GridState] = []
         for tile in plan.tiles:
-            bands: dict[str, BandWindow] = {}
-            for polarization in SAR_POLARIZATIONS:
-                if polarization in failed:
-                    continue
-                try:
-                    bands[polarization] = await self._read_tile(
+            wanted = [p for p in SAR_POLARIZATIONS if p not in failed]
+            reads = await asyncio.gather(
+                *(
+                    self._read_tile(
                         scene_id=window.selected_scene_id, bbox=bbox, asset=polarization,
                         collection=collection, plan=plan, tile=tile,
                     )
-                except AppError as exc:
+                    for polarization in wanted
+                ),
+                return_exceptions=True,
+            )
+            bands: dict[str, BandWindow] = {}
+            for polarization, read in zip(wanted, reads, strict=True):
+                if isinstance(read, AppError):
                     failed[polarization] = (
                         f"The {polarization} polarization could not be read for the "
                         f"{window.modality} window {window.label!r}, so no "
-                        f"{polarization} statistics were computed: {exc.message}"
+                        f"{polarization} statistics were computed: {read.message}"
                     )
+                elif isinstance(read, BaseException):
+                    raise read
+                else:
+                    bands[polarization] = read
             for polarization, band in bands.items():
                 stats[polarization].append(
                     compute_polarization_statistics(band, polarization=polarization)
@@ -945,9 +968,9 @@ class AnalysisService(DomainService):
                 collection=observation.collection, plan=plan, tile=tile,
             )
 
-        scl = await read(_SCL_ASSET)
-        high_source = await read(index.high_band)
-        low_source = await read(index.low_band)
+        scl, high_source, low_source = await asyncio.gather(
+            read(_SCL_ASSET), read(index.high_band), read(index.low_band)
+        )
         high, low = _on_finer_grid(high_source, low_source)
         masked = mask_with_scl(
             high,
@@ -1047,11 +1070,16 @@ class AnalysisService(DomainService):
             accumulator = ChangeAccumulator(first_plan, index=index.key, label=index.label)
             sides: list[list[tuple[list[Measurement], PixelQuality, GridState]]] = [[], []]
             for tile in first_plan.tiles:
-                read = []
-                for side, observation in enumerate(observations):
-                    part, green, nir = await self._observation_tile(
-                        observation, bbox, first_plan, tile, statuses[side], index
+                both = await asyncio.gather(
+                    *(
+                        self._observation_tile(
+                            observation, bbox, first_plan, tile, statuses[side], index
+                        )
+                        for side, observation in enumerate(observations)
                     )
+                )
+                read = []
+                for side, (part, green, nir) in enumerate(both):
                     sides[side].append(part)
                     read.append((green, nir))
                 accumulator.add(
