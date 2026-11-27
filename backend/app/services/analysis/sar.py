@@ -302,20 +302,53 @@ def compute_sar_backscatter(
     """
 
     statistics: list[SarPolarizationStatistics] = []
-    warnings: list[str] = []
     for polarization, band in (("vv", vv), ("vh", vh)):
         if band is None:
             continue
-        result = compute_polarization_statistics(band, polarization=polarization)
-        statistics.append(result)
-        warnings.extend(_exclusion_warnings(result))
+        statistics.append(compute_polarization_statistics(band, polarization=polarization))
 
     difference: SarPolarizationDifference | None = None
+    difference_warnings: list[str] = []
     if vv is not None and vh is not None:
         difference, difference_warnings = compare_polarizations(vv, vh)
+    return assemble_sar_result(
+        statistics=statistics,
+        difference=difference,
+        difference_warnings=difference_warnings,
+        both_read=vv is not None and vh is not None,
+        vv_read=vv is not None,
+        scene_id=scene_id,
+        window_label=window_label,
+        acquired_at=acquired_at,
+        collection=collection,
+    )
+
+
+def assemble_sar_result(
+    *,
+    statistics: list[SarPolarizationStatistics],
+    difference: SarPolarizationDifference | None,
+    difference_warnings: list[str],
+    both_read: bool,
+    vv_read: bool,
+    scene_id: str,
+    window_label: str,
+    acquired_at: datetime | None = None,
+    collection: str | None = None,
+) -> SarBackscatterResult:
+    """The result, its measurements and its warnings, from statistics already made.
+
+    Shared by one read (:func:`compute_sar_backscatter`) and by a large area
+    measured in tiles, so both report in exactly the same words and order.
+    """
+
+    warnings: list[str] = []
+    for result in statistics:
+        warnings.extend(_exclusion_warnings(result))
+    if both_read:
         warnings.extend(difference_warnings)
     else:
-        missing = "VH" if vv is not None else "VV"
+        missing = "VH" if vv_read else "VV"
         warnings.append(
             f"No VV/VH difference was computed: {missing} was not read for this "
             "scene."

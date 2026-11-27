@@ -597,6 +597,37 @@ def _change_rgba(change: np.ndarray, paired: np.ndarray) -> np.ndarray:
     return rgba
 
 
+def ndwi_change_grid(
+    *,
+    first_green: BandWindow,
+    first_nir: BandWindow,
+    second_green: BandWindow,
+    second_nir: BandWindow,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(change, paired)``: ``second - first`` NDWI where both are valid.
+
+    The arithmetic of :func:`compute_ndwi_temporal_change`, without its PNG,
+    for a caller assembling a large area tile by tile. The caller is
+    responsible for both pairs being on one grid; this re-checks it.
+    """
+
+    problem = _grids_are_comparable(first_green, second_green)
+    if problem is not None:
+        raise ImageryError(f"Cannot compute an NDWI change: {problem}.")
+    first_ndwi, first_valid = _ndwi_grid(first_green, first_nir)
+    second_ndwi, second_valid = _ndwi_grid(second_green, second_nir)
+    paired = first_valid & second_valid
+    change = np.zeros(first_ndwi.shape, dtype=np.float64)
+    np.subtract(second_ndwi, first_ndwi, out=change, where=paired)
+    return change, paired
+
+
+def change_rgba(change: np.ndarray, paired: np.ndarray) -> np.ndarray:
+    """The change ramp of the NDWI change overlay, for a tiled caller."""
+
+    return _change_rgba(change, paired)
+
+
 def compute_ndwi_temporal_change(
     *,
     first_green: BandWindow,

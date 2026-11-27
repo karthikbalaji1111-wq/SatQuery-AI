@@ -1372,7 +1372,9 @@ def test_read_band_resolves_green_and_nir_from_the_stac_item() -> None:
         "B03.tif",
         "B08.tif",
     ]
-    assert fetcher.collections == ["sentinel-2-l2a", "sentinel-2-l2a"]
+    # The item is fetched ONCE per service instance (one request): every band,
+    # and every tile of a large area, reads the same item.
+    assert fetcher.collections == ["sentinel-2-l2a"]
 
 
 def test_read_band_is_collection_aware() -> None:

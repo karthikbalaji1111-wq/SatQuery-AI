@@ -546,23 +546,32 @@ def _check_aoi_size(
     grid_spacing_m: float,
     limits: QuantitativeReadLimits | None,
     field: str,
+    *,
+    tiled: bool = False,
 ) -> None:
     """Refuse an area the reader would refuse, before anything is fetched.
 
     ``limits`` is whatever the reader DECLARES. ``None`` - a reader that
     declares none - means no early check: the rule belongs to the reader, and
-    this module only moves it earlier.
+    this module only moves it earlier. ``tiled`` selects the larger bounds of
+    the analyses that read in tiles, when the reader declares them.
     """
 
     if limits is None:
         return
-    columns, rows = estimated_window_pixels(bbox, grid_spacing_m)
-    if max(columns, rows) <= limits.max_dimension and (
-        columns * rows <= limits.max_window_pixels
+    max_dimension, max_pixels = limits.max_dimension, limits.max_window_pixels
+    if (
+        tiled
+        and limits.tiled_max_dimension is not None
+        and limits.tiled_max_window_pixels is not None
     ):
+        max_dimension = limits.tiled_max_dimension
+        max_pixels = limits.tiled_max_window_pixels
+    columns, rows = estimated_window_pixels(bbox, grid_spacing_m)
+    if max(columns, rows) <= max_dimension and columns * rows <= max_pixels:
         return
     width_m, height_m = aoi_extent_m(bbox)
-    limit_km = limits.max_dimension * grid_spacing_m / 1000.0
+    limit_km = min(max_dimension, math.sqrt(max_pixels)) * grid_spacing_m / 1000.0
     raise AnalysisRequestRejectedError(
         "aoi_too_large",
         field,
@@ -993,6 +1002,8 @@ def check_operations_area(
     operations: Sequence[AnalysisOperation],
     limits: QuantitativeReadLimits | None,
     field: str,
+    *,
+    tiled: bool = False,
 ) -> None:
     """The area rule for a set of operations, on its own.
 
@@ -1004,7 +1015,7 @@ def check_operations_area(
     if not operations:
         return
     spacing = min(OPERATIONS[op].grid_spacing_m for op in operations)
-    _check_aoi_size(bbox, spacing, limits, field)
+    _check_aoi_size(bbox, spacing, limits, field, tiled=tiled)
 
 
 def validate_execution_analysis(
@@ -1041,7 +1052,11 @@ def validate_execution_analysis(
         return ExecutionAnalysisGate(operations=(), bbox=bbox, size_checked=False)
 
     specs = [OPERATIONS[op] for op in operations]
-    check_operations_area(bbox, operations, limits, "execution.plan.bbox")
+    # The single-scene NDWI path (``include_ndwi``) draws an overlay from one
+    # read and is not tiled; every other analysis is.
+    check_operations_area(
+        bbox, operations, limits, "execution.plan.bbox", tiled=not request.include_ndwi
+    )
 
     known = _known_datasets(settings)
     families = {s.modality for s in specs}

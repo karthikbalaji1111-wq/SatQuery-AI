@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import rasterio
-from rasterio.crs import CRSError
+from rasterio.crs import CRS, CRSError
 from rasterio.errors import RasterioIOError
 from rasterio.transform import Affine
 from rasterio.warp import transform as warp_coordinates
@@ -244,6 +244,28 @@ def _normalize_sar_band(band: np.ndarray, *, nodata: float | None) -> np.ndarray
     return normalize_sar_display(band, nodata=nodata)[0]
 
 
+def aoi_window(
+    bbox: BoundingBox,
+    *,
+    crs: str,
+    transform: Affine,
+    width: int,
+    height: int,
+) -> Window:
+    """The native window a read of ``bbox`` opens on a raster of this grid.
+
+    The same steps :func:`_extract_band_window` takes - densified reprojection,
+    ``from_bounds``, outward clamp - so a tile plan computed from catalog grid
+    metadata names exactly the window the reader would have read in one piece.
+    """
+
+    proj_bounds = transform_bounds(
+        _WGS84, crs, bbox.west, bbox.south, bbox.east, bbox.north, densify_pts=21
+    )
+    raw = from_bounds(*proj_bounds, transform=transform)
+    return _clamp_window_to_source(raw, width, height)
+
+
 def _clamp_window_to_source(raw: Window, src_width: int, src_height: int) -> Window:
     col_off = max(0, math.floor(raw.col_off))
     row_off = max(0, math.floor(raw.row_off))
@@ -443,24 +465,67 @@ def _band_validity(values: np.ndarray, nodata: float | None) -> np.ndarray:
     return valid
 
 
+#: A computed window edge this close to a whole pixel IS that pixel edge: the
+#: difference is floating-point noise from the affine arithmetic, not ground.
+_EDGE_SNAP_PX = 1e-6
+
+
+def _snap(value: float) -> float:
+    nearest = round(value)
+    return float(nearest) if abs(value - nearest) < _EDGE_SNAP_PX else value
+
+
+def _window_from_native_bounds(
+    src, bounds: tuple[float, float, float, float], crs: str
+) -> Window:
+    """The window covering ``bounds`` given in the raster's OWN CRS.
+
+    Used for tiles: adjacent tiles share exact pixel edges in the source CRS,
+    so their windows abut with no pixel read twice and none skipped. Edges that
+    fall on a pixel boundary are snapped to it; the clamp that follows widens
+    any other edge outward (a coarser band read under a finer tile).
+    """
+
+    if CRS.from_user_input(crs) != src.crs:
+        raise ImageryError(
+            f"Tile bounds are in {crs} but the raster is in {src.crs}; a tile "
+            "is never reprojected."
+        )
+    raw = from_bounds(*bounds, transform=src.transform)
+    col_off, row_off = _snap(raw.col_off), _snap(raw.row_off)
+    col_end = _snap(raw.col_off + raw.width)
+    row_end = _snap(raw.row_off + raw.height)
+    return Window(col_off, row_off, col_end - col_off, row_end - row_off)
+
+
 def _extract_band_window(
     src,
     bbox: BoundingBox,
     *,
     max_dimension: int,
     max_window_pixels: int,
+    native_bounds: tuple[float, float, float, float] | None = None,
+    native_crs: str | None = None,
 ) -> BandWindow:
-    """Read one band of ``src`` over ``bbox`` at native resolution."""
+    """Read one band of ``src`` over ``bbox`` at native resolution.
+
+    With ``native_bounds`` (and its ``native_crs``) the window is that tile of
+    the area instead, given in the raster's own coordinates.
+    """
 
     if src.crs is None or src.transform is None or int(src.count) < 1:
         raise UpstreamServiceError("The remote raster metadata is invalid.")
 
     try:
-        proj_bounds = transform_bounds(
-            _WGS84, src.crs, bbox.west, bbox.south, bbox.east, bbox.north, densify_pts=21
-        )
-        raw_window = from_bounds(*proj_bounds, transform=src.transform)
-    except (ValueError, RasterioIOError) as exc:
+        if native_bounds is not None:
+            raw_window = _window_from_native_bounds(src, native_bounds, native_crs or "")
+        else:
+            proj_bounds = transform_bounds(
+                _WGS84, src.crs, bbox.west, bbox.south, bbox.east, bbox.north,
+                densify_pts=21,
+            )
+            raw_window = from_bounds(*proj_bounds, transform=src.transform)
+    except (ValueError, RasterioIOError, CRSError) as exc:
         raise ImageryError("Could not map the bbox onto the raster grid.") from exc
 
     window = _clamp_window_to_source(raw_window, src.width, src.height)
@@ -535,11 +600,15 @@ def read_band_window(
     *,
     max_dimension: int,
     max_window_pixels: int,
+    native_bounds: tuple[float, float, float, float] | None = None,
+    native_crs: str | None = None,
 ) -> BandWindow:
     """Open ``href`` remotely and read band 1 over ``bbox``, values preserved.
 
     The quantitative sibling of :func:`read_rgb_window`. It shares the window
     mathematics but never the display normalization, and never decimates.
+    ``native_bounds`` reads one tile of a larger area instead (see
+    :func:`_window_from_native_bounds`).
     """
 
     try:
@@ -549,6 +618,8 @@ def read_band_window(
                 bbox,
                 max_dimension=max_dimension,
                 max_window_pixels=max_window_pixels,
+                native_bounds=native_bounds,
+                native_crs=native_crs,
             )
     except RasterioIOError as exc:
         logger.warning("Raster open failed for %s (%s)", href.split("?", 1)[0], type(exc).__name__)

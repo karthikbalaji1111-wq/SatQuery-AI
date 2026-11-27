@@ -144,6 +144,15 @@ class Settings(BaseSettings):
     imagery_max_dimension: int = 1024
     imagery_hard_max_dimension: int = 2048
     imagery_max_window_pixels: int = 50_000_000
+    #: How large an area the standard analyses (spectral indices, the two-date
+    #: comparison and SAR backscatter) may cover. Larger than one read: such an
+    #: area is read in native-resolution tiles of at most
+    #: ``imagery_hard_max_dimension`` px, each read, masked and measured on its
+    #: own, and the tile statistics are combined exactly (pixel counts add,
+    #: means are pixel-weighted). Memory stays that of one tile; time grows
+    #: with the area. 5000 px is about 50 km at 10 m.
+    imagery_tiled_max_dimension: int = Field(default=5000, ge=1, le=20_000)
+    imagery_tiled_max_window_pixels: int = Field(default=25_000_000, ge=1)
     #: Scene validation refuses a scene whose footprint covers less than this
     #: fraction of the requested area. 0.0 (the default) refuses only a scene
     #: that does not reach the area at all and REPORTS partial coverage: there
