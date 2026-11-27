@@ -374,7 +374,7 @@ def system_outcome_full(text: str, label: str, classifier) -> tuple[str, str]:
 #: Each asks what a satellite image shows. When the datasets were written such
 #: questions were refused, so they carry the operation label UNSUPPORTED - and
 #: the model was trained with that label, which stays, because no measurable
-#: operation answers them. Since visual questions shipped (CLAUDE.md section
+#: operation answers them. Since visual questions shipped (PROJECT_RECORD.md section
 #: 34) the product answers them by retrieving the normal-colour image and
 #: describing it only when a visual model is configured. The full-pipeline
 #: judgement therefore expects imagery for exactly these rows. Listed by id,
@@ -385,7 +385,7 @@ SYSTEM_EXPECTATION: dict[str, str] = {
     "challenge-unsup-13": "TRUE_COLOR",
     # Vegetation and built-up change were refused when these rows were
     # labelled; the two-period comparison now exists for NDVI and NDBI
-    # (CLAUDE.md section 36). The model keeps its UNSUPPORTED label for them -
+    # (PROJECT_RECORD.md section 36). The model keeps its UNSUPPORTED label for them -
     # it has no comparison label but water's - and the rules decide.
     "unsup-082": "TEMPORAL_NDBI",
     "challenge2-unsup-04": "TEMPORAL_NDVI",

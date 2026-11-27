@@ -593,7 +593,7 @@ frontend/
       query/           configuration rail
 ```
 
-`CLAUDE.md` holds the authoritative phase-by-phase record, including the
+`PROJECT_RECORD.md` holds the authoritative phase-by-phase record, including the
 boundaries each phase deliberately did not cross and the architectural traps
 that were verified against live data.
 

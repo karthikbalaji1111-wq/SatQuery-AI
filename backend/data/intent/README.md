@@ -72,7 +72,7 @@ for the full decision rule.
   fixed and the model retrained on the SAME data with the same protocol. The
   challenge v2 numbers reported after that are therefore no longer fully
   blind for the items that exposed the gaps. The first, blind evaluation is
-  recorded in `CLAUDE.md` section 26.
+  recorded in `PROJECT_RECORD.md` section 26.
 - 39 of the 120 challenge-v2 items are >= 0.75 similar (char 4-gram Jaccard,
   after masking) to some training sentence: short question skeletons recur.
   The report states this per set.

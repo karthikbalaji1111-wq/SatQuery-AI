@@ -141,7 +141,7 @@ class OperationSpec:
     implemented: bool
     #: Pixel spacing of the finest grid the operation reads. The reader sizes
     #: its native window on this grid, so it is what the area limit is judged
-    #: against. Sentinel-2 10 m bands: live COG headers (CLAUDE.md section 6).
+    #: against. Sentinel-2 10 m bands: live COG headers (PROJECT_RECORD.md section 6).
     #: Sentinel-1 RTC: the collection's ``raster:bands.spatial_resolution`` for
     #: ``vv``/``vh`` is 10 (read from Planetary Computer, 2026-09-22) - the SAR
     #: RESOLUTION is 20 m, but the window is counted in grid pixels.

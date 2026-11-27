@@ -1,4 +1,4 @@
-# SatQuery AI — Claude Code Instructions
+# SatQuery AI — Engineering Record
 
 ## Project
 
@@ -498,7 +498,7 @@ Dependency order as built:
    nodata, transform, decimated GSD); engine unit tests on known arrays;
    `AnalysisService` tests with a fake imagery service; full Phase 1–10
    regression.
-7. `CLAUDE.md` — pipeline step 10.
+7. `PROJECT_RECORD.md` — pipeline step 10.
 
 **Pixel access mechanism:** pixels stay **server-side**. The engine re-retrieves
 through `ImageryService` keyed by `selected_scene_id` + `collection` + asset +
