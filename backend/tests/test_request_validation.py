@@ -157,11 +157,11 @@ def test_missing_operation_is_refused() -> None:
 
 
 @pytest.mark.parametrize("operation", ["temporal_ndvi", "temporal_ndbi"])
-def test_recognised_but_unimplemented_operation_says_so(operation: str) -> None:
-    """Distinguishes "fix your request" from "no engine yet"."""
+def test_vegetation_and_built_up_change_now_have_an_engine(operation: str) -> None:
+    """Formerly refused as "no engine yet"; the two-date comparison now runs
+    for NDVI and NDBI with the same rules as for NDWI."""
 
-    error = rejected(temporal_body(operation=operation), "analysis_not_implemented")
-    assert "no engine" in error.message
+    assert validate(temporal_body(operation=operation)).operation.value == operation
 
 
 def test_a_long_unknown_value_is_never_echoed_in_full() -> None:
@@ -173,7 +173,10 @@ def test_the_allowlist_matches_the_engines_that_exist() -> None:
     """Pins the allowlist: adding an engine must be a deliberate edit here."""
 
     implemented = {op.value for op, spec in OPERATIONS.items() if spec.implemented}
-    assert implemented == {"ndvi", "ndwi", "ndbi", "sar_backscatter", "temporal_ndwi"}
+    assert implemented == {
+        "ndvi", "ndwi", "ndbi", "sar_backscatter",
+        "temporal_ndwi", "temporal_ndvi", "temporal_ndbi",
+    }
 
 
 # =========================================================================== #

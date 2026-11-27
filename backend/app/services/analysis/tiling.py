@@ -364,6 +364,8 @@ class ChangeAccumulator:
     """
 
     plan: TilePlan
+    index: str = "ndwi"
+    label: str = "NDWI"
     stride: int = 1
     count: int = 0
     total: float = 0.0
@@ -391,6 +393,7 @@ class ChangeAccumulator:
             first_nir=first_nir,
             second_green=second_green,
             second_nir=second_nir,
+            label=self.label,
         )
         measured = change[paired]
         if measured.size:
@@ -437,6 +440,7 @@ class ChangeAccumulator:
             valid_pixel_count=self.count,
         )
         return NdwiTemporalChange(
+            index=self.index,  # type: ignore[arg-type]
             first_scene_id=first_scene_id,
             second_scene_id=second_scene_id,
             first_acquired_at=first_acquired_at,

@@ -62,6 +62,19 @@ _TEMPLATES: tuple[tuple[str, str], ...] = (
         "temporal_ndwi.difference.mean_ndwi_difference",
         "The mean NDWI difference was {value} index.",
     ),
+    # The same comparison tool, measuring vegetation or built-up area.
+    ("temporal_ndwi.first.ndvi_mean", "The earlier mean NDVI was {value} index."),
+    ("temporal_ndwi.second.ndvi_mean", "The later mean NDVI was {value} index."),
+    (
+        "temporal_ndwi.difference.mean_ndvi_difference",
+        "The mean NDVI difference was {value} index.",
+    ),
+    ("temporal_ndwi.first.ndbi_mean", "The earlier mean NDBI was {value} index."),
+    ("temporal_ndwi.second.ndbi_mean", "The later mean NDBI was {value} index."),
+    (
+        "temporal_ndwi.difference.mean_ndbi_difference",
+        "The mean NDBI difference was {value} index.",
+    ),
 )
 
 

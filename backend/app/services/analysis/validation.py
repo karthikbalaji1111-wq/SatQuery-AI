@@ -114,10 +114,10 @@ def _shown(value: object) -> str:
 class AnalysisOperation(StrEnum):
     """Every operation the pipeline RECOGNISES.
 
-    Recognised is not the same as implemented: temporal NDVI and NDBI are named
-    here so a request for them is refused as "not implemented" rather than as
-    a string nobody has heard of. The difference tells a client whether to fix
-    its request or wait for an engine.
+    Recognised is not the same as implemented: an operation named here without
+    an engine is refused as "not implemented" rather than as a string nobody
+    has heard of. The difference tells a client whether to fix its request or
+    wait for an engine. Every operation listed today has an engine.
     """
 
     NDVI = "ndvi"
@@ -158,8 +158,8 @@ OPERATIONS: Mapping[AnalysisOperation, OperationSpec] = {
         OperationSpec(AnalysisOperation.NDBI, _OPTICAL, False, True, 10.0),
         OperationSpec(AnalysisOperation.SAR_BACKSCATTER, _SAR, False, True, 10.0),
         OperationSpec(AnalysisOperation.TEMPORAL_NDWI, _OPTICAL, True, True, 10.0),
-        OperationSpec(AnalysisOperation.TEMPORAL_NDVI, _OPTICAL, True, False, 10.0),
-        OperationSpec(AnalysisOperation.TEMPORAL_NDBI, _OPTICAL, True, False, 10.0),
+        OperationSpec(AnalysisOperation.TEMPORAL_NDVI, _OPTICAL, True, True, 10.0),
+        OperationSpec(AnalysisOperation.TEMPORAL_NDBI, _OPTICAL, True, True, 10.0),
     )
 }
 
@@ -968,6 +968,7 @@ def operations_for_flags(
     include_ndwi: bool = False,
     include_temporal_ndwi: bool = False,
     include_sar_backscatter: bool = False,
+    temporal_index: str = "ndwi",
 ) -> tuple[AnalysisOperation, ...]:
     """The live contract's flags, in the allowlist's vocabulary, de-duplicated.
 
@@ -980,7 +981,7 @@ def operations_for_flags(
     if include_ndwi:
         ordered.append(AnalysisOperation.NDWI)
     if include_temporal_ndwi:
-        ordered.append(AnalysisOperation.TEMPORAL_NDWI)
+        ordered.append(AnalysisOperation(f"temporal_{temporal_index}"))
     if include_sar_backscatter:
         ordered.append(AnalysisOperation.SAR_BACKSCATTER)
     return tuple(dict.fromkeys(ordered))
@@ -994,6 +995,7 @@ def requested_operations(request: AnalysisRequest) -> tuple[AnalysisOperation, .
         include_ndwi=request.include_ndwi,
         include_temporal_ndwi=request.include_temporal_ndwi,
         include_sar_backscatter=request.include_sar_backscatter,
+        temporal_index=request.temporal_index,
     )
 
 

@@ -12,10 +12,10 @@
     "sklearn_equivalence_same_argmax": true
   },
   "latency_ms": {
-    "predict_mean": 0.04922710000834701,
-    "predict_p95": 0.06888125062687322,
-    "route_operation_mean": 0.2726115653390677,
-    "route_operation_p95": 0.3743500499695074
+    "predict_mean": 0.04623085119617273,
+    "predict_p95": 0.06430029861803631,
+    "route_operation_mean": 0.25315759273286426,
+    "route_operation_p95": 0.34893124939117115
   },
   "threshold": 0.95,
   "threshold_calibration": [
@@ -731,8 +731,8 @@
       ]
     },
     "full_pipeline_model_plus_rules": {
-      "correct": 175,
-      "clarified_safely": 9,
+      "correct": 174,
+      "clarified_safely": 10,
       "wrong_operation_executed": 0,
       "examples": [
         {
@@ -797,12 +797,19 @@
           "intent": "TEMPORAL_NDWI",
           "outcome": "clarified",
           "detail": "clarify:date_ambiguous"
+        },
+        {
+          "id": "unsup-082",
+          "text": "Compare built-up area in Bengaluru between 2010 and 2024",
+          "intent": "UNSUPPORTED",
+          "outcome": "clarified",
+          "detail": "clarify:date_invalid"
         }
       ]
     },
     "full_pipeline_rules_only": {
-      "correct": 162,
-      "clarified_safely": 21,
+      "correct": 161,
+      "clarified_safely": 22,
       "wrong_operation_executed": 1,
       "examples": [
         {
@@ -937,6 +944,13 @@
           "intent": "TRUE_COLOR",
           "outcome": "clarified",
           "detail": "clarify:analysis_missing"
+        },
+        {
+          "id": "unsup-082",
+          "text": "Compare built-up area in Bengaluru between 2010 and 2024",
+          "intent": "UNSUPPORTED",
+          "outcome": "clarified",
+          "detail": "clarify:date_invalid"
         },
         {
           "id": "ndbi-133",

@@ -327,6 +327,9 @@ _EXPECTED = {
     "SAR_BACKSCATTER": (["sar_backscatter"], False),
     "TRUE_COLOR": (["imagery"], False),
     "TEMPORAL_NDWI": (["temporal_ndwi"], True),
+    # System outcomes only: the model has no such labels (see SYSTEM_EXPECTATION).
+    "TEMPORAL_NDVI": (["temporal_ndvi"], True),
+    "TEMPORAL_NDBI": (["temporal_ndbi"], True),
 }
 
 
@@ -380,6 +383,14 @@ SYSTEM_EXPECTATION: dict[str, str] = {
     "unsup-101": "TRUE_COLOR",
     "challenge2-unsup-14": "TRUE_COLOR",
     "challenge-unsup-13": "TRUE_COLOR",
+    # Vegetation and built-up change were refused when these rows were
+    # labelled; the two-period comparison now exists for NDVI and NDBI
+    # (CLAUDE.md section 36). The model keeps its UNSUPPORTED label for them -
+    # it has no comparison label but water's - and the rules decide.
+    "unsup-082": "TEMPORAL_NDBI",
+    "challenge2-unsup-04": "TEMPORAL_NDVI",
+    "challenge2-unsup-05": "TEMPORAL_NDBI",
+    "challenge-unsup-12": "TEMPORAL_NDVI",
 }
 
 

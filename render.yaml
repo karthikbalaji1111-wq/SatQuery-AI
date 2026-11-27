@@ -77,6 +77,14 @@ services:
       # with 2 GB can return to the defaults (2048 px, 4 workflows).
       - key: SATQUERY_IMAGERY_HARD_MAX_DIMENSION
         value: "1024"
+      # Larger areas are measured in tiles of that size (memory stays that of
+      # one tile; time grows with the area). 4500 px is about 45 km at 10 m and
+      # takes a whole city such as Chennai (about 21 x 42 km); on the free
+      # plan's CPU such a run takes a few minutes.
+      - key: SATQUERY_IMAGERY_TILED_MAX_DIMENSION
+        value: "4500"
+      - key: SATQUERY_IMAGERY_TILED_MAX_WINDOW_PIXELS
+        value: "16000000"
       - key: SATQUERY_MAX_CONCURRENT_WORKFLOWS
         value: "2"
       - key: SATQUERY_MAX_CONCURRENT_RASTER_READS

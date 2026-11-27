@@ -812,7 +812,7 @@ def test_service_performs_no_pixel_arithmetic() -> None:
 
     assert "import numpy" not in source
     assert "np." not in source
-    assert "compare_ndwi_observations" in source
+    assert "compare_index_observations" in source
 
 
 def test_service_does_not_modify_the_phase_13_compatibility_module() -> None:

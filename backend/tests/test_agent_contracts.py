@@ -228,8 +228,16 @@ def test_invalid_execute_query_parameters_are_rejected(bad: dict[str, Any]) -> N
 def test_analysis_tool_params_carry_no_free_parameters() -> None:
     """The analysis tools are flags; they must not accept tunable knobs."""
 
-    for model in (NdwiParams, TemporalNdwiParams):
-        assert set(model.model_fields) == {"tool"}
+    assert set(NdwiParams.model_fields) == {"tool"}
+    # The comparison chooses WHICH index from a closed set - like
+    # spectral_indices - and nothing else: no threshold, no band, no window.
+    assert set(TemporalNdwiParams.model_fields) == {"tool", "index"}
+    assert TemporalNdwiParams().index == "ndwi"
+    for key in ("ndwi", "ndvi", "ndbi"):
+        assert TemporalNdwiParams(index=key).index == key
+    for bad in ("evi", "NDVI ", "swir16", ""):
+        with pytest.raises(ValidationError):
+            TemporalNdwiParams(index=bad)  # type: ignore[arg-type]
 
 
 # =========================================================================== #

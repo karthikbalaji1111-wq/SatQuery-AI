@@ -411,6 +411,9 @@ class NdwiTemporalChange(BaseModel):
     ``.second`` and are not copied here.
     """
 
+    #: The index compared: "ndwi" (the original, and the default), "ndvi" or
+    #: "ndbi". The model keeps its NDWI name for contract compatibility.
+    index: Literal["ndwi", "ndvi", "ndbi"] = "ndwi"
     first_scene_id: str
     second_scene_id: str
     first_acquired_at: datetime | None = None
@@ -589,6 +592,11 @@ class AnalysisRequest(BaseModel):
     #: pixels, so it is never produced without the statistics.
     include_ndwi_overlay: bool = False
     include_temporal_ndwi: bool = False
+    #: Which index the two-date comparison measures when
+    #: ``include_temporal_ndwi`` is set. "ndwi" (water, the default and the
+    #: original behaviour), "ndvi" (vegetation) or "ndbi" (built-up). Every
+    #: rule of the comparison is the same; only the band pair changes.
+    temporal_index: Literal["ndwi", "ndvi", "ndbi"] = "ndwi"
     #: Quantitative Sentinel-1 RTC backscatter (VV and VH) for one SAR window.
     include_sar_backscatter: bool = False
     #: Additional spectral indices to compute over the same optical window,

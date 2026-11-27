@@ -289,10 +289,12 @@ def pair_files(tmp_path_factory: pytest.TempPathFactory, scene_files: dict[str, 
     t20 = Affine(20, 0, t10.c, 0, -20, t10.f)
     rng = np.random.default_rng(99)
     later: dict[str, Path] = {}
-    for name in ("B03", "B08"):
+    for name in ("B03", "B04", "B08"):
         data = rng.integers(1, 6000, (h, w), dtype=np.uint16)
         later[name] = root / f"{name}.tif"
         _write(later[name], data, t10, 0)
+    later["B11"] = root / "B11.tif"
+    _write(later["B11"], rng.integers(1, 6000, (h // 2, w // 2), dtype=np.uint16), t20, 0)
     classes = rng.choice(np.array([4, 5, 6, 8], dtype=np.uint8), (h // 2, w // 2))
     later["SCL"] = root / "SCL.tif"
     _write(later["SCL"], classes, t20, 0)
@@ -322,7 +324,7 @@ def _pair_service(scene_files: dict, pair_files: dict, tile: int) -> AnalysisSer
     )
 
 
-def _pair_run(service: AnalysisService, later_id: str):
+def _pair_run(service: AnalysisService, later_id: str, index: str = "ndwi"):
     first = window(client_scene(SCENE_ID), label="baseline", start="2025-01-01", end="2025-01-10")
     second = window(
         client_scene(later_id, datetime="2025-01-19T05:15:39Z"),
@@ -330,7 +332,11 @@ def _pair_run(service: AnalysisService, later_id: str):
     )
     exec_result = execution([first, second], temporal=True)
     return asyncio.run(
-        service.analyze(AnalysisRequest(execution=exec_result, include_temporal_ndwi=True))
+        service.analyze(
+            AnalysisRequest(
+                execution=exec_result, include_temporal_ndwi=True, temporal_index=index
+            )
+        )
     )
 
 
@@ -395,3 +401,33 @@ def test_a_large_change_map_is_drawn_smaller_but_measured_in_full(
     assert tiled.change.paired_valid_pixel_count == whole.change.paired_valid_pixel_count
     assert overlay.valid_pixel_count == whole.change.paired_valid_pixel_count
     assert overlay.corners_wgs84 == whole.change.corners_wgs84
+
+
+@pytest.mark.parametrize("index", ["ndvi", "ndbi"])
+def test_vegetation_and_built_up_change_tiled_equal_one_read(
+    scene_files: dict, pair_files: dict, index: str
+) -> None:
+    later = pair_files["later_id"]
+    tiled_result = _pair_run(_pair_service(scene_files, pair_files, TILE), later, index)
+    whole_result = _pair_run(_pair_service(scene_files, pair_files, 2048), later, index)
+    tiled, whole = tiled_result.temporal_comparison, whole_result.temporal_comparison
+    assert tiled is not None and whole is not None
+    assert {o.name: o.status for o in tiled_result.analysis_outcomes} == {
+        f"temporal_{index}": "completed"
+    }
+    assert [d.name for d in whole.differences] == [f"mean_{index}_difference"]
+    for x, y in zip(tiled.differences, whole.differences, strict=True):
+        assert math.isclose(x.value, y.value, rel_tol=1e-12, abs_tol=1e-12)
+    for a, b in ((tiled.first, whole.first), (tiled.second, whole.second)):
+        ma = {m.name: m.value for m in a.measurements}
+        mb = {m.name: m.value for m in b.measurements}
+        assert f"{index}_mean" in mb and ma.keys() == mb.keys()
+        for name, value in mb.items():
+            assert math.isclose(ma[name], value, rel_tol=1e-12, abs_tol=1e-12), name
+    assert tiled.change is not None and whole.change is not None
+    assert tiled.change.index == whole.change.index == index
+    assert tiled.change.paired_valid_pixel_count == whole.change.paired_valid_pixel_count
+    assert math.isclose(tiled.change.change_mean, whole.change.change_mean, rel_tol=1e-12)
+    # Wording names the index compared, never water.
+    words = " ".join(whole.warnings)
+    assert "NDWI" not in words and index.upper() in words

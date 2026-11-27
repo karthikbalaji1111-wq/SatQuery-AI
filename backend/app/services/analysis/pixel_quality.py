@@ -447,11 +447,12 @@ def temporal_quality_note(
     applied to the other.
     """
 
+    label = first.index.upper()
     paired = (
         f"{paired_valid} pixels are usable on both dates and are the only pixels "
-        "the paired NDWI change uses"
+        f"the paired {label} change uses"
         if paired_valid is not None
-        else "no paired NDWI change was computed"
+        else f"no paired {label} change was computed"
     )
     return (
         f"Pixel quality: {first.window_label!r} has {first.valid_pixels} usable "

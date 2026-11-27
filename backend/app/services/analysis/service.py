@@ -39,7 +39,7 @@ from app.core.logging import get_logger
 from app.services.analysis import geometry
 from app.services.analysis.engines import (
     _grids_are_comparable,
-    compare_ndwi_observations,
+    compare_index_observations,
     compute_index_measurements,
     compute_ndwi_measurements,
     compute_ndwi_temporal_change,
@@ -47,7 +47,7 @@ from app.services.analysis.engines import (
     coregister_to_finer_grid,
     render_ndwi_overlay,
 )
-from app.services.analysis.indices import SpectralIndex, bands_for, resolve_index
+from app.services.analysis.indices import NDWI, SpectralIndex, bands_for, resolve_index
 from app.services.analysis.pixel_quality import (
     align_scl_to_grid,
     mask_with_scl,
@@ -403,6 +403,31 @@ def _coverage_warnings(scene: ValidatedScene | None, label: str) -> list[str]:
         f"{scene.aoi_coverage.fraction:.1%} of the requested area by its catalog "
         f"{scene.aoi_coverage.basis}; its statistics describe only the part it covers."
     ]
+
+
+def _on_finer_grid(high: BandWindow, low: BandWindow) -> tuple[BandWindow, BandWindow]:
+    """A band pair on the finer of its two grids, by whole-cell assignment.
+
+    NDBI pairs 20 m SWIR with 10 m NIR; this is the same explicit placement the
+    single-date indices use (``coregister_to_finer_grid``). Same-grid pairs
+    pass through untouched.
+    """
+
+    if high.values.shape == low.values.shape:
+        return high, low
+    if (high.resolution or 0) > (low.resolution or 0):
+        return coregister_to_finer_grid(high, low), low
+    return high, coregister_to_finer_grid(low, high)
+
+
+def _observation_measurements(
+    index: SpectralIndex, high: BandWindow, low: BandWindow
+) -> list[Measurement]:
+    """One observation's statistics: NDWI keeps its index-threshold share."""
+
+    if index.key == NDWI.key:
+        return compute_ndwi_measurements(high, low)
+    return compute_index_measurements(index, high, low)
 
 
 class AnalysisService(DomainService):
@@ -910,6 +935,7 @@ class AnalysisService(DomainService):
         plan: TilePlan,
         tile: Tile,
         scl_metadata_status: str,
+        index: SpectralIndex = NDWI,
     ) -> tuple[tuple[list[Measurement], PixelQuality, GridState], BandWindow, BandWindow]:
         """One tile of one observation: the steps of :meth:`_observation_index`."""
 
@@ -920,31 +946,32 @@ class AnalysisService(DomainService):
             )
 
         scl = await read(_SCL_ASSET)
-        green = await read(_NDWI_GREEN_ASSET)
-        nir = await read(_NDWI_NIR_ASSET)
+        high_source = await read(index.high_band)
+        low_source = await read(index.low_band)
+        high, low = _on_finer_grid(high_source, low_source)
         masked = mask_with_scl(
-            green,
-            nir,
+            high,
+            low,
             scl,
-            index="ndwi",
-            label="NDWI",
+            index=index.key,
+            label=index.label,
             scene_id=observation.scene_id,
             window_label=observation.window_label,
             scl_metadata_status=scl_metadata_status,
         )
         grid = geometry.Grid.of(masked.high)
         state = geometry.grid_state(
-            analysis="ndwi",
+            analysis=index.key,
             scene_id=observation.scene_id,
             grid=grid,
             inputs=[
-                geometry.grid_input(_NDWI_GREEN_ASSET, green, grid),
-                geometry.grid_input(_NDWI_NIR_ASSET, nir, grid),
+                geometry.grid_input(index.high_band, high_source, grid),
+                geometry.grid_input(index.low_band, low_source, grid),
                 geometry.grid_input(_SCL_ASSET, scl, grid),
             ],
         )
         return (
-            (compute_ndwi_measurements(masked.high, masked.low), masked.quality, state),
+            (_observation_measurements(index, masked.high, masked.low), masked.quality, state),
             masked.high,
             masked.low,
         )
@@ -955,6 +982,7 @@ class AnalysisService(DomainService):
         parts: list[tuple[list[Measurement], PixelQuality, GridState]],
         plan: TilePlan,
         radiometry: RadiometricState | None,
+        index: SpectralIndex = NDWI,
     ) -> ObservationIndexResult:
         quality = merge_quality(
             [q for _, q, _ in parts],
@@ -968,14 +996,14 @@ class AnalysisService(DomainService):
             acquired_at=observation.acquired_at,
             cloud_cover=observation.scene.cloud_cover,
             measurements=[
-                *merge_index_measurements("ndwi", [m for m, _, _ in parts]),
+                *merge_index_measurements(index.key, [m for m, _, _ in parts]),
                 *quality_measurements(quality),
             ],
             pixel_quality=quality,
             radiometry=radiometry,
             grid=merge_grid_state(
                 [g for _, _, g in parts], plan,
-                analysis="ndwi", scene_id=observation.scene_id,
+                analysis=index.key, scene_id=observation.scene_id,
             ),
             crs=plan.crs,
             resolution=abs(plan.transform.a),
@@ -990,6 +1018,7 @@ class AnalysisService(DomainService):
         plans: list[TilePlan | None],
         scenes: tuple[ValidatedScene | None, ValidatedScene | None],
         states: list[RadiometricState | None],
+        index: SpectralIndex = NDWI,
     ) -> tuple[
         ObservationIndexResult,
         ObservationIndexResult,
@@ -1015,13 +1044,13 @@ class AnalysisService(DomainService):
         )
         if joint:
             assert first_plan is not None
-            accumulator = ChangeAccumulator(first_plan)
+            accumulator = ChangeAccumulator(first_plan, index=index.key, label=index.label)
             sides: list[list[tuple[list[Measurement], PixelQuality, GridState]]] = [[], []]
             for tile in first_plan.tiles:
                 read = []
                 for side, observation in enumerate(observations):
                     part, green, nir = await self._observation_tile(
-                        observation, bbox, first_plan, tile, statuses[side]
+                        observation, bbox, first_plan, tile, statuses[side], index
                     )
                     sides[side].append(part)
                     read.append((green, nir))
@@ -1033,8 +1062,12 @@ class AnalysisService(DomainService):
                     second_nir=read[1][1],
                 )
                 del read
-            first = self._merge_observation(pair.first, sides[0], first_plan, states[0])
-            second = self._merge_observation(pair.second, sides[1], first_plan, states[1])
+            first = self._merge_observation(
+                pair.first, sides[0], first_plan, states[0], index
+            )
+            second = self._merge_observation(
+                pair.second, sides[1], first_plan, states[1], index
+            )
             change = accumulator.result(
                 first_scene_id=first.scene_id,
                 second_scene_id=second.scene_id,
@@ -1052,7 +1085,7 @@ class AnalysisService(DomainService):
                 for role in ("earlier", "later")
             ]
             pair_grid = geometry.grid_state(
-                analysis="temporal_ndwi_pair",
+                analysis=f"temporal_{index.key}_pair",
                 scene_id=None,
                 grid=grid,
                 inputs=inputs,
@@ -1070,16 +1103,18 @@ class AnalysisService(DomainService):
             if plan is not None and plan.tiled:
                 parts = [
                     (await self._observation_tile(
-                        observation, bbox, plan, tile, statuses[side]
+                        observation, bbox, plan, tile, statuses[side], index
                     ))[0]
                     for tile in plan.tiles
                 ]
-                results.append(self._merge_observation(observation, parts, plan, states[side]))
+                results.append(
+                    self._merge_observation(observation, parts, plan, states[side], index)
+                )
                 grids.append(plan.grid)
             else:
                 result, green, _ = await self._observation_index(
                     observation, bbox, scl_metadata_status=statuses[side],
-                    radiometry=states[side],
+                    radiometry=states[side], index=index,
                 )
                 results.append(result)
                 grids.append(geometry.Grid.of(green))
@@ -1090,7 +1125,7 @@ class AnalysisService(DomainService):
             else "the observations were read on different tile plans"
         )
         pair_grid = geometry.grid_state(
-            analysis="temporal_ndwi_pair",
+            analysis=f"temporal_{index.key}_pair",
             scene_id=None,
             grid=None,
             refusal=f"paired change not computed: {incomparable}",
@@ -1495,6 +1530,7 @@ class AnalysisService(DomainService):
         *,
         scl_metadata_status: str = "not_validated",
         radiometry: RadiometricState | None = None,
+        index: SpectralIndex = NDWI,
     ) -> tuple[ObservationIndexResult, BandWindow, BandWindow]:
         """Index ONE observation on its own pixels. Two reads, no comparison.
 
@@ -1514,16 +1550,18 @@ class AnalysisService(DomainService):
             self._imagery.read_band,
             scene_id=observation.scene_id,
             bbox=bbox,
-            asset=_NDWI_GREEN_ASSET,
+            asset=index.high_band,
             collection=observation.collection,
         )
         nir = await run_in_threadpool(
             self._imagery.read_band,
             scene_id=observation.scene_id,
             bbox=bbox,
-            asset=_NDWI_NIR_ASSET,
+            asset=index.low_band,
             collection=observation.collection,
         )
+        green_source, nir_source = green, nir
+        green, nir = _on_finer_grid(green, nir)
         # Each observation is masked by ITS OWN classification; the returned
         # bands carry that mask, so the paired change can only use pixels
         # usable on both dates.
@@ -1531,13 +1569,12 @@ class AnalysisService(DomainService):
             green,
             nir,
             scl,
-            index="ndwi",
-            label="NDWI",
+            index=index.key,
+            label=index.label,
             scene_id=observation.scene_id,
             window_label=observation.window_label,
             scl_metadata_status=scl_metadata_status,
         )
-        green_source, nir_source = green, nir
         green, nir = masked.high, masked.low
         observation_grid = geometry.Grid.of(green)
         result = ObservationIndexResult(
@@ -1546,18 +1583,18 @@ class AnalysisService(DomainService):
             acquired_at=observation.acquired_at,
             cloud_cover=observation.scene.cloud_cover,
             measurements=[
-                *compute_ndwi_measurements(green, nir),
+                *_observation_measurements(index, green, nir),
                 *quality_measurements(masked.quality),
             ],
             pixel_quality=masked.quality,
             radiometry=radiometry,
             grid=geometry.grid_state(
-                analysis="ndwi",
+                analysis=index.key,
                 scene_id=observation.scene_id,
                 grid=observation_grid,
                 inputs=[
-                    geometry.grid_input(_NDWI_GREEN_ASSET, green_source, observation_grid),
-                    geometry.grid_input(_NDWI_NIR_ASSET, nir_source, observation_grid),
+                    geometry.grid_input(index.high_band, green_source, observation_grid),
+                    geometry.grid_input(index.low_band, nir_source, observation_grid),
                     geometry.grid_input(_SCL_ASSET, scl, observation_grid),
                 ],
             ),
@@ -1575,7 +1612,7 @@ class AnalysisService(DomainService):
         return result, green, nir
 
     async def _temporal_ndwi(
-        self, execution: QueryExecutionResult
+        self, execution: QueryExecutionResult, index: SpectralIndex = NDWI
     ) -> tuple[TemporalIndexComparison | None, list[str]]:
         """Temporal NDWI Statistics for ONE deterministic Sentinel-2 pair.
 
@@ -1603,7 +1640,7 @@ class AnalysisService(DomainService):
                 "no Sentinel-2 observation pair was available."
             ]
             warnings.extend(
-                "Temporal NDWI statistics were requested but no Sentinel-2 pair "
+                f"Temporal {index.label} statistics were requested but no Sentinel-2 pair "
                 f"could be formed: {reason}"
                 for reason in reasons
             )
@@ -1612,7 +1649,7 @@ class AnalysisService(DomainService):
         pair = pairs[0]
         if len(pairs) > 1:
             warnings.append(
-                "Temporal NDWI statistics cover one observation pair "
+                f"Temporal {index.label} statistics cover one observation pair "
                 f"({pair.first.window_label!r} and {pair.second.window_label!r}); "
                 f"{len(pairs) - 1} further consecutive pair(s) were not analysed."
             )
@@ -1627,7 +1664,7 @@ class AnalysisService(DomainService):
                     scene_id=observation.scene_id,
                     collection=observation.collection,
                     modality=_OPTICAL_MODALITY,
-                    assets=(_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET, _SCL_ASSET),
+                    assets=(index.high_band, index.low_band, _SCL_ASSET),
                     bbox=bbox,
                 )
                 for observation in (pair.first, pair.second)
@@ -1640,7 +1677,7 @@ class AnalysisService(DomainService):
                 # its own, then the pair. Nothing is corrected to make them agree.
                 states = [
                     require_usable(
-                        assess_radiometry(scene, (_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET))
+                        assess_radiometry(scene, (index.high_band, index.low_band))
                     )
                     for scene in (first_scene, second_scene)
                 ]
@@ -1651,25 +1688,26 @@ class AnalysisService(DomainService):
                 # grids for green, NIR and the SCL.
                 for validated in (first_scene, second_scene):
                     source, _ = _source_geometry(
-                        validated, (_NDWI_GREEN_ASSET, _NDWI_NIR_ASSET), (_SCL_ASSET,)
+                        validated, (index.high_band, index.low_band), (_SCL_ASSET,)
                     )
                     if source is not None:
                         raise geometry.GeometryError(
                             source[0],
                             _geometry_refusal(
-                                "ndwi", validated.scene_id, source, "pre_read"
+                                index.key, validated.scene_id, source, "pre_read"
                             )[1],
                             stage="pre_read",
                         )
             plans = [
-                self._tile_plan(scene, (_NDWI_GREEN_ASSET,), bbox)
+                # On the finer band's grid: NDBI's 20 m SWIR is placed under it.
+                self._tile_plan(scene, (index.high_band, index.low_band), bbox)
                 for scene in (first_scene, second_scene)
             ]
             tiled = any(plan is not None and plan.tiled for plan in plans)
             if tiled:
                 first, second, tiled_change, tiled_pair_grid, tiled_incomparable = (
                     await self._tiled_temporal(
-                        pair, bbox, plans, (first_scene, second_scene), states
+                        pair, bbox, plans, (first_scene, second_scene), states, index
                     )
                 )
             else:
@@ -1678,12 +1716,14 @@ class AnalysisService(DomainService):
                     bbox,
                     scl_metadata_status=_scl_metadata_status(first_scene),
                     radiometry=states[0],
+                    index=index,
                 )
                 second, second_green, second_nir = await self._observation_index(
                     pair.second,
                     bbox,
                     scl_metadata_status=_scl_metadata_status(second_scene),
                     radiometry=states[1],
+                    index=index,
                 )
         except AppError as exc:
             logger.info(
@@ -1694,15 +1734,19 @@ class AnalysisService(DomainService):
                 exc.message,
             )
             warnings.append(
-                "Temporal NDWI statistics could not be computed for the pair "
+                f"Temporal {index.label} statistics could not be computed for the pair "
                 f"{pair.first.window_label!r} / {pair.second.window_label!r}: "
                 f"{exc.message}"
             )
             return None, warnings
 
         compatibility = compute_compatibility(pair.first, pair.second)
-        differences, comparison_warnings = compare_ndwi_observations(
-            first=first, second=second, compatibility=compatibility
+        differences, comparison_warnings = compare_index_observations(
+            key=index.key,
+            label=index.label,
+            first=first,
+            second=second,
+            compatibility=compatibility,
         )
         if scene_pair is not None:
             for scene, label in (
@@ -1717,7 +1761,9 @@ class AnalysisService(DomainService):
             incomparable, pair_grid, change = (
                 tiled_incomparable, tiled_pair_grid, tiled_change
             )
-            comparison_warnings.append(geometry.summary("Temporal NDWI pair", pair_grid))
+            comparison_warnings.append(
+                geometry.summary(f"Temporal {index.label} pair", pair_grid)
+            )
         else:
             # Paired-pixel change, on the bands already read. The engine verifies
             # the two grids are identical and returns None when they are not; this
@@ -1727,7 +1773,7 @@ class AnalysisService(DomainService):
             # never did, so a refusal here withholds the paired change only.
             common = geometry.Grid.of(first_green)
             pair_grid = geometry.grid_state(
-                analysis="temporal_ndwi_pair",
+                analysis=f"temporal_{index.key}_pair",
                 scene_id=None,
                 grid=common if incomparable is None else None,
                 inputs=(
@@ -1743,7 +1789,9 @@ class AnalysisService(DomainService):
                     else f"paired change not computed: {incomparable}"
                 ),
             )
-            comparison_warnings.append(geometry.summary("Temporal NDWI pair", pair_grid))
+            comparison_warnings.append(
+                geometry.summary(f"Temporal {index.label} pair", pair_grid)
+            )
             change = (
                 compute_ndwi_temporal_change(
                     first_green=first_green,
@@ -1755,20 +1803,22 @@ class AnalysisService(DomainService):
                     first_acquired_at=first.acquired_at,
                     second_acquired_at=second.acquired_at,
                     window_label=f"{first.window_label}\u2192{second.window_label}",
+                    index=index.key,
+                    label=index.label,
                 )
                 if incomparable is None
                 else None
             )
         if incomparable is not None:
             comparison_warnings.append(
-                "Per-pixel NDWI change was not computed because "
+                f"Per-pixel {index.label} change was not computed because "
                 f"{incomparable}. The observations are NOT co-registered and "
                 "nothing was resampled onto a shared grid, so the aggregate "
                 "statistics above remain the only comparison available."
             )
         elif change is None:
             comparison_warnings.append(
-                "Per-pixel NDWI change was not computed because no pixel was "
+                f"Per-pixel {index.label} change was not computed because no pixel was "
                 "valid in both observations."
             )
         if first.pixel_quality is not None and second.pixel_quality is not None:
@@ -2110,13 +2160,14 @@ class AnalysisService(DomainService):
 
         temporal_comparison: TemporalIndexComparison | None = None
         if request.include_temporal_ndwi:
+            temporal_index = resolve_index(request.temporal_index)
             temporal_comparison, temporal_warnings = await self._temporal_ndwi(
-                execution
+                execution, temporal_index
             )
             warnings.extend(temporal_warnings)
             outcomes.append(
                 _outcome(
-                    "temporal_ndwi",
+                    f"temporal_{temporal_index.key}",
                     produced=temporal_comparison is not None,
                     # Every path that returns no comparison says why last.
                     reason=temporal_warnings[-1] if temporal_warnings else None,
@@ -2126,13 +2177,13 @@ class AnalysisService(DomainService):
                 if task == "change_detection":
                     status = "ok"
                     answer = (
-                        "Temporal NDWI comparison completed."
+                        f"Temporal {temporal_index.label} comparison completed."
                         if temporal_comparison.change is not None
-                        else "Temporal NDWI aggregate comparison completed; "
-                        "a paired-pixel change map is unavailable."
+                        else f"Temporal {temporal_index.label} aggregate comparison "
+                        "completed; a paired-pixel change map is unavailable."
                     )
                 answer = (
-                    f"{answer} Temporal NDWI statistics were computed for two "
+                    f"{answer} Temporal {temporal_index.label} statistics were computed for two "
                     "Sentinel-2 observations, each indexed independently at "
                     "native 10 m resolution."
                 )
