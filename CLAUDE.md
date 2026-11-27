@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 34 (visual questions). Section 23 (the scientific core,
+current figures are in section 35 (production hardening). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider, and section 34 supersedes section 24's
@@ -3065,3 +3065,87 @@ numbers. "What does NDVI show at X" is not a look (no image word).
 | `ruff check .` / `git diff --check` | clean / clean |
 | `npm run test` | **571 passed** (551 before `805ab28`; 570 at it) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds (with `VITE_API_BASE_URL`) |
+
+---
+
+## 35. Production hardening after the independent audit - IMPLEMENTED (2026-11-26)
+
+Branch `production-hardening` (not pushed). Started from an independent
+read-only audit of `f89ea3d`; every change below fixes something that audit
+verified. The scientific formulas, SCL classes, M1-M5 rules and the M4 offset
+rule are unchanged; the one scientific-path change is scene SELECTION order.
+
+### Intent model (the "custom model") - status
+
+`satquery-intent-v2` is a TF-IDF + logistic-regression classifier trained in
+this repo (`scripts/train_intent_model.py`, 1,258 hand-written rows), run with
+numpy, no network, no key. It is not a pretrained model. Verified:
+
+- **Reproducible**: retraining the shipped data and script reproduced the
+  shipped artifact byte for byte (SHA-256 `11ba5095...`) before any change.
+- **The committed evaluation report was stale.** Regenerated with today's rules
+  it counted three "describe the image" questions (labelled UNSUPPORTED before
+  visual questions shipped, section 34) as wrong executions, while tests pinned
+  the old zeros. `SYSTEM_EXPECTATION` in the script now records, by id, that the
+  product answers those with imagery; training labels are unchanged.
+- **Two reader defects found by 41 fresh questions**, fixed with tests
+  (`tests/test_interpretation_edge_cases.py`): a trailing `:`/`;` stayed in the
+  place sent to the geocoder ("Hussain Sagar, Hyderabad:"), and "How deep is X"
+  was read as a definition of "deep" and asked back instead of refused.
+- The colon fix changes masked training text, so the artifact was retrained on
+  the same data and protocol (new SHA `cfdd3cec...`, threshold still 0.95).
+  Held-out: test macro F1 0.9406, 122 of 184 acted on, 0 wrong; challenge v2
+  macro F1 0.9917, 107 of 120 acted on, 0 wrong; challenge v1 0.9749, 101 acted
+  on, 0 wrong. Full pipeline (model + rules): 0 wrong analyses executed on
+  every set. Fresh 41-question probe: 40 correct, 1 asked back, 0 wrong.
+- Known limits unchanged: English only, single label per question, evaluated
+  only on author-written questions (no real-user set exists).
+
+### Fixed
+
+| Audit finding | Fix | Where |
+| --- | --- | --- |
+| Workflow budget and raster gate documented but never applied | `within_budget()` on every expensive route (504 `workflow_timeout`, slot freed); threading `raster_read_slot()` around both remote reads | `core/limits.py`, routes, `satellite/imagery.py` |
+| Rate limit keyed on the proxy, so shared by every user | `SATQUERY_TRUSTED_PROXY_HOPS` reads X-Forwarded-For from the right; container runs `--no-proxy-headers` | `core/limits.py`, Dockerfile.prod, render.yaml (1) |
+| Any caller could pick a paid AI provider | `SATQUERY_CLIENT_AI_SELECTION` (unset: dev allows, prod refuses with 403 `ai_selection_disabled`); catalog reports `client_selection_enabled`; UI shows "Standard · no external AI" | routes, `core/config.py`, `ModelSelector.tsx` |
+| No request ids, metrics or structured logs | `X-Request-ID` on every response (shown in UI errors as "reference"), access lines, token-gated `/metrics`, `SATQUERY_LOG_FORMAT=json` | `core/telemetry.py`, `core/logging.py` |
+| Unpinned builds, no scans, vulnerable deps | images by digest, uv 0.13.7, actions by SHA, `scripts/check_secrets.py`, pip-audit + npm audit in CI, Dependabot; pillow 13.0.0, urllib3 2.8.0, pyasn1 0.6.5, certifi; Vitest 5 | CI, Dockerfiles, locks |
+| Peak memory never measured | `scripts/benchmark_memory.py`: +132 MB at 1024 px, +454 MB at 2048 px (idle 104 MB); render.yaml 1024 px and 2 workflows; budget test | render.yaml, `tests/test_deployment_memory_budget.py` |
+| Least-cloudy scene chosen even when M4 then refuses it | `offset_free_by_metadata()` (the same central rule) puts verifiable scenes first; reorders only, never drops | `query/execution.py`, `satellite/radiometry.py` |
+| Stale OpenAPI docstrings and README | corrected | routes, README, DEPLOYMENT.md |
+| Tests slept through real provider backoff | zeroed in conftest | 127 s -> 16 s |
+| 1.09 MB app chunk | MapLibre split into its own chunk; app chunk 124 kB | vite.config.ts |
+
+### Verified live (local backend, no AI key, real Nominatim / Earth Search / Planetary Computer)
+
+NDVI 0.5204 (Cubbon Park, Dec 2024); **Cubbon Park, Jan 2025 now measured:
+NDVI 0.5356 on S2B_43PGQ_20250107** (before: refused `radiometric_undetermined`);
+NDWI 0.1466 (Marina Beach); NDBI -0.02482 (Ameerpet); SAR VV -5.444 / VH -17.85
+dB; temporal NDWI 0.02658 -> 0.1466 (difference 0.12); Hussain Sagar comparison
+with the colon stripped; "How deep is Ulsoor Lake" -> `analysis_unsupported`;
+"NDVI Chennai January 2025" -> `area_too_large`; "How leafy is Lalbagh" -> NDVI
+0.3847. Every run `provider=standard model=none`, no AI endpoint, no server
+error. The production frontend build was served and exercised in the browser
+pane: basemap, image overlay, footprint and result all render.
+
+### NOT verified / still open
+
+- Docker images were not built locally (daemon not running); CI builds both.
+- The Render forwarding-chain length (1 assumed); read the logged count.
+- No accounts: per-user quotas, attribution and revocation need them.
+- Public Nominatim and OSM tiles remain (terms do not cover commercial scale).
+- No run persistence, no shared state for more than one instance.
+- `backend/.env` and `Satquery.zip` hold Gemini/NVIDIA keys; rotate them.
+- The local `.venv` scripts point at the old Desktop path; run `uv sync --reinstall`.
+- The uncommitted deletion of `frontend/public/landing/product-analysis.jpg`
+  (still used by `Landing.tsx:298`) was left for the owner.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3205 passed** in about 16 s |
+| `ruff check .` / `git diff --check` / `scripts/check_secrets.py` | clean / clean / clean |
+| `npm run test` | **574 passed** (Vitest 5) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
+| `pip-audit` (locked prod deps) / `npm audit` | no known vulnerabilities / 0 |

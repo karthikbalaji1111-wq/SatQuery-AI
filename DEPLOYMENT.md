@@ -31,8 +31,15 @@ nothing is written into a committed file.
 Replace the example domains with your own. A host TLS reverse proxy must route
 the frontend domain to `127.0.0.1:8080` and the API domain to `127.0.0.1:8000`.
 Both published ports are loopback-only. TLS certificates and external ingress
-are operator prerequisites; this stack does not provision them. Do not expose
-the API publicly before authentication and quotas are implemented.
+are operator prerequisites; this stack does not provision them.
+
+**What a public deployment does and does not have.** There are no user
+accounts. What makes an anonymous public deployment safe to run is narrower:
+in production a caller cannot choose an AI provider or model (403
+`ai_selection_disabled`, see below), so nobody can spend a metered key; every
+expensive route is rate-limited per caller, bounded in concurrency and in time;
+and the standard workflow needs no key at all. Per-user quotas, attribution and
+revocation need accounts, which do not exist.
 
 Compose refuses missing/empty `SATQUERY_CORS_ORIGINS` and
 `SATQUERY_PUBLIC_API_URL`. Backend production startup additionally rejects HTTP,
@@ -75,8 +82,9 @@ Milestone 1 verification on 2026-09-19:
 GitHub-hosted CI, Linux/AMD64, external HTTPS ingress, real browser E2E, live
 provider workflows and load tests remain unverified by this milestone.
 The source tree still includes pre-existing uncommitted/untracked work; no
-release commit or tag was created. Base-image tags and OS package repositories
-remain mutable, so this is not a claim of bit-for-bit reproducibility.
+release commit or tag was created. Base images are now pinned by digest (see Supply chain); the OS package
+repository used by `apt-get` remains mutable, so this is still not a claim of
+bit-for-bit reproducibility.
 
 ## Why the frontend is served the way it is
 
@@ -107,10 +115,16 @@ that the running configuration is visible in one place.
 | `SATQUERY_MAX_REQUEST_BYTES` | `1000000` | Request body size, refused before the body is read |
 | `SATQUERY_RATE_LIMIT_REQUESTS` | `120` | Requests per client per window, on the expensive routes |
 | `SATQUERY_RATE_LIMIT_WINDOW_SECONDS` | `60` | The window those requests are counted in |
-| `SATQUERY_MAX_CONCURRENT_WORKFLOWS` | `4` | Simultaneous discovery / analysis / agent runs |
-| `SATQUERY_MAX_CONCURRENT_RASTER_READS` | `2` | Simultaneous windowed COG reads |
-| `SATQUERY_ADMISSION_WAIT_SECONDS` | `2` | How long a request waits for a slot before 503 |
-| `SATQUERY_WORKFLOW_BUDGET_SECONDS` | `900` | Total budget for one workflow |
+| `SATQUERY_TRUSTED_PROXY_HOPS` | `0` | Proxies in front that append to `X-Forwarded-For`; see below |
+| `SATQUERY_MAX_CONCURRENT_WORKFLOWS` | `4` | Simultaneous discovery / analysis / agent runs (render.yaml: `2`) |
+| `SATQUERY_MAX_CONCURRENT_RASTER_READS` | `2` | Simultaneous windowed COG reads, per process |
+| `SATQUERY_ADMISSION_WAIT_SECONDS` | `2` | How long a request waits for a workflow slot before 503 |
+| `SATQUERY_RASTER_ADMISSION_WAIT_SECONDS` | `60` | How long one raster read waits for a raster slot before 503 |
+| `SATQUERY_WORKFLOW_BUDGET_SECONDS` | `900` | Total time for one request on an expensive route; past it, 504 `workflow_timeout` |
+| `SATQUERY_IMAGERY_HARD_MAX_DIMENSION` | `2048` | Largest quantitative window per side; larger areas are refused as too large (render.yaml: `1024`) |
+| `SATQUERY_CLIENT_AI_SELECTION` | *(unset)* | Whether a caller may name an AI provider/model. Unset: allowed in development, refused in production |
+| `SATQUERY_LOG_FORMAT` | `text` | `json` writes one JSON object per log line |
+| `SATQUERY_METRICS_TOKEN` | *(unset)* | Bearer token for `GET /metrics`; unset, the route answers 404 |
 | `SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS` | `1` | Minimum spacing between geocoder requests |
 | `SATQUERY_GEOCODER_CACHE_TTL_SECONDS` | `86400` | How long a resolved place is reused (successes only) |
 | `SATQUERY_GEOCODER_CACHE_ENTRIES` | `256` | Places kept in the geocoder cache (least recently used evicted) |
@@ -141,11 +155,61 @@ contacting it. A free instance loses its cache when it sleeps;
 after startup. None of this can create budget the shared IP does not have: a
 dedicated outbound IP or a keyed/self-hosted geocoder is the durable fix.
 
-Three refusals, deliberately distinguishable:
+Four refusals, deliberately distinguishable:
 
 * **429** — this client is asking too often. Carries `Retry-After`.
 * **503** — this process is at capacity. The caller did nothing wrong.
+* **504** — this one request used its whole `SATQUERY_WORKFLOW_BUDGET_SECONDS`.
+  The slot is freed at once; a raster read already running in a worker thread
+  finishes (bounded by its HTTP timeouts) and its result is discarded.
 * **413** — this body is too large.
+
+### Who a request is attributed to
+
+Behind a load balancer the TCP peer is the balancer, so a peer-keyed limit is
+one allowance shared by everyone. Each proxy APPENDS the address it received
+the connection from to `X-Forwarded-For`, so the entry
+`SATQUERY_TRUSTED_PROXY_HOPS` places from the right was written by the outermost
+trusted proxy and cannot be forged by the caller. That entry is used; a shorter
+chain or a non-address falls back to the peer. The container runs uvicorn with
+`--no-proxy-headers`, because uvicorn told to trust every proxy
+(`FORWARDED_ALLOW_IPS=*`) takes the LEFTMOST entry, which the caller chose.
+
+Render does not document its forwarding chain. `render.yaml` sets `1` (its
+load balancer). To measure it: after a deploy, load the site once in a browser
+and read the log line `first request carried N X-Forwarded-For entries`
+(logged once per process; the count only, never an address). Set the variable
+to `N`.
+
+### Memory: why render.yaml lowers two limits
+
+Measured with `backend/scripts/benchmark_memory.py` (the heaviest path: NDVI,
+NDWI and NDBI with SCL masking, both dates of a comparison held):
+
+| Window ceiling | One date | Two dates |
+|---|---|---|
+| 1024 px | 118 MB | 132 MB |
+| 2048 px | 385 MB | 454 MB |
+
+An idle server holds about 104 MB. The defaults (2048 px, 4 workflows) need
+about 1.9 GB worst case; on Render's 512 MB free plan a single full-size
+comparison could exhaust memory. `render.yaml` therefore sets a 1024 px window
+(about 10 km at 10 m) and 2 workflows, about 370 MB worst case, and
+`tests/test_deployment_memory_budget.py` fails if those values stop fitting.
+On a 2 GB instance the defaults fit.
+
+### Caller-chosen AI is off in production
+
+`POST /query/agent` and `POST /query/parse` accept a `provider` and `model`.
+With no accounts, letting any caller name them lets anyone spend the
+operator's metered keys, so production refuses them with **403
+`ai_selection_disabled`** before any provider is built, and
+`GET /api/v1/ai/models` reports `client_selection_enabled: false` so the web
+app shows "Standard · no external AI" instead of a picker. The standard
+workflow (deterministic rules plus the local intent model, no key) answers
+every question. Set `SATQUERY_CLIENT_AI_SELECTION=true` only where every
+caller is trusted. A configured `AI_PROVIDER` key is still used for one step:
+describing a retrieved image when a question asks what it shows.
 
 ### The limitation that matters: they are PER PROCESS
 
@@ -196,6 +260,24 @@ not configure anything.
 
 ## Observability
 
+Every response carries **`X-Request-ID`** (readable by the browser app, which
+appends it to error messages as "reference …"), and every log line written
+while that request runs carries the same id. One access line is written per
+request: method, route, status and milliseconds, never a query string, body,
+place name or address. Probes (`/health`, `/ready`, `/metrics`) log at DEBUG.
+
+`SATQUERY_LOG_FORMAT=json` writes one JSON object per line (`ts`, `level`,
+`logger`, `run_id`, `message`, plus `exc_type`/`exc` for exceptions) for a log
+platform to index.
+
+With `SATQUERY_METRICS_TOKEN` set, `GET /metrics` serves Prometheus text
+(`satquery_http_requests_total{route,method,status}`, a latency histogram per
+route, and requests in flight) to a caller sending
+`Authorization: Bearer <token>`. Metrics are per process. Paths that matched no
+route share the label `unmatched`, so probing random URLs cannot grow the
+series set. Nothing scrapes it by default: on a host without Prometheus, use
+the access lines.
+
 Every workflow opens a correlated scope. A short run id is attached to every log
 line emitted anywhere during that run — including third-party loggers — and each
 stage reports its own duration:
@@ -210,6 +292,18 @@ Fields are names, ids, durations and outcomes. A question, a place name and a
 credential are never logged, and a failing stage records the exception **class**
 rather than its message, because an upstream message can carry content this
 system did not write.
+
+## Supply chain
+
+Base images are pinned by digest and uv by version and digest; CI actions are
+pinned to commit SHAs and the workflow token is read-only. Dependabot proposes
+updates weekly; each still has to pass CI. CI fails on:
+
+* `scripts/check_secrets.py`: provider keys, private keys, a committed `.env`,
+  `.zip` or `.mcp.json` in any tracked file (test sentinels marked `SENTINEL`
+  are allowed);
+* `pip-audit` on the locked production Python dependencies;
+* `npm audit --omit=dev --audit-level=high` on the shipped npm dependencies.
 
 ## Scaling notes
 

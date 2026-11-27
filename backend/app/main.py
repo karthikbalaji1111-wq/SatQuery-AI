@@ -16,6 +16,8 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.limits import install_request_limits
 from app.core.logging import configure_logging, get_logger
+from app.core.telemetry import Metrics, RequestTelemetryMiddleware
+from app.core.telemetry import router as telemetry_router
 from app.services.geospatial.nominatim import warm_geocoder_cache, warm_places
 
 
@@ -49,7 +51,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Build and configure the FastAPI application."""
 
     settings = settings or get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_format)
     logger = get_logger("main")
 
     app = FastAPI(
@@ -71,11 +73,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Readable by the browser app: the id a user can quote, and how long
+        # to wait after a 429 or 503.
+        expose_headers=["X-Request-ID", "Retry-After"],
     )
+    # Outermost of all, so even a refusal from the middleware above is counted
+    # and carries a request id.
+    app.state.metrics = Metrics()
+    app.add_middleware(RequestTelemetryMiddleware, metrics=app.state.metrics)
 
     register_exception_handlers(app)
     # Built from THIS application's settings, not from an import-time singleton.
     app.include_router(build_api_router(settings))
+    app.include_router(telemetry_router)
 
     logger.info(
         "SatQuery API initialised (env=%s, version=%s)",

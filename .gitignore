@@ -35,6 +35,10 @@ logs/
 # --- Build / misc ---
 *.local
 
+# Archives of the working tree can carry a .env with real keys (one did).
+# Keep them out of git entirely; share source through git itself.
+*.zip
+
 # Playwright MCP writes page snapshots and console logs into the working
 # directory; they are run artefacts, not part of the project.
 .playwright-mcp/

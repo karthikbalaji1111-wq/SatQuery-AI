@@ -8,10 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     app_name: str = "SatQuery API"
     environment: str = "development"
     log_level: str = "INFO"
+    #: ``text`` for a terminal, ``json`` for a log platform: one JSON object
+    #: per line with ts, level, logger, run_id and message.
+    log_format: Literal["text", "json"] = "text"
+    #: Bearer token for ``GET /metrics``. Unset (the default), the route
+    #: answers 404 and no metric is published.
+    metrics_token: SecretStr | None = None
     api_v1_prefix: str = "/api/v1"
 
     #: ``NoDecode`` because pydantic-settings JSON-decodes a complex field
@@ -163,12 +169,22 @@ class Settings(BaseSettings):
     #: Simultaneous in-flight workflows (discovery, analysis, agent runs).
     #: Four keeps a small machine responsive; each one can hold raster arrays.
     max_concurrent_workflows: int = 4
+    #: How many reverse proxies in front of this process APPEND to
+    #: X-Forwarded-For. 0 (the default) attributes requests to the TCP peer.
+    #: Set it to the proxy count of the hosting platform so the rate limit is
+    #: per caller rather than shared by everyone behind the proxy; see
+    #: ``core/limits._client_of`` and DEPLOYMENT.md for how to measure it.
+    trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
     #: Simultaneous windowed COG reads. Raster work is the memory-hungriest
     #: thing this process does, and this machine has been OOM-killed before.
     max_concurrent_raster_reads: int = 2
     #: How long a request may wait for a slot before it is refused. Absorbs a
     #: passing burst without letting a queue grow without bound.
     admission_wait_seconds: float = 2.0
+    #: How long one raster read may wait for a raster slot. Longer than the
+    #: workflow wait: a read queued behind another analysis's reads is normal
+    #: work in progress, and refusing it would fail a run half-way through.
+    raster_admission_wait_seconds: float = Field(default=60.0, gt=0, le=600)
     #: Total budget for one workflow. A local model alone may legitimately take
     #: minutes (LOCAL_AI_TIMEOUT_SECONDS is 300), so this is deliberately far
     #: above the normal case - it exists to end a run that will never finish,
@@ -223,6 +239,15 @@ class Settings(BaseSettings):
         default="gemini",
         validation_alias=AliasChoices("AI_PROVIDER"),
     )
+
+    #: Whether a CALLER may name an AI provider or model for a run. ``None``
+    #: (the default) allows it in development and refuses it in production:
+    #: the API has no accounts, so a public deployment cannot attribute or cap
+    #: what an anonymous caller spends on a metered provider. The standard
+    #: workflow - deterministic rules and the local intent model - needs no
+    #: provider and is unaffected. Set ``SATQUERY_CLIENT_AI_SELECTION=true`` only
+    #: where every caller is trusted.
+    client_ai_selection: bool | None = None
 
     # NVIDIA's hosted NIM endpoints, which speak the OpenAI chat-completions
     # dialect. The model must accept image input - a text-only model cannot
@@ -393,6 +418,12 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() in {"production", "prod"}
+
+    @property
+    def client_ai_selection_enabled(self) -> bool:
+        if self.client_ai_selection is not None:
+            return self.client_ai_selection
+        return not self.is_production
 
     @model_validator(mode="after")
     def _production_configuration(self) -> Settings:

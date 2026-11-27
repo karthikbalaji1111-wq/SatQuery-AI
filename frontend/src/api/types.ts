@@ -103,6 +103,10 @@ export interface SatelliteScene {
   sar_polarizations?: string[] | null;
   sar_instrument_mode?: string | null;
   orbit_state?: string | null;
+  /** Sentinel-2 processing baseline, as the catalog search returned it. */
+  processing_baseline?: string | null;
+  /** The published `earthsearch:boa_offset_applied` flag, read as text. */
+  boa_offset_flag?: "true" | "false" | "absent" | "unparseable" | null;
   thumbnail_url: string | null;
   assets: SceneAsset[];
 }
@@ -965,6 +969,13 @@ export interface ModelCatalogResponse {
   role: string;
   default_provider: string;
   default_model: string;
+  /**
+   * False where callers may not choose an AI model: the server then refuses a
+   * named provider or model with 403 `ai_selection_disabled`, so the client
+   * offers the standard workflow only. Absent on older servers (treated as
+   * true).
+   */
+  client_selection_enabled?: boolean;
   models: ModelOption[];
 }
 

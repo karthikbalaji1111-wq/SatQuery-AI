@@ -47,6 +47,7 @@ export function ModelSelector({
   onDefaults?: (defaults: { provider: string; model: string }) => void;
 }) {
   const [models, setModels] = useState<ModelOption[] | null>(null);
+  const [selectable, setSelectable] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<{
     provider: string;
@@ -57,8 +58,10 @@ export function ModelSelector({
   // the callback to the deps would re-run the fetch whenever a caller passed a
   // fresh inline function - one network request per render.
   const onDefaultsRef = useRef(onDefaults);
+  const onChangeRef = useRef(onChange);
   useEffect(() => {
     onDefaultsRef.current = onDefaults;
+    onChangeRef.current = onChange;
   });
 
   // Whether a catalog request is in flight, so a burst of focus events cannot
@@ -100,6 +103,11 @@ export function ModelSelector({
           return;
         }
         setModels(catalog.models);
+        const allowed = catalog.client_selection_enabled !== false;
+        setSelectable(allowed);
+        // A choice made before the server said "standard only" must not be
+        // sent: the next run would be refused.
+        if (!allowed) onChangeRef.current(null);
         setDefaults({
           provider: catalog.default_provider,
           model: catalog.default_model,
@@ -137,6 +145,19 @@ export function ModelSelector({
   }
   if (models === null || defaults === null) {
     return <span className="model-selector">AI …</span>;
+  }
+
+  if (!selectable) {
+    // This deployment refuses caller-chosen AI; offering the choice would
+    // only produce a refusal. The standard workflow answers every run.
+    return (
+      <span
+        className="model-selector"
+        title="This deployment answers with the standard workflow only."
+      >
+        Standard · no external AI
+      </span>
+    );
   }
 
   const selected = value ?? STANDARD_OPTION;

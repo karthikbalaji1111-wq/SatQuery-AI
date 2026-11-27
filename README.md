@@ -416,11 +416,12 @@ to `::1` first.
 ### Checks
 
 ```bash
+python3 scripts/check_secrets.py
 cd backend  && uv run pytest -q && uv run ruff check .
 cd frontend && npm test -- --run && npx tsc -b --noEmit && npm run lint && VITE_API_BASE_URL=https://api.satquery.example.com npm run build
 ```
 
-**2277 backend tests · 307 frontend tests.** Every phase was written test-first:
+**3190 backend tests · 574 frontend tests.** Every phase was written test-first:
 the tests were added, observed failing for the expected reason, and only then
 satisfied.
 
@@ -442,8 +443,11 @@ A separate stack from the development one: no `--reload`, no source mount,
 locked dependencies, non-root, a built frontend served statically, and host
 ports bound only to loopback. Configure a host TLS reverse proxy for
 the two HTTPS domains above before external access. Production settings and
-frontend builds reject missing or unsafe public origins. This is not yet an
-authenticated public service; keep access restricted pending later milestones.
+frontend builds reject missing or unsafe public origins. There are no user
+accounts: in production a caller cannot choose an AI provider (403
+`ai_selection_disabled`), so no metered key can be spent by an anonymous
+caller, and every expensive route is rate-limited per caller and bounded in
+concurrency, memory and time. Every response carries `X-Request-ID`.
 See
 [`DEPLOYMENT.md`](DEPLOYMENT.md) for the resource limits, the liveness/readiness
 split, and the one limitation that matters — every limit is **per process**, so
