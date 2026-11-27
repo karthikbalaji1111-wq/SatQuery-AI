@@ -127,7 +127,9 @@ def _place(plan: AgentPlan) -> str | None:
     )
 
 
-def _location_failure(retry_after_seconds: float | None) -> AgentFailure:
+def _location_failure(
+    retry_after_seconds: float | None, code: str = "geocoding_unavailable"
+) -> AgentFailure:
     """The location service could not be used; nothing downstream ran.
 
     The message is fixed and system-written: the upstream's own words (status
@@ -135,14 +137,23 @@ def _location_failure(retry_after_seconds: float | None) -> AgentFailure:
     and never become the sentence a user reads.
     """
 
-    return AgentFailure(
-        stage="location",
-        code="geocoding_unavailable",
-        dependency="geocoder",
-        message=(
+    if code == "rate_limited":
+        message = (
+            "Too many different places were looked up from this address in a "
+            "short time. Places already looked up still work; a new place can "
+            "be looked up again shortly. No scene was searched and nothing was "
+            "measured."
+        )
+    else:
+        message = (
             "Location service temporarily unavailable. The place could not be "
             "looked up, so no scene was searched and nothing was measured."
-        ),
+        )
+    return AgentFailure(
+        stage="location",
+        code=code,
+        dependency="geocoder",
+        message=message,
         retry_after_seconds=retry_after_seconds,
     )
 
@@ -312,10 +323,13 @@ class AgentService(DomainService):
         # sending it on to synthesis is what turned it into "Insufficient
         # evidence". It ends here, as what it is. The failed step and the
         # discovery-failure evidence item keep the diagnostic detail.
-        if outcome.discovery_failure_code == "geocoding_unavailable":
+        if outcome.discovery_failure_code in ("geocoding_unavailable", "rate_limited"):
             return AgentResult(
                 status="location_unavailable",
-                failure=_location_failure(outcome.discovery_failure_retry_after_seconds),
+                failure=_location_failure(
+                    outcome.discovery_failure_retry_after_seconds,
+                    outcome.discovery_failure_code,
+                ),
                 trace=AgentTrace(plan=plan, steps=outcome.steps),
                 evidence=outcome.evidence,
             )

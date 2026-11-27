@@ -48,7 +48,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from app.core.errors import AppError, GeocodingUnavailableError, InvalidInputError
+from app.core.errors import (
+    AppError,
+    GeocodingUnavailableError,
+    InvalidInputError,
+    RateLimitedError,
+)
 from app.core.logging import get_logger
 from app.services.agent.registry import AnalysisFlag, resolve_tool
 from app.services.agent.schemas import (
@@ -552,7 +557,7 @@ class AgentExecutor:
                 discovery_failure = exc.message
                 discovery_failure_code = exc.code
                 # Only a location-service outage names a wait worth keeping.
-                if isinstance(exc, GeocodingUnavailableError):
+                if isinstance(exc, GeocodingUnavailableError | RateLimitedError):
                     discovery_failure_retry_after = exc.retry_after_seconds
                 steps[index] = AgentToolStep(
                     status="failed", parameters=params, error_message=exc.message

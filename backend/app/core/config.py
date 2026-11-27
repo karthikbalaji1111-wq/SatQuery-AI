@@ -219,6 +219,12 @@ class Settings(BaseSettings):
     #: consecutive failure, capped by ``geocoder_max_cooldown_seconds``.
     geocoder_backoff_base_seconds: float = Field(default=2.0, ge=0, le=60)
     geocoder_max_cooldown_seconds: float = Field(default=300.0, ge=0, le=3_600)
+    #: How many NEW places (not already cached) one caller may look up per
+    #: window. The geocoder's budget is shared by the whole application, so
+    #: without this one anonymous caller cycling place names could spend it for
+    #: everyone. Cached places are free; 0 disables the cap.
+    geocoder_new_places_per_caller: int = Field(default=30, ge=0, le=10_000)
+    geocoder_new_places_window_seconds: float = Field(default=600.0, gt=0, le=86_400)
     #: Optional, ";"-separated place names geocoded once in the background at
     #: startup, through the same cache, pacing and cooldown as any request. A
     #: free-tier host loses its in-memory cache whenever it sleeps; this refills

@@ -1888,10 +1888,12 @@ function StatusNoticeBlock({
           {failure.stage === "planning" ? "Planning" : "Synthesis"} · {failure.code}: {failure.message}
         </p>
       )}
-      {failure?.code === "geocoding_unavailable" ? (
+      {failure?.stage === "location" ? (
         // The summary already says what failed; this says when to retry, and
-        // names the dependency and code for anyone diagnosing it.
+        // names the dependency and code for anyone diagnosing it. A per-caller
+        // limit on new places is not an outage, so it says so in its own words.
         <p className="answer-notice-retry" data-dependency={failure.dependency ?? undefined}>
+          {failure.code !== "geocoding_unavailable" ? `${failure.message} ` : null}
           {failure.retry_after_seconds !== null &&
           Math.ceil(failure.retry_after_seconds) >= 1
             ? `Try again in about ${Math.ceil(failure.retry_after_seconds)} second${Math.ceil(failure.retry_after_seconds) === 1 ? "" : "s"}.`

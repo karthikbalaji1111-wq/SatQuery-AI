@@ -47,6 +47,7 @@ import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from ipaddress import ip_address
 
@@ -346,6 +347,11 @@ def install_request_limits(app: FastAPI, settings: Settings) -> None:
 
 _FORWARDED_CHAIN_REPORTED = False
 
+#: Who the request in progress is attributed to, for limits applied deeper in
+#: the stack than a route dependency can see - the geocoder's per-caller cap on
+#: new places. ``None`` outside a rate-limited request (a background warm-up).
+CALLER: ContextVar[str | None] = ContextVar("satquery_caller", default=None)
+
 
 def _peer(request: Request) -> str:
     return request.client.host if request.client else "unknown"
@@ -407,7 +413,9 @@ async def rate_limited(request: Request) -> None:
     limits: RequestLimits | None = getattr(request.app.state, "limits", None)
     if limits is None:  # an app built without limits installed
         return
-    limits.limiter.admit(_client_of(request, limits.settings.trusted_proxy_hops))
+    client = _client_of(request, limits.settings.trusted_proxy_hops)
+    CALLER.set(client)
+    limits.limiter.admit(client)
 
 
 async def workflow_slot(request: Request) -> AsyncIterator[None]:
