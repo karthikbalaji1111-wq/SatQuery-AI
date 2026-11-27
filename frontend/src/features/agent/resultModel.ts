@@ -299,6 +299,8 @@ export interface PeriodReading {
 }
 
 export interface TemporalReading {
+  /** Which index the two dates were compared on. */
+  index: IndexReading["key"];
   earlier: PeriodReading;
   later: PeriodReading;
   /** later mean − earlier mean, as the backend computed it; `null` if suppressed. */
@@ -380,10 +382,30 @@ function periodFor(result: AgentResult, label: string | null | undefined): strin
   return window ? formatPeriod(window.time_range) : null;
 }
 
+/**
+ * Which index a comparison measured. The comparison tool keeps its NDWI name
+ * for every index, so the index is read from the measurements themselves.
+ */
+function comparedIndex(items: EvidenceItem[]): IndexReading["key"] {
+  for (const { key } of INDEX_NAMES) {
+    if (
+      items.some(
+        (item) =>
+          item.id === `temporal_ndwi.first.${key}_mean` ||
+          item.id === `temporal_ndwi.difference.mean_${key}_difference`,
+      )
+    ) {
+      return key;
+    }
+  }
+  return "ndwi";
+}
+
 function temporalFrom(result: AgentResult): TemporalReading | null {
   const items = result.evidence.items;
   if (!items.some((item) => item.id.startsWith("temporal_ndwi."))) return null;
   const comparison = result.evidence.analysis?.temporal_comparison ?? null;
+  const index = comparedIndex(items);
 
   const side = (key: "first" | "second"): PeriodReading => {
     const observation = comparison?.[key] ?? null;
@@ -392,17 +414,18 @@ function temporalFrom(result: AgentResult): TemporalReading | null {
       period: periodFor(result, observation?.window_label),
       acquired: acquisitionDate(observation?.acquired_at ?? null),
       sceneId: observation?.scene_id ?? null,
-      mean: valueOf(items, `temporal_ndwi.${key}.ndwi_mean`),
-      validPixels: valueOf(items, `temporal_ndwi.${key}.ndwi_valid_pixel_count`),
+      mean: valueOf(items, `temporal_ndwi.${key}.${index}_mean`),
+      validPixels: valueOf(items, `temporal_ndwi.${key}.${index}_valid_pixel_count`),
       quality: qualityFrom(observation?.pixel_quality),
     };
   };
 
   return {
+    index,
     earlier: side("first"),
     later: side("second"),
-    difference: valueOf(items, "temporal_ndwi.difference.mean_ndwi_difference"),
-    pairedChange: valueOf(items, "temporal_ndwi.change.ndwi_change_mean"),
+    difference: valueOf(items, `temporal_ndwi.difference.mean_${index}_difference`),
+    pairedChange: valueOf(items, `temporal_ndwi.change.${index}_change_mean`),
     pairedPixels: valueOf(items, "temporal_ndwi.change.paired_valid_pixel_count"),
   };
 }
@@ -545,6 +568,8 @@ const PLAIN_OPERATION: Record<string, string> = {
   ndwi: "water index",
   ndbi: "built-up index",
   temporal_ndwi: "water change",
+  temporal_ndvi: "vegetation change",
+  temporal_ndbi: "built-up change",
   sar_backscatter: "radar",
 };
 

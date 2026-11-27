@@ -430,6 +430,8 @@ export interface ObservationIndexResult {
  * yields `null` and a warning explaining why.
  */
 export interface NdwiTemporalChange {
+  /** The index compared; absent from older servers, which compared NDWI only. */
+  index?: "ndwi" | "ndvi" | "ndbi";
   first_scene_id: string;
   second_scene_id: string;
   first_acquired_at: string | null;
@@ -494,6 +496,8 @@ export interface AnalysisRequest {
    * `false`.
    */
   include_temporal_ndwi?: boolean;
+  /** Which index the two-date comparison uses; the backend default is "ndwi". */
+  temporal_index?: "ndwi" | "ndvi" | "ndbi";
   /**
    * Opt in to quantitative Sentinel-1 backscatter statistics over the SAR
    * window: VV and VH gamma-naught in decibels, plus their mean difference.
@@ -661,6 +665,9 @@ export interface AnalysisResult {
  * shows; the backend carries more (per-class counts, notes).
  */
 export interface PixelQuality {
+  /** Native-resolution tiles the grid was assessed in (1: read at once). */
+  tile_count?: number;
+  unclassified_by_scl_pixels?: number;
   index: string;
   scene_id: string;
   window_label: string;
@@ -753,6 +760,8 @@ export interface SarBackscatterParams {
 
 export interface TemporalNdwiParams {
   tool: "temporal_ndwi_statistics";
+  /** Which index the two dates are compared on; absent means "ndwi". */
+  index?: "ndwi" | "ndvi" | "ndbi";
 }
 
 /**

@@ -104,8 +104,10 @@ export function indicesComputed(
   const steps = result?.trace.plan?.steps ?? [];
   const used = new Set<SpectralIndexKey>();
   for (const step of steps) {
-    if (step.tool === "ndwi_statistics" || step.tool === "temporal_ndwi_statistics") {
-      used.add("ndwi");
+    if (step.tool === "ndwi_statistics") used.add("ndwi");
+    if (step.tool === "temporal_ndwi_statistics") {
+      // The comparison tool keeps its NDWI name for every index it compares.
+      used.add((step as { index?: SpectralIndexKey }).index ?? "ndwi");
     }
     if (step.tool === "spectral_indices") {
       for (const key of (step as { indices?: SpectralIndexKey[] }).indices ?? []) {

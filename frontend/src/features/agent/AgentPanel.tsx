@@ -57,6 +57,13 @@ import {
 import { STANDARD_INTERPRETER, useAgentRun } from "./agentRun";
 import type { AgentRun, AgentRunHandlers } from "./agentRun";
 
+/** The comparison card's title, by the index the two dates were compared on. */
+const CHANGE_TITLE: Record<"ndvi" | "ndwi" | "ndbi", string> = {
+  ndvi: "Vegetation change",
+  ndwi: "Water change",
+  ndbi: "Built-up change",
+};
+
 /**
  * Starting points, one per capability the agent actually has. Clicking one
  * RUNS it - through the same request as a typed question; nothing is canned -
@@ -419,7 +426,7 @@ export function AgentQueryCard({ run }: { run: AgentRun }) {
 
       <p id="agent-capabilities" className="query-hint">
         Ask for vegetation (NDVI), water (NDWI), built-up area (NDBI), radar
-        backscatter, or water change between two periods — for a named place
+        backscatter, or how any of the three changed between two periods — for a named place
         and month. Enter to run.
       </p>
 
@@ -1444,7 +1451,8 @@ function ResultCard({ body, change }: { body: ResultBody; change?: string }) {
       return (
         <div className="result-card" data-kind="temporal">
           <p className="result-op">
-            Water change <span className="result-op-code">· two dates</span>
+            {CHANGE_TITLE[body.reading.index]}{" "}
+            <span className="result-op-code">· two dates</span>
           </p>
           <p className="result-question">What changed</p>
           {change && <p className="result-change">{change}</p>}
@@ -1830,7 +1838,7 @@ const CLARIFICATION_NOTICES: Partial<Record<OutcomeKind, StatusNotice>> = {
   unsupported: {
     summary: "No analysis ran: SatQuery does not do this.",
     detail:
-      "It measures vegetation (NDVI), water (NDWI), built-up area (NDBI), radar backscatter and water change between two periods, for a named place and period.",
+      "It measures vegetation (NDVI), water (NDWI), built-up area (NDBI), radar backscatter, and how water, vegetation or built-up area changed between two periods, for a named place and period.",
     retryable: false,
   },
 };
