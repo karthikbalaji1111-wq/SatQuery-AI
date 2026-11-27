@@ -159,6 +159,8 @@ _ABOUT_A_PLACE = re.compile(
 #: word straight after "how" is a degree, so "<word> is" does not define it.
 #: An acronym ("How NDVI is computed") keeps the definition reading.
 _DEGREE_QUESTION = re.compile(r"(?<![A-Za-z0-9_])how\s+$", re.IGNORECASE)
+#: A vocabulary term that itself opens with "how" ("how deep", "how many").
+_DEGREE_TERM = re.compile(r"how\s+\w", re.IGNORECASE)
 
 #: Quoted text is being discussed, not issued as an instruction.
 _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'|“[^”]*”")
@@ -211,8 +213,13 @@ def requested_matches(
                     continue
                 tail = sentence[offset + match.end() :]
                 if _IS_DEFINED.match(tail) and not (
-                    match.group(0).islower()
-                    and _DEGREE_QUESTION.search(sentence[: offset + match.start()])
+                    (
+                        match.group(0).islower()
+                        and _DEGREE_QUESTION.search(sentence[: offset + match.start()])
+                    )
+                    # A term that IS the degree question ("How deep is X") asks
+                    # about X; it does not define the word "deep".
+                    or _DEGREE_TERM.match(match.group(0))
                 ):
                     continue
                 if _DEFINITION_LEAD.search(sentence[:at]) and not _ABOUT_A_PLACE.match(tail):

@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
-import { ApiError } from "../../api/client";
+import { ApiError, describeApiError } from "../../api/client";
 import { shownScene, shownWindow } from "../agent/derive";
 import { ImageryErrorNotice } from "../agent/AgentPanel";
 import { resolveLocation } from "../../api/geospatial";
@@ -85,7 +85,7 @@ type AnalyzeState =
   | { status: "done"; result: AnalysisResult };
 
 function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.message : "Unexpected error";
+  return error instanceof ApiError ? describeApiError(error) : "Unexpected error";
 }
 
 function formatBbox(bbox: BoundingBox): string {

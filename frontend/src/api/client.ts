@@ -6,13 +6,38 @@ import type { ApiErrorBody } from "./types";
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The server's `X-Request-ID`, when the response carried one. */
+  readonly requestId: string | null;
 
-  constructor(message: string, status: number, code = "http_error") {
+  constructor(
+    message: string,
+    status: number,
+    code = "http_error",
+    requestId: string | null = null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.requestId = requestId;
   }
+}
+
+/**
+ * An API failure as one sentence for the UI, with the server's request id
+ * when there is one - the reference an operator needs to find the run's log
+ * lines.
+ */
+export function describeApiError(error: ApiError): string {
+  return error.requestId
+    ? `${error.message} (reference ${error.requestId})`
+    : error.message;
+}
+
+/** Only an id the server could have issued is shown; anything else is dropped. */
+function requestIdOf(response: Response): string | null {
+  const id = response.headers?.get?.("x-request-id") ?? null;
+  return id !== null && /^[0-9a-f]{12}$/.test(id) ? id : null;
 }
 
 export interface RequestOptions extends Omit<RequestInit, "body"> {
@@ -64,6 +89,7 @@ export async function apiRequest<T>(
           : `Request failed with ${response.status}`,
         response.status,
         response.ok ? "invalid_response" : "http_error",
+        requestIdOf(response),
       );
     }
   }
@@ -74,6 +100,7 @@ export async function apiRequest<T>(
       errBody?.error?.message ?? `Request failed with ${response.status}`,
       response.status,
       errBody?.error?.code ?? "http_error",
+      requestIdOf(response),
     );
   }
 

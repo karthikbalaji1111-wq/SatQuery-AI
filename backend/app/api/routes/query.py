@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from app.core.errors import AppError
-from app.core.limits import rate_limited, workflow_slot
+from app.core.config import get_settings
+from app.core.errors import AiSelectionDisabledError, AppError
+from app.core.limits import rate_limited, within_budget, workflow_slot
 from app.core.observability import workflow
 from app.services.agent.executor import AgentExecutor
 from app.services.agent.intent_model import load_intent_classifier
@@ -35,6 +36,20 @@ from app.services.query import (
 )
 
 router = APIRouter()
+
+
+def require_client_ai_selection() -> None:
+    """Refuse a caller-chosen AI provider where this deployment forbids it.
+
+    Checked before any provider object is built, so a refused request never
+    constructs a client, reads a credential or contacts a provider.
+    """
+
+    if not get_settings().client_ai_selection_enabled:
+        raise AiSelectionDisabledError(
+            "This deployment answers with the standard workflow only. "
+            "Ask again without choosing an AI model."
+        )
 
 
 def get_query_service() -> QueryService:
@@ -72,8 +87,8 @@ def get_query_execution_service() -> QueryExecutionService:
 def get_analysis_service() -> AnalysisService:
     """Provider for :class:`AnalysisService`; overridden in tests.
 
-    The service has no collaborators and no external dependencies, so this is
-    a plain construction.
+    The service reads bands through its default ``ImageryService``; it is
+    cheap to construct and performs no I/O until an analysis asks for one.
     """
 
     return AnalysisService()
@@ -168,6 +183,7 @@ def get_agent_service() -> AgentService:
 )
 async def parse_intent(
     request: ParsePromptRequest,
+    http_request: Request,
     service: AiService = Depends(get_ai_service),
 ) -> SatQueryIntent:
     """Convert a natural-language request into a structured ``SatQueryIntent``.
@@ -179,8 +195,9 @@ async def parse_intent(
     provider parses with that provider and no other."""
 
     if request.provider is not None:
+        require_client_ai_selection()
         service = AiService(parser=get_intent_parser(provider=request.provider))
-    return await service.parse_intent(request.prompt)
+    return await within_budget(http_request, service.parse_intent(request.prompt))
 
 
 @router.post(
@@ -209,17 +226,20 @@ async def build_plan(
 )
 async def execute_query(
     request: QueryExecutionRequest,
+    http_request: Request,
     service: QueryExecutionService = Depends(get_query_execution_service),
 ) -> QueryExecutionResult:
     """Execute a validated ``SatQueryIntent`` end to end.
 
-    Grounds the location via the Geospatial Service, runs Sentinel-2 discovery
-    once per temporal window, deterministically selects one scene per window,
-    and - when ``include_imagery`` is set - retrieves one bounded RGB window for
-    each selected scene. Sentinel-1 SAR is reported under ``skipped_modalities``
-    and is not executed in this phase. No LLM/AI inference happens here."""
+    Grounds the location via the Geospatial Service, runs discovery once per
+    requested modality and temporal window (Sentinel-2 L2A from Earth Search,
+    Sentinel-1 RTC from Planetary Computer), deterministically selects one
+    scene per window, and - when ``include_imagery`` is set - retrieves one
+    bounded display window for each selected scene. One window's failure is
+    recorded against that window; the run fails only when none succeeded. No
+    LLM/AI inference happens here."""
 
-    return await service.execute(request)
+    return await within_budget(http_request, service.execute(request))
 
 
 @router.post(
@@ -229,6 +249,7 @@ async def execute_query(
 )
 async def analyze_query(
     request: AnalysisRequest,
+    http_request: Request,
     service: AnalysisService = Depends(get_analysis_service),
 ) -> AnalysisResult:
     """Interpret an already-computed ``QueryExecutionResult``.
@@ -238,11 +259,14 @@ async def analyze_query(
     traceability, and warnings. A task with no engine yet is reported as
     ``status="not_implemented"`` in a 200 body rather than as an error.
 
-    This endpoint performs no scene discovery, no STAC search, no imagery
-    retrieval, no raster I/O, and no LLM/VLM inference - it only reads the
-    execution result it is given."""
+    It performs no scene discovery and no LLM/VLM inference. The opt-in
+    analyses (``include_ndwi``, ``indices``,
+    ``include_temporal_ndwi``, ``include_sar_backscatter``) DO read bands:
+    native-resolution windowed reads of the scenes the submitted execution
+    selected, after the execution's internal consistency, the scene, pixel
+    quality, radiometry and grids have been validated."""
 
-    return await service.analyze(request)
+    return await within_budget(http_request, service.analyze(request))
 
 
 @router.post(
@@ -254,14 +278,17 @@ async def analyze_query(
 )
 async def answer_question(
     request: AgentQuestionRequest,
+    http_request: Request,
     service: AgentService = Depends(get_agent_service),
 ) -> AgentResult:
     """Answer a free-form question by planning, executing and describing.
 
-    A language model chooses which of the existing deterministic analyses to
-    run; the server validates that choice against a closed tool set, executes
-    it through the same services the manual endpoints use, and validates the
-    generated answer against the evidence before returning it.
+    The STANDARD workflow (no ``provider``/``model``) reads the question with
+    deterministic rules and the local intent classifier; an AI provider does so
+    only when the request names one and the deployment allows that. Either way
+    the plan is validated against a closed tool set, executed through the same
+    services the manual endpoints use, and the answer is validated against the
+    evidence before it is returned.
 
     Every agent outcome is a 200, including the failures. ``planner_unavailable``,
     ``synthesis_unavailable`` and ``answer_withheld`` all carry whatever
@@ -297,6 +324,8 @@ async def answer_question(
         model=request.model or ("configured-default" if explicit else "none"),
     ):
         if explicit:
-            # AI was asked for by name; only then is a provider built.
+            # AI was asked for by name; only then is a provider built - and
+            # only where this deployment lets a caller make that choice.
+            require_client_ai_selection()
             service = build_agent_service(request.provider, request.model)
-        return await service.answer(request)
+        return await within_budget(http_request, service.answer(request))

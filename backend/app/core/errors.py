@@ -156,6 +156,20 @@ class WorkflowTimeoutError(AppError):
     code = "workflow_timeout"
 
 
+class AiSelectionDisabledError(AppError):
+    """Raised when a request names an AI provider or model on a deployment
+    that does not let callers choose one.
+
+    403 rather than 422: the request is well formed, and this deployment has
+    decided that anonymous callers may not route work to an AI provider - a
+    provider may be metered, and nothing here can attribute or limit its cost
+    per user.
+    """
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "ai_selection_disabled"
+
+
 class IntentParsingError(AppError):
     """Raised when a prompt cannot be turned into a valid ``SatQueryIntent``.
 

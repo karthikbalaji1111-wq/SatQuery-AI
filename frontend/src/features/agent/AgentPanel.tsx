@@ -906,7 +906,7 @@ export function AgentEvidencePanel({
       value: `${window.scene_count} · ${
         window.modality === "sentinel-1-sar"
           ? "earliest acquisition selected"
-          : "lowest cloud cover selected"
+          : "verifiable radiometry first, then lowest cloud cover"
       }`,
     });
   }

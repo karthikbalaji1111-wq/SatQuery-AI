@@ -10,6 +10,9 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [react()],
     build: {
+      // The largest chunk is MapLibre itself (about 970 kB minified, 256 kB
+      // gzip), split out below; nothing of ours comes near this.
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         // Separate entries keep three.js out of the workspace bundle. The
         // cinematic landing is the front door at "/" (index.html); the real
@@ -17,6 +20,15 @@ export default defineConfig(({ command, mode }) => {
         input: {
           app: "app.html",
           landing: "index.html",
+        },
+        output: {
+          // MapLibre is most of the workspace's weight and changes far less
+          // often than the app's own code; its own chunk stays cached across
+          // releases and keeps the app chunk under Vite's 500 kB warning.
+          manualChunks(id: string) {
+            if (id.includes("node_modules/maplibre-gl/")) return "maplibre";
+            return undefined;
+          },
         },
       },
     },

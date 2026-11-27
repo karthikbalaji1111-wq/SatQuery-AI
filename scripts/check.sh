@@ -3,6 +3,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+echo "==> Secrets"
+python3 "$ROOT/scripts/check_secrets.py"
+
 echo "==> Frontend: lint"
 (cd "$ROOT/frontend" && npm run lint)
 echo "==> Frontend: typecheck"

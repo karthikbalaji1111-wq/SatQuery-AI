@@ -42,18 +42,22 @@ makes a burst expensive for the burster rather than for everyone else.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 
 from fastapi import FastAPI, Request
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.core.errors import (
     PayloadTooLargeError,
     RateLimitedError,
     ServiceOverloadedError,
+    WorkflowTimeoutError,
     error_response,
 )
 from app.core.logging import get_logger
@@ -65,6 +69,7 @@ logger = get_logger("limits")
 #: has to be bounded - otherwise the defence against unbounded memory is an
 #: unbounded dictionary.
 _MAX_TRACKED_CLIENTS = 4096
+
 
 
 @dataclass
@@ -195,13 +200,93 @@ class _GateSlot:
 #: a cap, concurrent analyses multiply resident raster memory on a machine that
 #: has already been observed being OOM-killed.
 #:
+#: A THREADING semaphore, not an asyncio one: the reads run inside
+#: ``run_in_threadpool`` workers (and the sync imagery route), where there is no
+#: event loop to await on. An earlier asyncio ``RASTER_GATE`` was declared here
+#: and documented as enforced, but nothing ever entered it - so the setting
+#: bounded nothing. This one is entered by ``ImageryService`` around every
+#: remote raster read.
+#:
+#: One semaphore per configured limit, created on first use: the limit is read
+#: from the settings the service was built with, never fixed at import time.
+#:
 #: The geocoder's own budget is NOT here: OpenStreetMap's policy is about
 #: request SPACING as well as concurrency, and both live together in
 #: ``services/geospatial/nominatim.py`` so there is one place that decides how
 #: this application treats that service, rather than two that must agree.
-RASTER_GATE = ConcurrencyGate(
-    get_settings().max_concurrent_raster_reads, name="raster reads"
-)
+_RASTER_SEMAPHORES: dict[int, threading.BoundedSemaphore] = {}
+_RASTER_SEMAPHORES_LOCK = threading.Lock()
+
+
+def _raster_semaphore(limit: int) -> threading.BoundedSemaphore:
+    with _RASTER_SEMAPHORES_LOCK:
+        semaphore = _RASTER_SEMAPHORES.get(limit)
+        if semaphore is None:
+            semaphore = threading.BoundedSemaphore(max(1, limit))
+            _RASTER_SEMAPHORES[limit] = semaphore
+        return semaphore
+
+
+@contextmanager
+def raster_read_slot(settings: Settings) -> Iterator[None]:
+    """Hold one of the process's raster-read slots for the duration of a read.
+
+    Blocks the calling worker thread for up to
+    ``raster_admission_wait_seconds``; past that the read is refused with 503
+    rather than queueing without bound behind a slow upstream.
+    """
+
+    semaphore = _raster_semaphore(settings.max_concurrent_raster_reads)
+    wait = settings.raster_admission_wait_seconds
+    if not semaphore.acquire(timeout=wait):
+        logger.info(
+            "raster reads at capacity (%d in use, waited %.0fs)",
+            settings.max_concurrent_raster_reads,
+            wait,
+        )
+        raise ServiceOverloadedError(
+            "The service is at capacity for raster reads. "
+            "Please retry in a few seconds."
+        )
+    try:
+        yield
+    finally:
+        semaphore.release()
+
+
+async def within_budget[T](request: Request, awaitable: Awaitable[T]) -> T:
+    """Await one workflow, ending it with 504 once its budget is spent.
+
+    ``workflow_budget_seconds`` was configured and documented as enforced, and
+    nothing read it. This is the one place it is applied; the expensive routes
+    await their service call through it.
+
+    Only THIS timeout becomes a 504: a ``TimeoutError`` raised by the work
+    itself (an upstream that timed out) propagates unchanged, because
+    ``asyncio.timeout`` reports separately whether it was the one that expired.
+
+    KNOWN LIMITATION: cancelling the awaiting coroutine cannot stop a raster
+    read already running in a worker thread. That read finishes (bounded by
+    the HTTP timeouts below it) and its result is discarded; the request's
+    workflow slot is released at once.
+    """
+
+    limits: RequestLimits | None = getattr(request.app.state, "limits", None)
+    if limits is None:
+        return await awaitable
+    budget = limits.settings.workflow_budget_seconds
+    deadline = asyncio.timeout(budget)
+    try:
+        async with deadline:
+            return await awaitable
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
+        logger.warning("workflow exceeded its %.0fs budget", budget)
+        raise WorkflowTimeoutError(
+            f"The request did not finish within {budget:.0f} seconds and was "
+            "stopped. Try a smaller area or a single period."
+        ) from exc
 
 
 @dataclass
@@ -259,16 +344,61 @@ def install_request_limits(app: FastAPI, settings: Settings) -> None:
         return await call_next(request)
 
 
-def _client_of(request: Request) -> str:
+_FORWARDED_CHAIN_REPORTED = False
+
+
+def _peer(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _client_of(request: Request, trusted_proxy_hops: int = 0) -> str:
     """Who this request is attributed to.
 
-    The peer address, never a client-supplied header: ``X-Forwarded-For`` is
-    trivially spoofed, so trusting it would let one caller present as many and
-    bypass the limit entirely. A deployment behind a trusted proxy must
-    terminate that header at the proxy and is documented as such.
+    With ``trusted_proxy_hops == 0`` (the default) it is the TCP peer, never a
+    header, because ``X-Forwarded-For`` is written by whoever sends the request.
+
+    Behind proxies, the peer is the proxy, so every caller would share ONE
+    allowance and one busy client would lock everyone out. Each proxy APPENDS
+    the address it received the connection from, so the entry ``hops`` places
+    from the right was written by the outermost trusted proxy and cannot be
+    forged by the client; anything to its left can be. That entry is used.
+
+    The header is read here rather than taken from ``request.client`` after
+    uvicorn's proxy-header rewriting: told to trust every proxy
+    (``FORWARDED_ALLOW_IPS=*``), uvicorn takes the LEFTMOST entry, which the
+    client chose. A chain shorter than the configured hop count, or an entry
+    that is not an IP address, falls back to the peer rather than to anything
+    the client supplied.
     """
 
-    return request.client.host if request.client else "unknown"
+    if trusted_proxy_hops <= 0:
+        return _peer(request)
+
+    header = ",".join(request.headers.getlist("x-forwarded-for"))
+    chain = [entry.strip() for entry in header.split(",") if entry.strip()]
+    _report_chain_length(len(chain))
+    if len(chain) < trusted_proxy_hops:
+        return _peer(request)
+    candidate = chain[-trusted_proxy_hops]
+    try:
+        return str(ip_address(candidate))
+    except ValueError:
+        return _peer(request)
+
+
+def _report_chain_length(length: int) -> None:
+    """Log, once per process, how many forwarding entries arrive.
+
+    Hosting platforms rarely document how many proxies sit in front of a
+    service. For a request the client sent WITHOUT its own X-Forwarded-For,
+    this count is exactly the value ``SATQUERY_TRUSTED_PROXY_HOPS`` should
+    have. Only the count is logged - never an address.
+    """
+
+    global _FORWARDED_CHAIN_REPORTED
+    if not _FORWARDED_CHAIN_REPORTED:
+        _FORWARDED_CHAIN_REPORTED = True
+        logger.info("first request carried %d X-Forwarded-For entries", length)
 
 
 async def rate_limited(request: Request) -> None:
@@ -277,7 +407,7 @@ async def rate_limited(request: Request) -> None:
     limits: RequestLimits | None = getattr(request.app.state, "limits", None)
     if limits is None:  # an app built without limits installed
         return
-    limits.limiter.admit(_client_of(request))
+    limits.limiter.admit(_client_of(request, limits.settings.trusted_proxy_hops))
 
 
 async def workflow_slot(request: Request) -> AsyncIterator[None]:

@@ -42,6 +42,7 @@ from app.services.satellite import (
     Scene,
     SceneSearchRequest,
 )
+from app.services.satellite.radiometry import offset_free_by_metadata
 from app.services.satellite.schemas import DEFAULT_IMAGERY_ASSET
 
 logger = get_logger("query.execution")
@@ -69,23 +70,37 @@ _expand_windows = expand_windows
 
 
 def _select_scene(scenes: list[Scene]) -> Scene | None:
-    """Deterministically pick one scene from a discovery result.
+    """Deterministically pick one optical scene from a discovery result.
 
-    Ordering: ``cloud_cover`` ascending, then ``datetime`` ascending, then
-    ``id`` lexicographically ascending. A ``None`` ``cloud_cover`` sorts after
-    any numeric value; a ``None`` ``datetime`` sorts after any string. An empty
+    Ordering: scenes whose search metadata already establishes offset-free
+    values first (``radiometry.offset_free_by_metadata``), then
+    ``cloud_cover`` ascending, then ``datetime`` ascending, then ``id``
+    lexicographically ascending. A ``None`` ``cloud_cover`` sorts after any
+    numeric value; a ``None`` ``datetime`` sorts after any string. An empty
     list yields ``None`` and is not treated as a failure.
+
+    The radiometric preference only REORDERS: no scene is dropped, and when no
+    candidate is established offset-free the order is the cloud order alone.
+    Without it the least-cloudy scene was chosen even where radiometric
+    validation would then refuse it and a usable scene of the same month was
+    available, so the user got "not computed" instead of a measurement.
     """
 
     if not scenes:
         return None
 
-    def sort_key(scene: Scene) -> tuple[tuple[int, float], tuple[int, str], str]:
+    def sort_key(
+        scene: Scene,
+    ) -> tuple[int, tuple[int, float], tuple[int, str], str]:
+        verifiable = offset_free_by_metadata(
+            scene.processing_baseline, scene.boa_offset_flag
+        )
+        radiometry_key = 0 if verifiable else 1
         cloud = scene.cloud_cover
         cloud_key = (1, 0.0) if cloud is None else (0, float(cloud))
         moment = scene.datetime
         datetime_key = (1, "") if moment is None else (0, moment)
-        return (cloud_key, datetime_key, scene.id)
+        return (radiometry_key, cloud_key, datetime_key, scene.id)
 
     return min(scenes, key=sort_key)
 
