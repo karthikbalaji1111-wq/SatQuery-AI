@@ -41,6 +41,15 @@ export default defineConfig(({ command, mode }) => {
       globals: true,
       setupFiles: ["./src/test/setup.ts"],
       css: false,
+      coverage: {
+        provider: "v8",
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/**/m6Fixtures.ts"],
+        // Measured 2026-11-27 over every source file: lines 83.8%, branches
+        // 85.9%, functions 91.0%, statements 82.7%. CI fails below these
+        // floors (applied only with --coverage).
+        thresholds: { lines: 82, branches: 84, functions: 89, statements: 81 },
+      },
     },
   };
 });
