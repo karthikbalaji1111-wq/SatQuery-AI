@@ -127,7 +127,9 @@ def test_the_tile_plan_partitions_the_area_exactly() -> None:
     assert sum(t.width * t.height for t in plan.tiles) == plan.width * plan.height
     covered = np.zeros((plan.height, plan.width), dtype=np.int8)
     for tile in plan.tiles:
-        covered[tile.row_off : tile.row_off + tile.height, tile.col_off : tile.col_off + tile.width] += 1
+        rows = slice(tile.row_off, tile.row_off + tile.height)
+        cols = slice(tile.col_off, tile.col_off + tile.width)
+        covered[rows, cols] += 1
     assert covered.min() == 1 and covered.max() == 1
     assert all(t.width <= TILE and t.height <= TILE for t in plan.tiles)
 
