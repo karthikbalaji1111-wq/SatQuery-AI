@@ -114,10 +114,10 @@ def _shown(value: object) -> str:
 class AnalysisOperation(StrEnum):
     """Every operation the pipeline RECOGNISES.
 
-    Recognised is not the same as implemented: temporal NDVI and NDBI are named
-    here so a request for them is refused as "not implemented" rather than as
-    a string nobody has heard of. The difference tells a client whether to fix
-    its request or wait for an engine.
+    Recognised is not the same as implemented: an operation named here without
+    an engine is refused as "not implemented" rather than as a string nobody
+    has heard of. The difference tells a client whether to fix its request or
+    wait for an engine. Every operation listed today has an engine.
     """
 
     NDVI = "ndvi"
@@ -141,7 +141,7 @@ class OperationSpec:
     implemented: bool
     #: Pixel spacing of the finest grid the operation reads. The reader sizes
     #: its native window on this grid, so it is what the area limit is judged
-    #: against. Sentinel-2 10 m bands: live COG headers (CLAUDE.md section 6).
+    #: against. Sentinel-2 10 m bands: live COG headers (PROJECT_RECORD.md section 6).
     #: Sentinel-1 RTC: the collection's ``raster:bands.spatial_resolution`` for
     #: ``vv``/``vh`` is 10 (read from Planetary Computer, 2026-09-22) - the SAR
     #: RESOLUTION is 20 m, but the window is counted in grid pixels.
@@ -158,8 +158,8 @@ OPERATIONS: Mapping[AnalysisOperation, OperationSpec] = {
         OperationSpec(AnalysisOperation.NDBI, _OPTICAL, False, True, 10.0),
         OperationSpec(AnalysisOperation.SAR_BACKSCATTER, _SAR, False, True, 10.0),
         OperationSpec(AnalysisOperation.TEMPORAL_NDWI, _OPTICAL, True, True, 10.0),
-        OperationSpec(AnalysisOperation.TEMPORAL_NDVI, _OPTICAL, True, False, 10.0),
-        OperationSpec(AnalysisOperation.TEMPORAL_NDBI, _OPTICAL, True, False, 10.0),
+        OperationSpec(AnalysisOperation.TEMPORAL_NDVI, _OPTICAL, True, True, 10.0),
+        OperationSpec(AnalysisOperation.TEMPORAL_NDBI, _OPTICAL, True, True, 10.0),
     )
 }
 
@@ -546,23 +546,32 @@ def _check_aoi_size(
     grid_spacing_m: float,
     limits: QuantitativeReadLimits | None,
     field: str,
+    *,
+    tiled: bool = False,
 ) -> None:
     """Refuse an area the reader would refuse, before anything is fetched.
 
     ``limits`` is whatever the reader DECLARES. ``None`` - a reader that
     declares none - means no early check: the rule belongs to the reader, and
-    this module only moves it earlier.
+    this module only moves it earlier. ``tiled`` selects the larger bounds of
+    the analyses that read in tiles, when the reader declares them.
     """
 
     if limits is None:
         return
-    columns, rows = estimated_window_pixels(bbox, grid_spacing_m)
-    if max(columns, rows) <= limits.max_dimension and (
-        columns * rows <= limits.max_window_pixels
+    max_dimension, max_pixels = limits.max_dimension, limits.max_window_pixels
+    if (
+        tiled
+        and limits.tiled_max_dimension is not None
+        and limits.tiled_max_window_pixels is not None
     ):
+        max_dimension = limits.tiled_max_dimension
+        max_pixels = limits.tiled_max_window_pixels
+    columns, rows = estimated_window_pixels(bbox, grid_spacing_m)
+    if max(columns, rows) <= max_dimension and columns * rows <= max_pixels:
         return
     width_m, height_m = aoi_extent_m(bbox)
-    limit_km = limits.max_dimension * grid_spacing_m / 1000.0
+    limit_km = min(max_dimension, math.sqrt(max_pixels)) * grid_spacing_m / 1000.0
     raise AnalysisRequestRejectedError(
         "aoi_too_large",
         field,
@@ -959,6 +968,7 @@ def operations_for_flags(
     include_ndwi: bool = False,
     include_temporal_ndwi: bool = False,
     include_sar_backscatter: bool = False,
+    temporal_index: str = "ndwi",
 ) -> tuple[AnalysisOperation, ...]:
     """The live contract's flags, in the allowlist's vocabulary, de-duplicated.
 
@@ -971,7 +981,7 @@ def operations_for_flags(
     if include_ndwi:
         ordered.append(AnalysisOperation.NDWI)
     if include_temporal_ndwi:
-        ordered.append(AnalysisOperation.TEMPORAL_NDWI)
+        ordered.append(AnalysisOperation(f"temporal_{temporal_index}"))
     if include_sar_backscatter:
         ordered.append(AnalysisOperation.SAR_BACKSCATTER)
     return tuple(dict.fromkeys(ordered))
@@ -985,6 +995,7 @@ def requested_operations(request: AnalysisRequest) -> tuple[AnalysisOperation, .
         include_ndwi=request.include_ndwi,
         include_temporal_ndwi=request.include_temporal_ndwi,
         include_sar_backscatter=request.include_sar_backscatter,
+        temporal_index=request.temporal_index,
     )
 
 
@@ -993,6 +1004,8 @@ def check_operations_area(
     operations: Sequence[AnalysisOperation],
     limits: QuantitativeReadLimits | None,
     field: str,
+    *,
+    tiled: bool = False,
 ) -> None:
     """The area rule for a set of operations, on its own.
 
@@ -1004,7 +1017,7 @@ def check_operations_area(
     if not operations:
         return
     spacing = min(OPERATIONS[op].grid_spacing_m for op in operations)
-    _check_aoi_size(bbox, spacing, limits, field)
+    _check_aoi_size(bbox, spacing, limits, field, tiled=tiled)
 
 
 def validate_execution_analysis(
@@ -1041,7 +1054,11 @@ def validate_execution_analysis(
         return ExecutionAnalysisGate(operations=(), bbox=bbox, size_checked=False)
 
     specs = [OPERATIONS[op] for op in operations]
-    check_operations_area(bbox, operations, limits, "execution.plan.bbox")
+    # The single-scene NDWI path (``include_ndwi``) draws an overlay from one
+    # read and is not tiled; every other analysis is.
+    check_operations_area(
+        bbox, operations, limits, "execution.plan.bbox", tiled=not request.include_ndwi
+    )
 
     known = _known_datasets(settings)
     families = {s.modality for s in specs}

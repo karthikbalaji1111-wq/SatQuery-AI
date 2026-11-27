@@ -672,12 +672,23 @@ def _supporting_measurements(
         if (
             item_metrics
             and item.source not in item_metrics
-            and not (item.source == "temporal_ndwi" and item_metrics == {"ndwi"})
+            # The comparison tool is named for NDWI and measures any of the
+            # three indices: one index per item, named in the measurement.
+            and not (
+                item.source == "temporal_ndwi"
+                and len(item_metrics) == 1
+                and item_metrics <= {"ndwi", "ndvi", "ndbi"}
+            )
             and not (item.source == "sar_backscatter" and item_metrics <= {"vv", "vh"})
         ):
             continue
         if measurement.name == "paired_valid_pixel_count" and item.source == "temporal_ndwi":
-            item_metrics = {"ndwi"}
+            comparison = evidence.analysis.temporal_comparison if evidence.analysis else None
+            item_metrics = {
+                comparison.change.index
+                if comparison is not None and comparison.change is not None
+                else "ndwi"
+            }
         if item.source == "sar_backscatter" and (
             not metrics or measurement.name not in {
                 "vv_mean_db", "vv_min_db", "vv_max_db", "vv_valid_pixel_count",

@@ -68,7 +68,10 @@ from app.services.query.schemas import (
 
 #: The analyses this interpreter can route to - each one a real, deterministic
 #: capability of the backend. Nothing is listed that the engines cannot do.
-AnalysisKey = Literal["ndvi", "ndwi", "ndbi", "sar_backscatter", "temporal_ndwi", "imagery"]
+AnalysisKey = Literal[
+    "ndvi", "ndwi", "ndbi", "sar_backscatter",
+    "temporal_ndwi", "temporal_ndvi", "temporal_ndbi", "imagery",
+]
 
 #: How each analysis is named to a reader, in clarifications and options.
 ANALYSIS_LABELS: dict[str, str] = {
@@ -77,6 +80,8 @@ ANALYSIS_LABELS: dict[str, str] = {
     "ndbi": "built-up area (NDBI)",
     "sar_backscatter": "SAR backscatter (Sentinel-1 VV/VH)",
     "temporal_ndwi": "water change between two periods (NDWI)",
+    "temporal_ndvi": "vegetation change between two periods (NDVI)",
+    "temporal_ndbi": "built-up change between two periods (NDBI)",
     "imagery": "true-colour imagery (Sentinel-2)",
 }
 
@@ -91,6 +96,15 @@ SUPPORTED_OPTIONS: tuple[str, ...] = (
 )
 
 _OPTICAL_INDICES: tuple[str, ...] = ("ndvi", "ndwi", "ndbi")
+
+#: The analyses a two-period comparison is available for, and the comparison
+#: each becomes. One comparison per question.
+_COMPARABLE: dict[str, str] = {
+    "ndwi": "temporal_ndwi",
+    "ndvi": "temporal_ndvi",
+    "ndbi": "temporal_ndbi",
+}
+_TEMPORAL_KEYS: tuple[str, ...] = tuple(_COMPARABLE.values())
 
 
 class ClarificationRequiredError(InvalidInputError):
@@ -880,8 +894,9 @@ class QueryInterpretation:
             steps.append(SpectralIndicesParams(indices=indices))  # type: ignore[arg-type]
         if "sar_backscatter" in self.analyses:
             steps.append(SarBackscatterParams())
-        if "temporal_ndwi" in self.analyses:
-            steps.append(TemporalNdwiParams())
+        for key, temporal in _COMPARABLE.items():
+            if temporal in self.analyses:
+                steps.append(TemporalNdwiParams(index=key))  # type: ignore[arg-type]
         if self.visual_question is not None:
             steps.append(RsModelParams(question=self.visual_question))
         return AgentPlan(steps=steps)
@@ -895,6 +910,8 @@ _MEASURED: dict[str, str] = {
     "ndbi": "built-up area (NDBI) be measured",
     "sar_backscatter": "SAR backscatter be measured",
     "temporal_ndwi": "water be compared",
+    "temporal_ndvi": "vegetation be compared",
+    "temporal_ndbi": "built-up area be compared",
     "imagery": "the image be shown",
 }
 
@@ -905,6 +922,8 @@ _QUESTION_FOR: dict[str, str] = {
     "ndbi": "Show built-up area (NDBI)",
     "sar_backscatter": "Analyze SAR backscatter",
     "temporal_ndwi": "Compare water (NDWI)",
+    "temporal_ndvi": "Compare vegetation (NDVI)",
+    "temporal_ndbi": "Compare built-up area (NDBI)",
     "imagery": "Show the satellite image",
 }
 _LABEL_KEY = {label: key for key, label in ANALYSIS_LABELS.items()}
@@ -931,7 +950,7 @@ def _suggested_question(key: str, location: str | None, periods: list[TimeRange]
     question = _QUESTION_FOR[key]
     if location:
         question += f" around {location}"
-    if key == "temporal_ndwi" and len(periods) == 2:
+    if key in _TEMPORAL_KEYS and len(periods) == 2:
         first, second = (_period_phrase(p).split(" ", 1)[1] for p in periods)
         question += f" between {first} and {second}"
     elif len(periods) == 1:
@@ -1247,31 +1266,43 @@ def resolve_operation(
 
     # -- the analysis, resolved against the comparison request ------------------
     if comparison:
-        others = [key for key in measured if key != "ndwi"]
+        comparable = [key for key in measured if key in _COMPARABLE]
+        others = [key for key in measured if key not in _COMPARABLE]
         if not measured:
             raise _clarify(
                 "analysis_missing",
                 "What should be compared"
                 + (f" at {place.text}" if place.text else "")
                 + "? Comparison between two periods is available for water "
-                "(NDWI).",
-                options=(ANALYSIS_LABELS["temporal_ndwi"],),
+                "(NDWI), vegetation (NDVI) and built-up area (NDBI).",
+                options=tuple(ANALYSIS_LABELS[_COMPARABLE[k]] for k in _COMPARABLE),
                 location=place.text,
                 periods=_stated_periods(reading),
             )
         if others:
             raise _clarify(
                 "analysis_unsupported",
-                "Comparison between two periods is available for water (NDWI) "
-                "only. "
+                "Comparison between two periods is available for water (NDWI), "
+                "vegetation (NDVI) and built-up area (NDBI). "
                 + ", ".join(ANALYSIS_LABELS[k] for k in others)
                 + " can be measured for one period at a time.",
-                options=(ANALYSIS_LABELS["temporal_ndwi"],
+                options=(*[ANALYSIS_LABELS[_COMPARABLE[k]] for k in comparable],
                          *[ANALYSIS_LABELS[k] for k in others]),
                 analyses=measured,
                 location=place.text,
             )
-        chosen: list[str] = ["temporal_ndwi"]
+        if len(comparable) > 1:
+            raise _clarify(
+                "analysis_ambiguous",
+                "One comparison is made at a time. Which should be compared"
+                + (f" at {place.text}" if place.text else "")
+                + "?",
+                options=tuple(ANALYSIS_LABELS[_COMPARABLE[k]] for k in comparable),
+                analyses=measured,
+                location=place.text,
+                periods=_stated_periods(reading),
+            )
+        chosen: list[str] = [_COMPARABLE[comparable[0]]]
     else:
         if not chosen_analyses:
             raise _clarify(

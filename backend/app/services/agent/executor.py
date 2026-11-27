@@ -48,7 +48,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from app.core.errors import AppError, GeocodingUnavailableError, InvalidInputError
+from app.core.errors import (
+    AppError,
+    GeocodingUnavailableError,
+    InvalidInputError,
+    RateLimitedError,
+)
 from app.core.logging import get_logger
 from app.services.agent.registry import AnalysisFlag, resolve_tool
 from app.services.agent.schemas import (
@@ -60,6 +65,7 @@ from app.services.agent.schemas import (
     ExecuteQueryParams,
     RsModelParams,
     SpectralIndicesParams,
+    TemporalNdwiParams,
     ToolCall,
     VisualObservation,
 )
@@ -315,21 +321,22 @@ def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
     # because nothing had offered it as evidence.
     change = comparison.change
     if change is not None:
+        key = change.index
         items.extend(
             _measurement_items(
                 [
                     Measurement(
-                        name="ndwi_change_mean",
+                        name=f"{key}_change_mean",
                         value=change.change_mean,
                         unit="index",
                     ),
                     Measurement(
-                        name="ndwi_change_min",
+                        name=f"{key}_change_min",
                         value=change.change_min,
                         unit="index",
                     ),
                     Measurement(
-                        name="ndwi_change_max",
+                        name=f"{key}_change_max",
                         value=change.change_max,
                         unit="index",
                     ),
@@ -349,7 +356,7 @@ def _analysis_items(analysis: AnalysisResult) -> list[EvidenceItem]:
                 id="temporal_ndwi.change.pair",
                 source="temporal_ndwi",
                 text=(
-                    f"Paired-pixel NDWI change from {change.first_scene_id} "
+                    f"Paired-pixel {key.upper()} change from {change.first_scene_id} "
                     f"(earlier) to {change.second_scene_id} (later), computed "
                     f"on one shared {change.crs} grid over "
                     f"{change.paired_valid_pixel_count} pixels valid in both."
@@ -521,11 +528,14 @@ class AgentExecutor:
         # executor is deliberately free of reflection primitives, and the one
         # tool that carries indices is known by name.
         requested_indices: list[str] = []
+        temporal_index = "ndwi"
         for _, params, _ in analysis_steps:
             if isinstance(params, SpectralIndicesParams):
                 for key in params.indices:
                     if key not in requested_indices:
                         requested_indices.append(key)
+            elif isinstance(params, TemporalNdwiParams):
+                temporal_index = params.index
         analysis_flags = [flag for _, _, flag in analysis_steps if flag is not None]
 
         steps: dict[int, AgentToolStep] = {}
@@ -547,7 +557,7 @@ class AgentExecutor:
                 discovery_failure = exc.message
                 discovery_failure_code = exc.code
                 # Only a location-service outage names a wait worth keeping.
-                if isinstance(exc, GeocodingUnavailableError):
+                if isinstance(exc, GeocodingUnavailableError | RateLimitedError):
                     discovery_failure_retry_after = exc.retry_after_seconds
                 steps[index] = AgentToolStep(
                     status="failed", parameters=params, error_message=exc.message
@@ -559,7 +569,7 @@ class AgentExecutor:
         analysis_failure: str | None = None
         if analysis_steps:
             analysis, analysis_status, message = await self._run_analysis(
-                execution, analysis_flags, requested_indices
+                execution, analysis_flags, requested_indices, temporal_index
             )
             if analysis_status == "failed":
                 analysis_failure = message
@@ -705,6 +715,7 @@ class AgentExecutor:
         execution: QueryExecutionResult | None,
         flags: list[AnalysisFlag],
         indices: list[str] | None = None,
+        temporal_index: str = "ndwi",
     ) -> tuple[AnalysisResult | None, str, str | None]:
         """ONE analyze call carrying the union of the requested flags.
 
@@ -723,6 +734,7 @@ class AgentExecutor:
             include_temporal_ndwi="include_temporal_ndwi" in flags,
             include_sar_backscatter="include_sar_backscatter" in flags,
             indices=indices,
+            temporal_index=temporal_index,  # type: ignore[arg-type]
         )
         try:
             result = await self._analysis.analyze(request)

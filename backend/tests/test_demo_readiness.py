@@ -302,10 +302,16 @@ def test_a_change_verb_over_water_is_a_comparison(question: str) -> None:
     assert result.comparison and list(result.analyses) == ["temporal_ndwi"], question
 
 
-def test_a_change_verb_over_vegetation_is_refused_not_measured_once() -> None:
-    clarification = ask("Has the vegetation of Kodagu declined from 2020 to 2024?")
-    assert clarification.reason == "analysis_unsupported"
-    assert "water (NDWI) only" in clarification.message
+def test_a_change_verb_over_vegetation_is_compared_not_measured_once() -> None:
+    # Formerly refused (only water could be compared). Still never a single
+    # NDVI over the whole span: it is the two-period vegetation comparison.
+    reading = interpret(
+        "Has the vegetation of Kodagu declined from 2020 to 2024?", today=TODAY
+    )
+    assert reading.comparison is True
+    assert list(reading.analyses) == ["temporal_ndvi"]
+    assert [step.tool for step in reading.plan().steps][-1] == "temporal_ndwi_statistics"
+    assert reading.plan().steps[-1].index == "ndvi"  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(

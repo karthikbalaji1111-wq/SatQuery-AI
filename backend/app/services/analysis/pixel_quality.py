@@ -28,7 +28,7 @@ unchanged. The catalog confirms the rest of the encoding: ``uint8``, nodata 0,
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -307,6 +307,7 @@ def mask_with_scl(
         contamination_fraction=_fraction(masked, total),
         scl_class_counts=class_counts,
         unknown_scl_values=unknown_values,
+        unclassified_by_scl_pixels=unclassified_by_scl,
         quality_notes=_notes(
             counts,
             total=total,
@@ -321,6 +322,73 @@ def mask_with_scl(
         low=dataclasses.replace(low, valid=low.valid & usable),
         quality=quality,
     )
+
+
+def merge_quality(
+    parts: Sequence[PixelQuality],
+    *,
+    grid_width: int,
+    grid_height: int,
+    grid_crs: str | None,
+) -> PixelQuality:
+    """One record for a grid assessed tile by tile. Exact: every count adds.
+
+    The tiles must partition the grid - each pixel in exactly one tile - which
+    is what the tile plan guarantees and the pixel totals here re-check: the
+    merged record is refused by its own validator unless the tiles' pixels add
+    up to the grid's. Notes are rebuilt from the merged counts with the same
+    wording one read would have produced, so a reader cannot tell the record
+    of a tiled grid from that of one read except by ``tile_count``.
+    """
+
+    if not parts:
+        raise ValueError("merge_quality needs at least one tile")
+    first = parts[0]
+    if len(parts) == 1:
+        return first
+    fields = (
+        "total_pixels", "valid_pixels", "masked_pixels", "nodata_pixels",
+        "saturated_or_defective_pixels", "cloud_pixels", "cloud_shadow_pixels",
+        "snow_pixels", "unknown_class_pixels", "other_masked_pixels",
+        "unclassified_by_scl_pixels",
+    )
+    sums = {name: sum(getattr(part, name) for part in parts) for name in fields}
+    class_counts: dict[str, int] = {}
+    for part in parts:
+        for key, value in part.scl_class_counts.items():
+            class_counts[key] = class_counts.get(key, 0) + value
+    unknown_values = sorted({v for part in parts for v in part.unknown_scl_values})
+    counts: dict[QualityCategory, int] = {
+        "nodata": sums["nodata_pixels"],
+        "saturated_or_defective": sums["saturated_or_defective_pixels"],
+        "cloud": sums["cloud_pixels"],
+        "cloud_shadow": sums["cloud_shadow_pixels"],
+        "snow": sums["snow_pixels"],
+        "unknown_class": sums["unknown_class_pixels"],
+        "other_masked": sums["other_masked_pixels"],
+    }
+    total, valid = sums["total_pixels"], sums["valid_pixels"]
+    record = first.model_dump() | sums | {
+        "grid_width": grid_width,
+        "grid_height": grid_height,
+        "grid_crs": grid_crs,
+        "valid_fraction": _fraction(valid, total),
+        "contamination_fraction": _fraction(total - valid, total),
+        "scl_class_counts": dict(sorted(class_counts.items(), key=lambda kv: int(kv[0]))),
+        "unknown_scl_values": unknown_values,
+        "tile_count": len(parts),
+        "quality_notes": _notes(
+            counts,
+            total=total,
+            valid=valid,
+            unknown_values=unknown_values,
+            unclassified_by_scl=sums["unclassified_by_scl_pixels"],
+            metadata_status=first.scl_metadata_status,
+        ),
+    }
+    # Validated, not copied: the record's own rules re-check that every pixel
+    # of the grid is accounted for exactly once.
+    return PixelQuality.model_validate(record)
 
 
 # --------------------------------------------------------------------------- #
@@ -379,11 +447,12 @@ def temporal_quality_note(
     applied to the other.
     """
 
+    label = first.index.upper()
     paired = (
         f"{paired_valid} pixels are usable on both dates and are the only pixels "
-        "the paired NDWI change uses"
+        f"the paired {label} change uses"
         if paired_valid is not None
-        else "no paired NDWI change was computed"
+        else f"no paired {label} change was computed"
     )
     return (
         f"Pixel quality: {first.window_label!r} has {first.valid_pixels} usable "

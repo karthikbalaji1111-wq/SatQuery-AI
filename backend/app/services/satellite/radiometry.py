@@ -31,7 +31,7 @@ signals about it, and they disagree:
 
 Pixel measurement settles the ``true`` case: over SCL-classified vegetation an
 applied ``-0.1`` gives NDVI 1.30, which is impossible, while raw values give
-0.637 (CLAUDE.md section 7), and 2023 open water reads a median NIR DN of 338
+0.637 (PROJECT_RECORD.md section 7), and 2023 open water reads a median NIR DN of 338
 (offset-free). So for ``true`` the flag is right and the declared offset is
 stale. The ``false`` case is NOT settled by metadata: baseline-04.00 items
 flagged ``false`` also read offset-free over water (3 of 3 sampled, median NIR

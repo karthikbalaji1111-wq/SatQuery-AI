@@ -300,11 +300,16 @@ def test_existing_places_resolve_exactly_as_before(query: str) -> None:
 # =========================================================================== #
 
 
-def test_a_real_large_extent_is_still_refused_as_too_large() -> None:
+def test_a_real_large_extent_is_measured_as_an_area_under_the_area_rule() -> None:
     plan = build_plan("Chennai")
     assert CAPTURED["Chennai"][0]["osm_type"] == "relation"
+    # About 21 x 42 km: inside the tiled limit of the standard analyses, which
+    # read a large area in native-resolution tiles...
+    AnalysisService().precheck_plan(plan.bbox, indices=("ndwi",))
+    # ...and still beyond the single-read NDWI path, which draws its overlay
+    # from one read and is not tiled. The area rule applies to both.
     with pytest.raises(AnalysisRequestRejectedError) as refused:
-        AnalysisService().precheck_plan(plan.bbox, indices=("ndwi",))
+        AnalysisService().precheck_plan(plan.bbox, include_ndwi=True)
     assert refused.value.code == "aoi_too_large"
 
 

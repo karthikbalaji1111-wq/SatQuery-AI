@@ -1,135 +1,64 @@
-# SatQuery Backend
+# SatQuery backend
 
-Python 3.12 + FastAPI. Managed with [uv](https://docs.astral.sh/uv/).
+This is the server side of SatQuery. It's written in Python 3.12 with FastAPI, and we use uv to manage packages.
 
-## Setup
 
-```bash
-uv sync
-cp .env.example .env     # add credentials; .env is git-ignored
-```
+## Setting it up
 
-## Run
+- run: uv sync
+- copy .env.example to .env
 
-```bash
-uv run uvicorn app.main:app --reload --port 8000
-```
+You don't need any API key. The satellite catalogues and the place lookup are all public.
 
-| | |
-|---|---|
-| Liveness | <http://localhost:8000/health> |
-| Readiness | <http://localhost:8000/ready> |
-| API docs | <http://localhost:8000/docs> |
 
-For the production image (no reload, locked dependencies, non-root, static
-frontend) see [`../DEPLOYMENT.md`](../DEPLOYMENT.md).
+## Running it
 
-## Checks
+- run: uv run uvicorn app.main:app --reload --port 8000
 
-```bash
-uv run pytest -q
-uv run ruff check .
-```
+Then:
 
-`ruff format` is **not** part of the gate. The tree predates it and 82 of 124
-files would be reformatted; doing that in the same change as behavioural work
-would bury the diff. It is a deliberate, separate piece of work.
+- http://localhost:8000/health tells you the server is alive
+- http://localhost:8000/ready tells you whether everything it depends on is working
+- http://localhost:8000/docs has the API documentation
 
-## Layout
+For running it in production, see DEPLOYMENT.md in the main folder.
 
-| Path | Responsibility |
-| --- | --- |
-| `app/main.py` | App factory: middleware order, exception handlers, router |
-| `app/api/router.py` | Router assembled **per application** from its own settings |
-| `app/api/routes/` | `health` (+`/ready`) · `geospatial` · `satellite` · `query` · `ai` |
-| `app/core/config.py` | Environment configuration (`pydantic-settings`) |
-| `app/core/errors.py` | Error types, one JSON envelope, `Retry-After` handling |
-| `app/core/limits.py` | Admission control: rate limit, workflow slots, raster gate, body size |
-| `app/core/observability.py` | Run ids (`ContextVar`) and stage timing |
-| `app/core/logging.py` | Logging setup; stamps every line with its run id |
-| `app/services/geospatial/` | Place → bounding box; the application-wide Nominatim budget |
-| `app/services/satellite/` | STAC discovery, windowed raster reads, asset-host policy |
-| `app/services/analysis/` | Spectral index engines, temporal statistics, SAR backscatter |
-| `app/services/query/` | Orchestration, observations, compatibility, execution integrity |
-| `app/services/agent/` | Planner · executor · grounding · synthesizer |
-| `app/services/agent/providers/` | `gemini` · `nvidia` · `anthropic` · `local` · catalog · factory |
 
-Every SDK is confined to its own provider module; AST tests assert the importer
-list. `services/query` must never import `services/analysis`.
+## Running the checks
 
-## What the boundaries guarantee
+- run: uv run pytest -q
+- run: uv run ruff check .
 
-- **A client-supplied execution result is checked for internal consistency**
-  before it is analysed (`services/query/integrity.py`). Pydantic proves the
-  shape; that module proves the parts agree with each other and with the intent
-  they claim to answer — a selected scene really is among the scenes returned, a
-  window's period really was requested. Structural validity is not provenance
-  integrity.
-- **Expensive routes are bounded** (`core/limits.py`): a per-client rate limit
-  (429 with `Retry-After`), a cap on simultaneous workflows (503), a body-size
-  refusal (413) and a raster-read gate. All per process — see `DEPLOYMENT.md`
-  for exactly what that does and does not guarantee.
-- **The geocoder has one application-wide budget** (`geospatial/nominatim.py`):
-  one request at a time, spaced by `SATQUERY_GEOCODER_MIN_INTERVAL_SECONDS`, a
-  TTL cache for repeats, and one bounded retry. Not per client — "one per second
-  per user" would let ten users send ten per second under this application's
-  single User-Agent.
-- **Asset hrefs come from an external catalog**, so a non-public address is
-  never opened on its behalf, and `SATQUERY_TRUSTED_ASSET_HOSTS` can narrow
-  reads to named hosts.
+The tests never call a real outside service. They use small fake versions of the geocoder, the catalogues and the AI providers instead. They also ignore your own .env file, so they give the same result on any machine.
 
-## AI providers
 
-The agent's three roles — planning, visual analysis, answer synthesis — all come
-from one provider, selected by configuration:
+## Where things are
 
-```bash
-AI_PROVIDER=gemini    # Google Gemini      (GEMINI_API_KEY, GEMINI_MODEL)
-AI_PROVIDER=nvidia    # NVIDIA-hosted NIM  (NVIDIA_API_KEY, NVIDIA_BASE_URL, NVIDIA_MODEL)
-AI_PROVIDER=anthropic # Anthropic Claude   (ANTHROPIC_API_KEY, ANTHROPIC_MODEL)
-AI_PROVIDER=local     # Ollama + Qwen3-VL  (LOCAL_AI_BASE_URL, LOCAL_AI_MODEL; no key)
-```
+- app/main.py: creates the app and wires everything together
+- app/api/routes: the web routes (health, geospatial, satellite, query, ai)
+- app/core/config.py: all the settings, read from environment variables
+- app/core/errors.py: the error types and how errors are returned
+- app/core/limits.py: rate limits, how many analyses run at once, time limits and request size
+- app/core/telemetry.py and app/core/logging.py: request ids, logs and metrics
+- app/services/geospatial: turns a place name into an area, using OpenStreetMap
+- app/services/satellite: searches the catalogues and reads the image files
+- app/services/analysis: the NDVI, NDWI, NDBI, radar and two-date comparison calculations, plus the cloud, value and grid checks
+- app/services/query: runs a request from start to end
+- app/services/agent: reads the question, plans what to run and checks the answer
+- app/services/agent/providers: the optional AI providers (Gemini, NVIDIA, Anthropic and a local Ollama model)
 
-A single run may override the default:
 
-```bash
-curl -X POST localhost:8000/api/v1/query/agent \
-  -H 'Content-Type: application/json' \
-  -d '{"question": "...", "provider": "nvidia"}'
-```
+## A few things worth knowing
 
-**Only the inference backend changes.** Geospatial grounding, STAC discovery,
-retrieval, the raster path, the indices, temporal analysis, the grounding checks
-and the evidence contract are identical whichever provider is selected, so the
-deterministic results for a given scene and query do not depend on it. Only the
-model-generated interpretation differs, and it is attributed to the provider and
-model that produced it.
+- Results from a client are checked before they're analysed. Someone can't send a made-up scene and get it measured.
+- Each caller gets 120 requests a minute on the heavy routes. Only a few analyses run at the same time, and each request has a time limit. These limits are per server process.
+- The place lookup is shared by everyone, so it's careful: one request at a time, results cached for a day, and each caller can look up at most 30 new places every 10 minutes.
+- Image links come from the outside catalogue, so the server only opens public addresses and never anything on a private network.
+- Large areas are read in pieces at full resolution and the results are combined exactly. Memory stays the same as reading one piece.
 
-Notes:
 
-- **A visual model must accept image input.** A text-only model is refused
-  *before* a request is made rather than being asked to describe a picture it
-  never received. `GET /api/v1/ai/models?role=visual` reports what this
-  deployment can actually offer, and whether each model is catalogued,
-  configured and compatible.
-- **There is no fallback between providers.** A missing or invalid credential
-  fails clearly; answering as a different provider would make the result
-  unattributable.
-- An invalid `AI_PROVIDER` is rejected when settings load, not at request time.
-- The local provider never silently becomes a cloud one. If Ollama is down, the
-  model is missing, or the drive holding the models is disconnected, the run
-  says so and the deterministic evidence is preserved.
+## AI providers (optional)
 
-## Tests
+By default no AI is used and no key is needed. The question is read by simple rules and a small model we trained ourselves (in app/services/agent).
 
-No test contacts a real provider, Nominatim, STAC or real imagery. Fakes are
-hand-written recording doubles; `app.dependency_overrides` injects them at the
-route boundary.
-
-**The suite is independent of the machine it runs on.** `tests/conftest.py`
-clears every provider variable and stops `Settings` reading a developer's
-`.env`, so a credentialed laptop and a fresh CI checkout run the same suite. A
-test that needs a provider configured sets an obviously fake value itself and
-clears the settings cache. Measured before that fixture existed: 2112 passed
-with a real key present, 2108 passed and 4 failed without one — same commit,
-same command.
+If you want to try an AI provider in development, set AI_PROVIDER to gemini, nvidia, anthropic or local, along with that provider's key or address in .env. The AI can choose what to run and word the answer, but it never calculates a number. If a provider isn't working, the request fails and says so. It never quietly switches to a different provider. In production, users can't choose a provider at all.

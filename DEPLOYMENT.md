@@ -117,11 +117,13 @@ that the running configuration is visible in one place.
 | `SATQUERY_RATE_LIMIT_WINDOW_SECONDS` | `60` | The window those requests are counted in |
 | `SATQUERY_TRUSTED_PROXY_HOPS` | `0` | Proxies in front that append to `X-Forwarded-For`; see below |
 | `SATQUERY_MAX_CONCURRENT_WORKFLOWS` | `4` | Simultaneous discovery / analysis / agent runs (render.yaml: `2`) |
-| `SATQUERY_MAX_CONCURRENT_RASTER_READS` | `2` | Simultaneous windowed COG reads, per process |
+| `SATQUERY_MAX_CONCURRENT_RASTER_READS` | `6` | Simultaneous windowed COG reads, per process. Bounds open remote connections; memory is bounded by workflows x tile size |
 | `SATQUERY_ADMISSION_WAIT_SECONDS` | `2` | How long a request waits for a workflow slot before 503 |
 | `SATQUERY_RASTER_ADMISSION_WAIT_SECONDS` | `60` | How long one raster read waits for a raster slot before 503 |
 | `SATQUERY_WORKFLOW_BUDGET_SECONDS` | `900` | Total time for one request on an expensive route; past it, 504 `workflow_timeout` |
-| `SATQUERY_IMAGERY_HARD_MAX_DIMENSION` | `2048` | Largest quantitative window per side; larger areas are refused as too large (render.yaml: `1024`) |
+| `SATQUERY_IMAGERY_HARD_MAX_DIMENSION` | `2048` | Largest SINGLE native-resolution read per side, and the tile size of a tiled analysis (render.yaml: `1024`) |
+| `SATQUERY_IMAGERY_TILED_MAX_DIMENSION` | `5000` | Largest analysis area per side, read in tiles; larger areas are refused as too large (render.yaml: `4500`, a whole city such as Chennai) |
+| `SATQUERY_IMAGERY_TILED_MAX_WINDOW_PIXELS` | `25000000` | Total pixels a tiled analysis may cover (render.yaml: `16000000`) |
 | `SATQUERY_CLIENT_AI_SELECTION` | *(unset)* | Whether a caller may name an AI provider/model. Unset: allowed in development, refused in production |
 | `SATQUERY_LOG_FORMAT` | `text` | `json` writes one JSON object per log line |
 | `SATQUERY_METRICS_TOKEN` | *(unset)* | Bearer token for `GET /metrics`; unset, the route answers 404 |
@@ -133,9 +135,32 @@ that the running configuration is visible in one place.
 | `SATQUERY_GEOCODER_BACKOFF_BASE_SECONDS` | `2` | First backoff; doubles per consecutive failure |
 | `SATQUERY_GEOCODER_MAX_COOLDOWN_SECONDS` | `300` | Cap on the backoff-derived cooldown after HTTP 429 |
 | `SATQUERY_GEOCODER_WARM_PLACES` | *(empty)* | `;`-separated places geocoded in the background at startup |
+| `SATQUERY_GEOCODER_NEW_PLACES_PER_CALLER` | `30` | New (uncached) places one client may look up per window; `0` disables. Cached places are never refused |
+| `SATQUERY_GEOCODER_NEW_PLACES_WINDOW_SECONDS` | `600` | The window those lookups are counted in |
 | `SATQUERY_TRUSTED_ASSET_HOSTS` | *(empty)* | Hosts whose rasters may be opened |
 | `SATQUERY_IMAGERY_MAX_DIMENSION` | `1024` | Pixels per side of a returned window |
 | `SATQUERY_IMAGERY_MAX_WINDOW_PIXELS` | `50000000` | Total pixels a quantitative read may cover |
+
+### Large areas: tiled analysis
+
+An analysis area larger than one read (`SATQUERY_IMAGERY_HARD_MAX_DIMENSION`)
+is measured in tiles of at most that size, up to the tiled limits above. The
+tile plan comes from the catalog's own `proj:*` grid, tiles share exact pixel
+edges, and every pixel is read once at native resolution - nothing is
+decimated. Tile results are combined exactly: counts add, means are
+pixel-weighted, and radar means are merged in linear power before the
+conversion to dB. Tests compare a tiled run with one read of the same area
+(identical counts and quality notes, means within 1e-12). A two-period
+comparison's change map is drawn at most 1024 px on its long side; its
+statistics use every pixel.
+
+Memory does not grow with the area: one tile per workflow is held at a time
+(measured about 132 MB per workflow at 1024 px tiles, so `2` workflows fit
+Render's 512 MB). Time does grow: measured locally, all of Chennai (2171 x 4245
+px, 15 tiles) took 194 s for NDVI and 241 s for radar. That is inside the
+900 s workflow budget, but a free instance with a slow network may not be.
+Past the budget the request ends with 504 `workflow_timeout` and its slot is
+freed.
 
 ### The geocoder on a shared outbound IP
 
@@ -152,7 +177,7 @@ guessed location. `/ready` reports the geocoder's counters (upstream requests,
 429s, cache hits, coalesced callers, refusals during a cooldown) without
 contacting it. A free instance loses its cache when it sleeps;
 `SATQUERY_GEOCODER_WARM_PLACES` refills it with real answers in the background
-after startup. None of this can create budget the shared IP does not have: a
+after startup. One client may look up at most `SATQUERY_GEOCODER_NEW_PLACES_PER_CALLER` new places per window (cached places never count), so a single caller cannot spend everyone's budget; past it the client gets 429 `rate_limited` with `Retry-After` (an agent run reports it as "Location service temporarily unavailable" with the time to wait). None of this can create budget the shared IP does not have: a
 dedicated outbound IP or a keyed/self-hosted geocoder is the durable fix.
 
 Four refusals, deliberately distinguishable:

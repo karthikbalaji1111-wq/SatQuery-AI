@@ -71,13 +71,16 @@ _LABEL_ANALYSIS: dict[str, str] = {
     "TRUE_COLOR": "imagery",
 }
 
+#: Indices whose two-period comparison exists but has no model label.
+_COMPARED_WITHOUT_A_LABEL = frozenset({"ndvi", "ndbi"})
+
 #: The refusal for a request the model recognises as unsupported when the rules
 #: have no more specific message for it.
 _UNSUPPORTED_MESSAGE = (
     "That request is outside what SatQuery measures. It computes vegetation "
     "(NDVI), water (NDWI), built-up area (NDBI), SAR backscatter, a two-period "
-    "water comparison, or shows true-colour imagery - for a named place and "
-    "period."
+    "comparison of water, vegetation or built-up area, or shows true-colour "
+    "imagery - for a named place and period."
 )
 
 DecisionSource = Literal["intent_model", "rules"]
@@ -90,6 +93,7 @@ DecisionReason = Literal[
     "model_clarification",
     "disagreement",
     "visual_question",
+    "outside_model_labels",
 ]
 
 
@@ -179,6 +183,17 @@ def decide_operation(
         # Asked to LOOK, not to measure. A label cannot add a measurement
         # nobody asked for; the rules decide, and they retrieve the image.
         return OperationDecision("rules", "visual_question", prediction)
+
+    if (
+        reading.comparison
+        and any(key in _COMPARED_WITHOUT_A_LABEL for key in rules)
+        and reading.unsupported is None
+    ):
+        # Vegetation or built-up CHANGE. The model has no label for either: it
+        # was trained when only water could be compared and learned them as
+        # UNSUPPORTED. The rules read the comparison explicitly, so they decide;
+        # the model can neither add this operation nor refuse it.
+        return OperationDecision("rules", "outside_model_labels", prediction)
 
     if label == "UNSUPPORTED":
         if rules and reading.unsupported is None:

@@ -22,6 +22,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "pytest-cov>=6",
     "ruff>=0.7.0",
     "scikit-learn>=1.5",
 ]
@@ -44,3 +45,13 @@ select = ["E", "F", "I", "B", "UP", "N", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.coverage.run]
+source = ["app"]
+branch = false
+
+[tool.coverage.report]
+# Measured 96% on 2026-11-27. CI fails below this floor, so coverage can only
+# move up deliberately (raise it) or be discussed (lower it), never drift.
+fail_under = 94
+skip_empty = true

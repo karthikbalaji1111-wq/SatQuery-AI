@@ -144,6 +144,15 @@ class Settings(BaseSettings):
     imagery_max_dimension: int = 1024
     imagery_hard_max_dimension: int = 2048
     imagery_max_window_pixels: int = 50_000_000
+    #: How large an area the standard analyses (spectral indices, the two-date
+    #: comparison and SAR backscatter) may cover. Larger than one read: such an
+    #: area is read in native-resolution tiles of at most
+    #: ``imagery_hard_max_dimension`` px, each read, masked and measured on its
+    #: own, and the tile statistics are combined exactly (pixel counts add,
+    #: means are pixel-weighted). Memory stays that of one tile; time grows
+    #: with the area. 5000 px is about 50 km at 10 m.
+    imagery_tiled_max_dimension: int = Field(default=5000, ge=1, le=20_000)
+    imagery_tiled_max_window_pixels: int = Field(default=25_000_000, ge=1)
     #: Scene validation refuses a scene whose footprint covers less than this
     #: fraction of the requested area. 0.0 (the default) refuses only a scene
     #: that does not reach the area at all and REPORTS partial coverage: there
@@ -175,9 +184,12 @@ class Settings(BaseSettings):
     #: per caller rather than shared by everyone behind the proxy; see
     #: ``core/limits._client_of`` and DEPLOYMENT.md for how to measure it.
     trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
-    #: Simultaneous windowed COG reads. Raster work is the memory-hungriest
-    #: thing this process does, and this machine has been OOM-killed before.
-    max_concurrent_raster_reads: int = 2
+    #: Simultaneous windowed COG reads, process-wide. Memory is bounded by the
+    #: workflow count and the tile size (every band of a tile is held until it
+    #: is measured, however the reads are scheduled); this bounds open remote
+    #: connections. A remote read is latency-bound, so a tile's bands are read
+    #: together: six halved a whole-city analysis (388 s -> 194 s, measured).
+    max_concurrent_raster_reads: int = 6
     #: How long a request may wait for a slot before it is refused. Absorbs a
     #: passing burst without letting a queue grow without bound.
     admission_wait_seconds: float = 2.0
@@ -210,6 +222,12 @@ class Settings(BaseSettings):
     #: consecutive failure, capped by ``geocoder_max_cooldown_seconds``.
     geocoder_backoff_base_seconds: float = Field(default=2.0, ge=0, le=60)
     geocoder_max_cooldown_seconds: float = Field(default=300.0, ge=0, le=3_600)
+    #: How many NEW places (not already cached) one caller may look up per
+    #: window. The geocoder's budget is shared by the whole application, so
+    #: without this one anonymous caller cycling place names could spend it for
+    #: everyone. Cached places are free; 0 disables the cap.
+    geocoder_new_places_per_caller: int = Field(default=30, ge=0, le=10_000)
+    geocoder_new_places_window_seconds: float = Field(default=600.0, gt=0, le=86_400)
     #: Optional, ";"-separated place names geocoded once in the background at
     #: startup, through the same cache, pacing and cooldown as any request. A
     #: free-tier host loses its in-memory cache whenever it sleeps; this refills

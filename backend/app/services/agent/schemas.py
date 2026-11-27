@@ -223,13 +223,16 @@ class SarBackscatterParams(_StrictModel):
 
 
 class TemporalNdwiParams(_StrictModel):
-    """Temporal NDWI Statistics for one deterministic Sentinel-2 pair.
+    """Temporal index statistics for one deterministic Sentinel-2 pair.
 
-    Also parameterless: pair selection, suppression rules and the compatibility
+    The tool keeps its original name. Its one parameter is WHICH index the two
+    dates are compared on - water (NDWI, the default), vegetation (NDVI) or
+    built-up (NDBI). Pair selection, suppression rules and the compatibility
     report are deterministic and are not open to negotiation.
     """
 
     tool: Literal["temporal_ndwi_statistics"] = "temporal_ndwi_statistics"
+    index: Literal["ndwi", "ndvi", "ndbi"] = "ndwi"
 
 
 class RsModelParams(_StrictModel):

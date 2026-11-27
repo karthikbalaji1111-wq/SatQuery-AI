@@ -597,6 +597,39 @@ def _change_rgba(change: np.ndarray, paired: np.ndarray) -> np.ndarray:
     return rgba
 
 
+def ndwi_change_grid(
+    *,
+    first_green: BandWindow,
+    first_nir: BandWindow,
+    second_green: BandWindow,
+    second_nir: BandWindow,
+    label: str = "NDWI",
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(change, paired)``: ``second - first`` index where both are valid.
+
+    The arithmetic of :func:`compute_ndwi_temporal_change`, without its PNG,
+    for a caller assembling a large area tile by tile. The arguments are the
+    index's (high, low) band pair on each date - green/NIR for NDWI - and the
+    caller is responsible for both pairs being on one grid; this re-checks it.
+    """
+
+    problem = _grids_are_comparable(first_green, second_green)
+    if problem is not None:
+        raise ImageryError(f"Cannot compute an {label} change: {problem}.")
+    first_ndwi, first_valid = _normalised_difference_grid(first_green, first_nir, label)
+    second_ndwi, second_valid = _normalised_difference_grid(second_green, second_nir, label)
+    paired = first_valid & second_valid
+    change = np.zeros(first_ndwi.shape, dtype=np.float64)
+    np.subtract(second_ndwi, first_ndwi, out=change, where=paired)
+    return change, paired
+
+
+def change_rgba(change: np.ndarray, paired: np.ndarray) -> np.ndarray:
+    """The change ramp of the NDWI change overlay, for a tiled caller."""
+
+    return _change_rgba(change, paired)
+
+
 def compute_ndwi_temporal_change(
     *,
     first_green: BandWindow,
@@ -608,8 +641,13 @@ def compute_ndwi_temporal_change(
     first_acquired_at: datetime | None,
     second_acquired_at: datetime | None,
     window_label: str,
+    index: str = "ndwi",
+    label: str = "NDWI",
 ) -> NdwiTemporalChange | None:
     """``second_NDWI - first_NDWI`` over pixels valid in both, or ``None``.
+
+    The same for any normalised-difference index: pass its (high, low) band
+    pair as ``*_green``/``*_nir`` and its ``index`` key and ``label``.
 
     *first* is the earlier acquisition and *second* the later one, matching
     the pairing order - not the requested baseline/target roles, which may
@@ -628,8 +666,8 @@ def compute_ndwi_temporal_change(
     if _grids_are_comparable(first_green, second_green) is not None:
         return None
 
-    first_ndwi, first_valid = _ndwi_grid(first_green, first_nir)
-    second_ndwi, second_valid = _ndwi_grid(second_green, second_nir)
+    first_ndwi, first_valid = _normalised_difference_grid(first_green, first_nir, label)
+    second_ndwi, second_valid = _normalised_difference_grid(second_green, second_nir, label)
 
     paired = first_valid & second_valid
     paired_count = int(np.count_nonzero(paired))
@@ -675,6 +713,7 @@ def compute_ndwi_temporal_change(
         raise ImageryError("Failed to encode the NDWI change overlay.") from exc
 
     return NdwiTemporalChange(
+        index=index,
         first_scene_id=first_scene_id,
         second_scene_id=second_scene_id,
         first_acquired_at=first_acquired_at,
@@ -728,7 +767,7 @@ _WARN_PARTIAL_OVERLAP = (
 
 
 def _coverage_warning(
-    first: ObservationIndexResult, second: ObservationIndexResult
+    first: ObservationIndexResult, second: ObservationIndexResult, key: str = "ndwi"
 ) -> list[str]:
     """State how much of the AOI each observation actually contributed.
 
@@ -746,7 +785,7 @@ def _coverage_warning(
     parts = []
     for observation in (first, second):
         window = observation.window_pixel_count
-        valid = _named(observation.measurements).get(_COUNT_NAME)
+        valid = _named(observation.measurements).get(f"{key}_valid_pixel_count")
         if window is None or valid is None or window <= 0:
             return []
         parts.append(
@@ -810,8 +849,8 @@ def _cloud_warnings(observation: ObservationIndexResult) -> list[str]:
     return []
 
 
-def _sample_warnings(observation: ObservationIndexResult) -> list[str]:
-    count = _named(observation.measurements).get(_COUNT_NAME)
+def _sample_warnings(observation: ObservationIndexResult, key: str = "ndwi") -> list[str]:
+    count = _named(observation.measurements).get(f"{key}_valid_pixel_count")
     if count is not None and 0 < count <= 1:
         return [
             f"Observation {observation.window_label!r} has only {int(count)} "
@@ -820,29 +859,40 @@ def _sample_warnings(observation: ObservationIndexResult) -> list[str]:
     return []
 
 
-def compare_ndwi_observations(
+def compare_index_observations(
     *,
+    key: str,
+    label: str,
     first: ObservationIndexResult,
     second: ObservationIndexResult,
     compatibility: CompatibilityReport,
 ) -> tuple[list[Measurement], list[str]]:
-    """Difference of two aggregate NDWI means, plus what qualifies it.
+    """Difference of two aggregate index means, plus what qualifies it.
 
-    Returns ``(differences, warnings)``. ``differences`` holds at most one
-    measurement and is empty whenever the comparison would misinform. Inputs are
-    never mutated, and the output is deterministic: warnings are emitted in a
-    fixed order.
+    The engine of Temporal Index Statistics for any normalised-difference
+    index (NDWI, NDVI, NDBI): ``mean_<key>_difference = second.<key>_mean -
+    first.<key>_mean``. Returns ``(differences, warnings)``. ``differences``
+    holds at most one measurement and is empty whenever the comparison would
+    misinform. Inputs are never mutated, and the output is deterministic:
+    warnings are emitted in a fixed order.
     """
 
-    warnings = [_WARN_AGGREGATE]
+    if key == "ndwi":
+        warnings = [_WARN_AGGREGATE]
+        no_mean = _WARN_NO_MEAN
+    else:
+        warnings = [
+            _WARN_AGGREGATE.replace("mean_ndwi_difference", f"mean_{key}_difference")
+        ]
+        no_mean = _WARN_NO_MEAN.replace("NDWI", label)
 
-    first_mean = _named(first.measurements).get(_MEAN_NAME)
-    second_mean = _named(second.measurements).get(_MEAN_NAME)
+    first_mean = _named(first.measurements).get(f"{key}_mean")
+    second_mean = _named(second.measurements).get(f"{key}_mean")
 
     # Suppression - at most one reason, checked in a fixed order.
     suppressed: str | None = None
     if first_mean is None or second_mean is None:
-        suppressed = _WARN_NO_MEAN
+        suppressed = no_mean
     elif compatibility.bbox_overlap == "none":
         suppressed = _WARN_NO_OVERLAP
     elif first.scene_id == second.scene_id:
@@ -857,13 +907,13 @@ def compare_ndwi_observations(
     if compatibility.bbox_overlap == "partial":
         warnings.append(_WARN_PARTIAL_OVERLAP)
 
-    warnings.extend(_coverage_warning(first, second))
+    warnings.extend(_coverage_warning(first, second, key))
     warnings.extend(_grid_warning(first, second))
 
     for observation in (first, second):
         warnings.extend(_cloud_warnings(observation))
     for observation in (first, second):
-        warnings.extend(_sample_warnings(observation))
+        warnings.extend(_sample_warnings(observation, key))
 
     if suppressed is not None:
         return [], warnings
@@ -871,8 +921,21 @@ def compare_ndwi_observations(
     # Both means are known here; mypy cannot see it through the branch above.
     assert first_mean is not None and second_mean is not None
     difference = Measurement(
-        name=MEAN_NDWI_DIFFERENCE,
+        name=f"mean_{key}_difference",
         value=float(second_mean - first_mean),
         unit=_INDEX_UNIT,
     )
     return [difference], warnings
+
+
+def compare_ndwi_observations(
+    *,
+    first: ObservationIndexResult,
+    second: ObservationIndexResult,
+    compatibility: CompatibilityReport,
+) -> tuple[list[Measurement], list[str]]:
+    """Difference of two aggregate NDWI means: :func:`compare_index_observations`."""
+
+    return compare_index_observations(
+        key="ndwi", label="NDWI", first=first, second=second, compatibility=compatibility
+    )

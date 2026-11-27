@@ -288,13 +288,14 @@ function interpretSar(
 
 function interpretTemporal(reading: TemporalReading): Interpretation {
   const { earlier, later, difference, pairedChange, pairedPixels } = reading;
+  const { signal, index } = PLAIN[reading.index];
   const from = earlier.period ?? formatDay(earlier.acquired) ?? "the earlier date";
   const to = later.period ?? formatDay(later.acquired) ?? "the later date";
   const days = [formatDay(earlier.acquired), formatDay(later.acquired)];
   const compared =
     days[0] && days[1]
-      ? `We compared satellite images of the same area taken on ${days[0]} and ${days[1]}, measuring the water index in each.`
-      : "We compared satellite measurements from two different dates, measuring the water index in each.";
+      ? `We compared satellite images of the same area taken on ${days[0]} and ${days[1]}, measuring the ${index} in each.`
+      : `We compared satellite measurements from two different dates, measuring the ${index} in each.`;
   const paired =
     pairedChange !== null
       ? `Looking only at the ${pairedPixels !== null ? `${pixelCount(pairedPixels)} ` : ""}pixels usable in both images, the average change per pixel was ${signedIndex(pairedChange)}.`
@@ -319,9 +320,9 @@ function interpretTemporal(reading: TemporalReading): Interpretation {
   const sign = shownSign(shown);
   if (sign === "zero") {
     return {
-      change: `The water signal was about the same in ${to} as in ${from}.`,
-      headline: "The two satellite images show little measured change in the water signal.",
-      explanation: `Between the two dates, the water index showed little measured change${means ? `, going${means}` : ""}: a difference of ${shown} at the precision shown.`,
+      change: `The ${signal} was about the same in ${to} as in ${from}.`,
+      headline: `The two satellite images show little measured change in the ${signal}.`,
+      explanation: `Between the two dates, the ${index} showed little measured change${means ? `, going${means}` : ""}: a difference of ${shown} at the precision shown.`,
       caveat: CHANGE_CAVEAT,
       howWeKnow,
     };
@@ -329,9 +330,9 @@ function interpretTemporal(reading: TemporalReading): Interpretation {
 
   const [verb, relative] = sign === "positive" ? ["increased", "stronger"] : ["decreased", "weaker"];
   return {
-    change: `The water signal was ${relative} in ${to} than in ${from}.`,
-    headline: `The later satellite image shows a ${relative} water signal than the earlier image.`,
-    explanation: `Between the two dates, the water index ${verb}${means}, a change of ${shown}.`,
+    change: `The ${signal} was ${relative} in ${to} than in ${from}.`,
+    headline: `The later satellite image shows a ${relative} ${signal} than the earlier image.`,
+    explanation: `Between the two dates, the ${index} ${verb}${means}, a change of ${shown}.`,
     caveat: CHANGE_CAVEAT,
     howWeKnow,
   };
@@ -570,15 +571,17 @@ function temporalRows(reading: TemporalReading): TechnicalRow[] {
       period.period,
       period.sceneId,
       period.acquired ? `acquired ${period.acquired}` : null,
-      period.mean !== null ? `NDWI mean ${exact(signedIndex(period.mean), period.mean)}` : null,
+      period.mean !== null
+        ? `${reading.index.toUpperCase()} mean ${exact(signedIndex(period.mean), period.mean)}`
+        : null,
       period.validPixels !== null ? `${pixelCount(period.validPixels)} valid pixels` : null,
     ]
       .filter((part): part is string => Boolean(part))
       .join(" · "),
   });
   const rows: TechnicalRow[] = [
-    { label: "Index", value: TECHNICAL.ndwi.name },
-    { label: "NDWI formula", value: TECHNICAL.ndwi.formula },
+    { label: "Index", value: TECHNICAL[reading.index].name },
+    { label: `${reading.index.toUpperCase()} formula`, value: TECHNICAL[reading.index].formula },
     {
       label: "Change formulas",
       value:

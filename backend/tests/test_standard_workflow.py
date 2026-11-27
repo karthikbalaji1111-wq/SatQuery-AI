@@ -341,8 +341,6 @@ def test_a_deictic_place_is_named_back_to_the_user() -> None:
         "Count the buildings in Anna Nagar in January 2025",
         "Classify land cover around Chennai in January 2025",
         "Identify objects around Chennai in January 2025",
-        "Show vegetation change around Chennai between January 2024 and January 2025",
-        "How has urban area grown in Chennai between 2020 and 2024?",
         "Compare SAR backscatter around Chennai in January 2024 and January 2025",
     ],
 )
@@ -350,6 +348,38 @@ def test_an_unsupported_request_is_refused_not_approximated(question: str) -> No
     """Mutation target 6 (part 1): an unsupported intent is never executed."""
 
     assert ask_for(question).reason == "analysis_unsupported"
+
+
+@pytest.mark.parametrize(
+    ("question", "analysis", "index"),
+    [
+        (
+            "Show vegetation change around Chennai between January 2024 and January 2025",
+            "temporal_ndvi", "ndvi",
+        ),
+        ("How has urban area grown in Chennai between 2020 and 2024?", "temporal_ndbi", "ndbi"),
+        (
+            "Compare water at Marina Beach, Chennai between January 2024 and January 2025",
+            "temporal_ndwi", "ndwi",
+        ),
+    ],
+)
+def test_a_two_period_question_runs_the_comparison_for_its_index(
+    question: str, analysis: str, index: str
+) -> None:
+    """Water, vegetation and built-up change: one comparison, never one period."""
+
+    reading = read(question)
+    assert reading.comparison is True
+    assert list(reading.analyses) == [analysis]
+    step = reading.plan().steps[-1]
+    assert step.tool == "temporal_ndwi_statistics" and step.index == index  # type: ignore[union-attr]
+
+
+def test_two_comparisons_at_once_are_asked_back_not_guessed() -> None:
+    assert ask_for(
+        "Compare water and vegetation at Hebbal Lake, Bengaluru between 2023 and 2024"
+    ).reason == "analysis_ambiguous"
 
 
 def test_a_supported_analysis_beside_an_unsupported_one_is_still_refused() -> None:

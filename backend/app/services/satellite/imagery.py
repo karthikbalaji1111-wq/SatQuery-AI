@@ -109,6 +109,11 @@ class QuantitativeReadLimits:
     max_dimension: int
     #: Width x height of the native window, in pixels.
     max_window_pixels: int
+    #: The area the TILED analyses may cover (read in tiles no larger than the
+    #: two bounds above). ``None``: the reader does not tile, so the single-read
+    #: bounds are the whole limit.
+    tiled_max_dimension: int | None = None
+    tiled_max_window_pixels: int | None = None
 
 
 _STAC_IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,200}")
@@ -310,9 +315,29 @@ class ImageryService(DomainService):
     ) -> None:
         self._settings = settings or get_settings()
         self._transport = transport
-        self._fetch_item = stac_item_fetcher or self._default_fetch_item
+        self._fetch_uncached = stac_item_fetcher or self._default_fetch_item
         self._read_window = raster_reader or read_rgb_window
         self._read_band = band_reader or read_band_window
+        # One request's service instance reads the same scene's item once per
+        # band - and once per band per TILE for a large area. The item does not
+        # change within a request, so it is fetched once and reused; a failure
+        # is never cached. The same holds for the signed read URL of an RTC
+        # asset, which stays valid far longer than one request.
+        self._items: dict[tuple[str, str], dict[str, Any]] = {}
+        self._signed: dict[str, str] = {}
+
+    def _fetch_item(self, scene_id: str, collection: str) -> dict[str, Any]:
+        key = (scene_id, collection)
+        if key not in self._items:
+            self._items[key] = self._fetch_uncached(scene_id, collection)
+        return self._items[key]
+
+    def _sign(self, href: str) -> str:
+        if href not in self._signed:
+            self._signed[href] = sign_rtc_asset(
+                href, settings=self._settings, transport=self._transport
+            )
+        return self._signed[href]
 
     def quantitative_read_limits(self) -> QuantitativeReadLimits:
         """The bounds :meth:`read_band` refuses a window beyond.
@@ -326,6 +351,8 @@ class ImageryService(DomainService):
         return QuantitativeReadLimits(
             max_dimension=self._settings.imagery_hard_max_dimension,
             max_window_pixels=self._settings.imagery_max_window_pixels,
+            tiled_max_dimension=self._settings.imagery_tiled_max_dimension,
+            tiled_max_window_pixels=self._settings.imagery_tiled_max_window_pixels,
         )
 
     def validate_scene(
@@ -542,8 +569,14 @@ class ImageryService(DomainService):
         bbox: BoundingBox,
         asset: str,
         collection: str | None = None,
+        native_bounds: tuple[float, float, float, float] | None = None,
+        native_crs: str | None = None,
     ) -> BandWindow:
         """Blocking: read one band's raw values over ``bbox`` at native GSD.
+
+        ``native_bounds`` (with ``native_crs``) reads one TILE of a larger area:
+        bounds in the raster's own coordinate system, so adjacent tiles share
+        exact pixel edges. ``bbox`` still decides whether the scene is reached.
 
         The quantitative sibling of :meth:`retrieve`, and the ONLY quantitative
         imagery-access boundary. It reuses the same collection-aware STAC item
@@ -615,11 +648,15 @@ class ImageryService(DomainService):
                     offset=encoding.get("offset", 0.0), unit=encoding.get("unit"),
                 )
         read_href = (
-            sign_rtc_asset(href, settings=self._settings, transport=self._transport)
-            if resolved_collection == RTC_COLLECTION else href
+            self._sign(href) if resolved_collection == RTC_COLLECTION else href
         )
 
         limits = self.quantitative_read_limits()
+        tile = (
+            {"native_bounds": native_bounds, "native_crs": native_crs}
+            if native_bounds is not None
+            else {}
+        )
         with raster_read_slot(self._settings):
             band = self._read_band(
                 read_href,
@@ -628,6 +665,7 @@ class ImageryService(DomainService):
                 # stay at native resolution, so an oversized window is refused.
                 max_dimension=limits.max_dimension,
                 max_window_pixels=limits.max_window_pixels,
+                **tile,
             )
         if asset in SAR_ANALYSIS_BAND_ASSETS:
             require_linear_power_encoding(

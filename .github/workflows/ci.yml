@@ -31,7 +31,7 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm run test
+      - run: npm run test -- --coverage --coverage.reporter=text-summary
       - run: npm run build
         env:
           VITE_API_BASE_URL: https://api.satquery.example
@@ -54,7 +54,7 @@ jobs:
         run: |
           uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/requirements.txt
           uvx pip-audit==2.10.1 -r /tmp/requirements.txt --disable-pip --progress-spinner off
-      - run: uv run pytest
+      - run: uv run pytest --cov=app --cov-report=term
       - name: Build production backend and check native imports
         run: |
           docker build -f Dockerfile.prod -t satquery-backend:ci .

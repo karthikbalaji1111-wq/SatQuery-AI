@@ -166,6 +166,11 @@ class PixelQuality(BaseModel):
     scl_class_counts: dict[str, int] = Field(default_factory=dict)
     #: SCL values present that are not documented classes. Always excluded.
     unknown_scl_values: list[int] = Field(default_factory=list)
+    #: Pixels with band data but no SCL value (counted within ``nodata``).
+    unclassified_by_scl_pixels: int = Field(default=0, ge=0)
+    #: How many native-resolution tiles the grid was assessed in; 1 for an
+    #: area read at once. The counts above always cover the whole grid.
+    tile_count: int = Field(default=1, ge=1)
     quality_notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -406,6 +411,9 @@ class NdwiTemporalChange(BaseModel):
     ``.second`` and are not copied here.
     """
 
+    #: The index compared: "ndwi" (the original, and the default), "ndvi" or
+    #: "ndbi". The model keeps its NDWI name for contract compatibility.
+    index: Literal["ndwi", "ndvi", "ndbi"] = "ndwi"
     first_scene_id: str
     second_scene_id: str
     first_acquired_at: datetime | None = None
@@ -584,6 +592,11 @@ class AnalysisRequest(BaseModel):
     #: pixels, so it is never produced without the statistics.
     include_ndwi_overlay: bool = False
     include_temporal_ndwi: bool = False
+    #: Which index the two-date comparison measures when
+    #: ``include_temporal_ndwi`` is set. "ndwi" (water, the default and the
+    #: original behaviour), "ndvi" (vegetation) or "ndbi" (built-up). Every
+    #: rule of the comparison is the same; only the band pair changes.
+    temporal_index: Literal["ndwi", "ndvi", "ndbi"] = "ndwi"
     #: Quantitative Sentinel-1 RTC backscatter (VV and VH) for one SAR window.
     include_sar_backscatter: bool = False
     #: Additional spectral indices to compute over the same optical window,

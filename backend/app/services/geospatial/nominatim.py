@@ -50,7 +50,7 @@ import asyncio
 import re
 import time
 import unicodedata
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -62,8 +62,10 @@ from app.core.config import Settings
 from app.core.errors import (
     GeocodingUnavailableError,
     NotFoundError,
+    RateLimitedError,
     UpstreamServiceError,
 )
+from app.core.limits import CALLER
 from app.core.logging import get_logger
 from app.services.geospatial.schemas import BoundingBox, Coordinate
 
@@ -142,6 +144,7 @@ class _Counters:
     cache_hits: int = 0
     coalesced: int = 0
     refused_during_cooldown: int = 0
+    refused_per_caller: int = 0
 
 
 @dataclass(frozen=True)
@@ -235,6 +238,7 @@ def reset_geocoder_state() -> None:
     _COUNTERS = _Counters()
     _CACHE.clear()
     _IN_FLIGHT.clear()
+    _CALLER_LOOKUPS.clear()
     # A lock is bound to the loop that first waited on it; each test runs its
     # own loop.
     _GEOCODE_LOCK = asyncio.Lock()
@@ -717,6 +721,7 @@ async def geocode(
                 return await geocode(query, settings=settings, transport=transport)
             raise
 
+    _admit_new_place(query, settings)
     future: asyncio.Future[NominatimPlace] = loop.create_future()
     future.add_done_callback(_retrieve)
     _IN_FLIGHT[key] = future
@@ -736,6 +741,45 @@ async def geocode(
     finally:
         if _IN_FLIGHT.get(key) is future:
             del _IN_FLIGHT[key]
+
+
+#: New-place lookups per caller, as timestamps. Bounded: see ``_admit_new_place``.
+_CALLER_LOOKUPS: dict[str, deque[float]] = {}
+_MAX_TRACKED_CALLERS = 4096
+
+
+def _admit_new_place(query: str, settings: Settings) -> None:
+    """Count one NEW place against its caller, or refuse it with 429.
+
+    Only lookups that would reach the geocoder count: a cached place, or one
+    already being resolved for someone else, costs the shared budget nothing
+    and is never refused here. Outside a request (the warm-up) there is no
+    caller and no cap.
+    """
+
+    caller = CALLER.get()
+    limit = settings.geocoder_new_places_per_caller
+    if caller is None or limit <= 0:
+        return
+    window = settings.geocoder_new_places_window_seconds
+    now = _now()
+    if caller not in _CALLER_LOOKUPS and len(_CALLER_LOOKUPS) >= _MAX_TRACKED_CALLERS:
+        stale = [c for c, hits in _CALLER_LOOKUPS.items() if not hits or hits[-1] <= now - window]
+        for c in stale or [next(iter(_CALLER_LOOKUPS))]:
+            del _CALLER_LOOKUPS[c]
+    hits = _CALLER_LOOKUPS.setdefault(caller, deque())
+    while hits and hits[0] <= now - window:
+        hits.popleft()
+    if len(hits) >= limit:
+        _COUNTERS.refused_per_caller += 1
+        logger.info("Refused a new place lookup: caller at its limit of %d", limit)
+        raise RateLimitedError(
+            f"Too many different places looked up from this address: at most "
+            f"{limit} new places every {window / 60:.0f} minutes. Places already "
+            "looked up recently are not limited.",
+            retry_after_seconds=hits[0] + window - now,
+        )
+    hits.append(now)
 
 
 # --------------------------------------------------------------------------- #
