@@ -48,11 +48,12 @@ Real results, with a condition that travels with them.
 | Capability | The condition |
 |---|---|
 | **NDBI** | SWIR (B11) is 20 m against NIR's 10 m. The grids are exactly 2:1 nested with a shared origin (read from the COG headers), so each 20 m value is assigned whole to the four 10 m pixels it contains. The arithmetic runs at 10 m; **the detail is 20 m**, and every NDBI result says so. A non-nested pair is refused, not resampled. |
-| **Temporal NDWI (aggregate)** | Two observations indexed independently; the reported difference is between two *aggregate statistics* over two different sets of pixels. Not per-pixel change. Suppressed entirely when the framing would mislead (no valid pixels, no footprint overlap, same scene twice). |
-| **Temporal NDWI (paired-pixel)** | Produced **only** when both reads land on an identical grid — same CRS, dimensions and affine, compared exactly with no tolerance. Otherwise refused with the reason, never approximated. |
+| **Two-date NDWI, NDVI or NDBI (aggregate)** | One index, two observations indexed independently; the reported difference is between two *aggregate statistics* over two different sets of pixels. Not per-pixel change. Suppressed entirely when the framing would mislead (no valid pixels, no footprint overlap, same scene twice). |
+| **Two-date change (paired-pixel)** | Produced **only** when both reads land on an identical grid — same CRS, dimensions and affine, compared exactly with no tolerance. Otherwise refused with the reason, never approximated. |
 | **Index thresholds** | Reported as "% of valid pixels with NDWI > 0.3" — an *index* threshold over valid pixels, never a water or flood classification. The denominator is valid pixels, not the raster's size. |
 | **Scene selection** | Deterministic over the scenes the catalog **returned** — one bounded page, not the archive. `scenes_matched` reports how many matched when the catalog says, so "best of 10 examined" is distinguishable from "best of 900 matching". |
-| **Cloud** | Scene cloud cover is catalog metadata for the whole tile, not a mask over the analysed area. It is reported as context and warned on above 30%. |
+| **Cloud** | Each optical index is masked per pixel by the scene's own Sentinel-2 SCL before any statistic: only classes 4/5/6 (vegetation, not vegetated, water) are used, and every excluded pixel is counted by reason. SCL misclassification itself is not assessed. Scene cloud cover is catalog metadata, reported as context and warned on above 30%. |
+| **Large areas (tiled)** | An area larger than one native read, up to the tiled limit (about 45 km on a side in the hosted deployment), is read in native-resolution tiles that share exact pixel edges, and the tile statistics are combined exactly (counts add, means pixel-weighted, radar means in linear power). Tested equal to one read of the same area. The change map of a tiled comparison is drawn at most 1024 px on its long side; its statistics use every pixel. Larger areas are refused as too large. |
 | **Mixed processing baselines** | Two scenes may come from different processing baselines. Nothing here reconciles them, and a comparison across them is not validated. |
 
 ---
@@ -65,7 +66,6 @@ Refused outright, with the reason. Each of these is a capability the system does
 | Not supported | Why |
 |---|---|
 | **Sentinel-1 GRD (Earth Search)** | The measurement asset is an `s3://` URI on a requester-pays bucket; the product is in radar geometry (`crs=None`, 210 GCPs) rather than a map projection; the pixels are uncalibrated `uint16` DN whose calibration LUTs are separate XML assets. Refused at the boundary with a message naming the cause. Use the RTC collection. |
-| **Cloud and shadow masking** | No `scl` mask is applied. A cloudy pixel inside the AOI is measured like any other. |
 | **Co-registration / resampling across grids** | Never performed. Comparisons that would require it are refused. (NDBI's whole-cell 20 m → 10 m assignment is the only regridding anywhere, and it invents no values.) |
 | **Land-cover classification** | No classifier exists. A high NDBI is a built-up-*like* reflectance signature, not a detected building. |
 | **General change detection** | What exists is a difference between two dated observations of one index. Nothing classifies *what* changed. |

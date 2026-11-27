@@ -61,7 +61,8 @@ Natural-language question
         ├─ Imagery retrieval ........ windowed COG reads → PNG
         ├─ Quantitative bands ....... raw uint16, never the display path
         ├─ NDVI · NDWI · NDBI ....... pure functions, raw DN
-        ├─ Temporal NDWI ............ two dates, exact-grid change
+        ├─ Two-date NDVI·NDWI·NDBI .. two dates, exact-grid change
+        ├─ Large areas .............. native-resolution tiles, merged exactly
         └─ Georeferencing ........... source affine → WGS 84 corners
         │
         ▼
@@ -146,8 +147,8 @@ after a failure observed against the live endpoints:
   valid plan that omits the analysis the question asked for. The server then
   adds exactly that step: the named index when a single-window Sentinel-2
   question says NDVI, NDWI or NDBI; the visual observation when it asks what is
-  *visible*; temporal NDWI when a two-window Sentinel-2 comparison asks about
-  water. It never adds a measurement, never changes where or when, and never
+  *visible*; a two-date comparison when a two-window Sentinel-2 question asks
+  about water, vegetation or built-up area. It never adds a measurement, never changes where or when, and never
   drops a step the planner chose. `trace.plan` keeps the planner's plan;
   `trace.steps` shows what ran.
 - **The synthesiser sees provenance and readable numbers.** Evidence is shown to
@@ -421,7 +422,7 @@ cd backend  && uv run pytest -q && uv run ruff check .
 cd frontend && npm test -- --run && npx tsc -b --noEmit && npm run lint && VITE_API_BASE_URL=https://api.satquery.example.com npm run build
 ```
 
-**3190 backend tests · 574 frontend tests.** Every phase was written test-first:
+**3221 backend tests · 577 frontend tests.** Every phase was written test-first:
 the tests were added, observed failing for the expected reason, and only then
 satisfied.
 
@@ -485,7 +486,7 @@ than one that implies it can do everything.
 - **NDWI is a spectral index, not a water classifier.** A threshold is reported
   as *"% of valid pixels with NDWI > 0.3"*, never as detected water. No
   validated water or flood classification exists here.
-- **Temporal NDWI compares two aggregate statistics**, each over a different set
+- **A two-date comparison (NDWI, NDVI or NDBI) compares two aggregate statistics**, each over a different set
   of pixels. It is not per-pixel change detection, and the difference is
   suppressed entirely when that framing would mislead.
 - **No temporal co-registration or resampling.** A paired-pixel comparison of
@@ -499,14 +500,21 @@ than one that implies it can do everything.
   applied because it does not describe these pixels (measured, not assumed).
   The result is proportional to reflectance, which a ratio needs and an absolute
   measurement would not.
-- **Temporal NDWI difference is implemented; general change detection is not.**
-  Two Sentinel-2 acquisitions are indexed independently, paired chronologically,
+- **Two-date index differences are implemented; general change detection is not.**
+  For one index (NDWI, NDVI or NDBI), two Sentinel-2 acquisitions are indexed independently, paired chronologically,
   and reported side by side with a mean difference. Where the two reads land on
   an identical grid (same CRS, dimensions and affine — checked exactly, with no
   tolerance) a paired-pixel difference and a **georeferenced difference overlay**
   are produced. That is a difference between two dated observations of one
   index. It is **not** general-purpose change detection: nothing is classified,
   no change type is inferred, and no threshold declares a pixel "changed".
+- **Large areas are measured in tiles, and take longer.** An area up to about
+  45 km on a side (a whole city such as Chennai) is read at native 10 m
+  resolution in tiles of at most 1024 px, and the tile statistics are combined
+  exactly; tests pin that a tiled run equals one read of the same area. Larger
+  areas (districts, states, countries) are still refused as too large. All of
+  Chennai took about 3-4 minutes locally; on a slow network it can exceed the
+  workflow budget and end with a timeout.
 - **Grounding is containment, not proof.** It establishes that every number
   traces to evidence — at the stated precision, with a matching unit stated on
   either side of the value — and that citations resolve. It cannot establish

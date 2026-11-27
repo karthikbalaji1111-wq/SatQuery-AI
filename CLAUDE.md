@@ -145,7 +145,7 @@ Core intended capabilities:
 Current HEAD represents the completed Agentic Orchestration phase, plus a
 provider abstraction (Gemini + NVIDIA), a MapLibre frontend and a Direction B
 UI. Test baselines quoted in the historical sections below are superseded; the
-current figures are in section 35 (production hardening). Section 23 (the scientific core,
+current figures are in section 36 (large areas and two-date comparisons). Section 23 (the scientific core,
 M1-M5) supersedes any statement below that the optical indices are not
 cloud-masked, section 24 supersedes any statement that the typed query box
 or `/query/parse` needs an AI provider, and section 34 supersedes section 24's
@@ -3149,3 +3149,83 @@ pane: basemap, image overlay, footprint and result all render.
 | `npm run test` | **574 passed** (Vitest 5) |
 | `npm run lint` / `typecheck` / `build` | clean / clean / builds |
 | `pip-audit` (locked prod deps) / `npm audit` | no known vulnerabilities / 0 |
+
+---
+
+## 36. Large areas and two-date comparisons for every index - IMPLEMENTED (2026-11-27)
+
+Branch `large-areas-and-change` (not pushed). Formulas, SCL classes, M1-M5
+rules, the M4 offset rule and the intent model are unchanged. Supersedes
+section 24's "temporal NDVI/NDBI/SAR is not implemented" for NDVI and NDBI
+(SAR comparisons are still refused), and section 30's "whole cities are
+refused as too large".
+
+**Tiled native-resolution analysis** (`analysis/tiling.py`, `d3b1d88`). An
+area larger than one read (`imagery_hard_max_dimension`, render 1024 px) is
+split into tiles of at most that size, up to `imagery_tiled_max_dimension`
+(5000; render 4500 px, about 45 km) and `imagery_tiled_max_window_pixels`
+(25M; render 16M). The plan is built from the catalog's `proj:*` grid of the
+FINEST band before any read (NDBI plans on NIR, not SWIR); tile bounds are
+snapped to pixel edges in the raster's own CRS (`raster._window_from_native_
+bounds`), so tiles share exact edges and every pixel is read once. Each tile
+runs exactly the one-read steps (SCL, radiometry, grid, masking, the same
+engines); merging is exact - counts and quality categories add
+(`pixel_quality.merge_quality`), means are pixel-weighted, SAR means merge in
+linear power, extremes are extremes. An index that fails on ANY tile is
+withheld, never reported over part of the area. A tiled comparison reads each
+tile of both dates once and accumulates the paired change
+(`ChangeAccumulator`); its map is drawn at most `OVERLAY_MAX_PX = 1024` on its
+long side, its statistics use every pixel. The single-read NDWI path
+(`include_ndwi`, with its overlay) keeps the single-read limit. STAC items and
+RTC signatures are cached per `ImageryService` instance; a tile's bands are
+read together (`asyncio.gather`) under `max_concurrent_raster_reads = 6`
+(`9398f0b`). Memory is one tile per workflow (about 132 MB at 1024 px).
+
+**Two-date NDVI and NDBI** (`3154445`, `c9ad86f`).
+`AnalysisRequest.temporal_index` (`ndwi` default, `ndvi`, `ndbi`) runs the
+existing comparison for that index with the same rules (per-date SCL,
+radiometry and grids, pair grid, suppression, paired change only on identical
+grids; NDBI's SWIR placed per date). `NdwiTemporalChange.index` names it;
+evidence keeps the tool's `temporal_ndwi` prefix with index-named measurements
+(`ndvi_change_mean`, ...); grounding binds one index per comparison item.
+Rules: a vegetation or built-up comparison runs that comparison; two at once
+-> `analysis_ambiguous`. The intent model has no label for these, so the rules
+decide when they read one (`outside_model_labels`). Evaluation: four rows that
+expected UNSUPPORTED now expect the comparison (by id, labels unchanged); 0
+wrong analyses on test and both challenge sets. Frontend: "Vegetation change"
+/ "Built-up change", the index's formula in Technical details.
+
+**Geocoder per-caller cap** (`70ed8d0`). `geocoder_new_places_per_caller`
+(30) per `geocoder_new_places_window_seconds` (600); only lookups that would
+reach Nominatim count (cache hits and in-flight places never do; the warm-up
+has no caller). 429 `rate_limited` on `/geospatial/resolve`;
+`location_unavailable` (code `rate_limited`, retry time) in an agent run.
+
+**Coverage** (`2842963`): backend 96.3% lines (floor 94); frontend lines 83.8
+/ branches 85.9 / functions 91.0 / statements 82.7 (floors 82/84/89/81). CI
+fails below a floor.
+
+**Verified live** (local backend, standard workflow, real Nominatim / Earth
+Search / Planetary Computer): all of Chennai, 2171 x 4245 px in 15 tiles -
+NDVI 0.06766 (194 s; 388 s before concurrent band reads), SAR VV -1.989 / VH
+-13.40 / VV-VH 11.41 dB over 7,669,023 px (241 s, scene covers 83.7% of the
+area, stated); Cubbon Park NDVI December 2023 vs December 2024 difference
+-0.01009; Ameerpet NDBI January 2024 vs January 2025 0.01172 -> -0.02482
+(difference -0.03654). A run during a network outage (machine asleep) lost
+its tile reads and reported SAR as not computed with the read error as the
+reason - no partial number.
+
+**Known limitations.** Time grows with the area (a whole city is minutes; a
+slow network can exceed the 900 s workflow budget -> 504). Districts, states
+and countries are still refused. SAR two-date comparison is not implemented.
+The tiled comparison's change map is decimated for display only. Not yet
+verified on Render's free CPU.
+
+### Baseline - VERIFIED
+
+| Check | Result |
+| --- | --- |
+| `pytest -q` | **3221 passed** (3205 at section 35) |
+| `ruff check .` / `git diff --check` | clean / clean |
+| `npm run test` | **577 passed** (574 at section 35) |
+| `npm run lint` / `typecheck` / `build` | clean / clean / builds |
